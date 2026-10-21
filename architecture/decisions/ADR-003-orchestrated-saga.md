@@ -2,6 +2,7 @@
 
 - **Status:** Accepted
 - **Date:** 2026-10-15
+- **Amended by:** [ADR-008](ADR-008-resumable-saga-steps.md)
 
 ## Context
 A payment spans several services (risk, ledger, CSM gateway, notifications) without a shared transaction. Failure at any step must

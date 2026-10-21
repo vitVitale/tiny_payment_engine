@@ -2,6 +2,7 @@
 
 - **Status:** Accepted
 - **Date:** 2026-10-21
+- **Amended by:** [ADR-011](ADR-011-send-by-guard-per-transmission.md)
 
 ## Context
 Between payment-orchestrator and the CSM there are an outbox relay, Kafka and csm-gateway. Each hop can lag or be down.

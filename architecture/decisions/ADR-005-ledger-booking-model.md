@@ -2,6 +2,7 @@
 
 - **Status:** Accepted
 - **Date:** 2026-10-21
+- **Amended by:** [ADR-009](ADR-009-ledger-tombstones.md), [ADR-010](ADR-010-incoming-transaction-identity.md) (pending credit id)
 
 ## Context
 - Every settled payment, outgoing or incoming, posts to the **CSM settlement account**. With optimistic locking on the account

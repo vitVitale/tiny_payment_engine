@@ -2,6 +2,7 @@
 
 - **Status:** Accepted
 - **Date:** 2026-10-15
+- **Amended by:** [ADR-006](ADR-006-ordered-outbox-relay.md), [ADR-007](ADR-007-account-events-as-compacted-snapshots.md)
 
 ## Context
 An SCT Inst payment must be confirmed within 10 s (20 s hard deadline). Some steps need an immediate answer
