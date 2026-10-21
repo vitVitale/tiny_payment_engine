@@ -1,0 +1,35 @@
+@startuml 01-system-context
+!include <C4/C4_Context>
+
+title System Context — Tiny Payment Engine (SEPA Instant Credit Transfer)
+
+AddElementTag("simulated", $bgColor="#8C8C8C", $borderColor="#5E5E5E", $legendText="external system (simulated)")
+
+Person(payer, "Payer", "Bank customer who sends instant credit transfers")
+Person(payee, "Payee", "Bank customer who receives instant credit transfers")
+Person(backoffice, "Back-office operator", "Manages accounts, investigates exceptions")
+Person(compliance, "Compliance officer", "Reviews sanctions screening hits")
+
+System_Ext(channels, "Customer channels", "Mobile / online banking. Authenticates customers and calls the engine API on their behalf")
+
+System(engine, "Tiny Payment Engine", "Executes SCT Inst payments as Originator and Beneficiary PSP: accounts, ledger, VoP, risk, ISO 20022 clearing")
+
+System_Ext(csm, "CSM (TIPS / RT1)", "Clears and settles instant payments between PSPs", $tags="simulated")
+System_Ext(peers, "Counterparty PSPs", "Other banks in the SCT Inst and VoP schemes", $tags="simulated")
+System_Ext(sanctions, "Sanctions list provider", "EU / UN consolidated sanctions lists", $tags="simulated")
+
+Rel(payer, channels, "Initiates payments, checks payee")
+Rel(channels, payee, "Shows credits")
+Rel(channels, engine, "pain.001, VoP requests, status queries", "REST/JSON, ISO 20022 XML")
+Rel(engine, channels, "Payment notifications", "Webhooks, camt.054")
+Rel(backoffice, engine, "Manages accounts, resolves exceptions", "REST/JSON")
+Rel(compliance, engine, "Reviews screening hits", "REST/JSON")
+
+Rel(engine, csm, "pacs.008, pacs.002, pacs.028", "ISO 20022 XML")
+Rel(csm, engine, "pacs.008, pacs.002", "ISO 20022 XML")
+Rel(csm, peers, "Routes payments", "ISO 20022 XML")
+BiRel(engine, peers, "Verification of Payee", "EPC VoP API, REST/JSON")
+Rel(engine, sanctions, "Downloads lists daily", "HTTPS")
+
+SHOW_LEGEND()
+@enduml

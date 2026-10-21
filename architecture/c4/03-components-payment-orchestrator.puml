@@ -1,0 +1,62 @@
+@startuml 03-components-payment-orchestrator
+!include <C4/C4_Component>
+
+title Components — payment-orchestrator
+
+Container(api, "payment-api", "Spring Boot", "Customer-facing API")
+Container(risk, "risk-service", "Spring Boot", "Fraud rules")
+Container(ledger, "ledger-service", "Spring Boot", "Accounts and journal")
+ContainerQueue(kafka, "Kafka", "Apache Kafka", "csm.outbound.commands, csm.inbound.events, payments.events")
+ContainerDb(db, "payments DB", "PostgreSQL", "payments, saga state, timers, outbox, inbox")
+Person(backoffice, "Back-office operator")
+
+Container_Boundary(orch, "payment-orchestrator") {
+  ' --- inbound adapters
+  Component(cmdApi, "Payment command API", "Spring MVC REST controller", "SubmitPayment (idempotent by commandId), GetPayment; validates command, returns paymentId")
+  Component(opsApi, "Exception case API", "Spring MVC REST controller", "Lists and resolves stuck payments")
+  Component(csmListener, "CSM event listener", "Spring Kafka listener", "Consumes csm.inbound.events, deduplicates by TxId + event type + outcome, poison messages → DLT")
+
+  ' --- application core
+  Component(outSaga, "Outgoing payment saga", "Application service", "Risk → hold → send (with sendBy) or on-us → settle / release; compensations")
+  Component(inSaga, "Incoming payment saga", "Application service", "Risk → pending credit → verdict → follows AnswerSent → confirm / cancel")
+  Component(fsm, "Payment state machine", "Domain model", "Allowed transitions (incl. on-us, ACCEPT_REQUESTED), invariants, reason codes")
+  Component(timers, "Deadline scheduler", "Scheduled job, DB row locks", "Fires outgoing 20 s deadlines, incoming settlement-overdue timers and investigation retries")
+
+  ' --- outbound adapters
+  Component(riskClient, "Risk client", "Spring RestClient", "Timeout from remaining deadline, fail closed")
+  Component(ledgerClient, "Ledger client", "Spring RestClient", "Idempotent hold / settle / settle-on-us / release / pending-credit calls")
+  Component(repo, "Payment repository", "Spring Data JDBC", "Payments, saga state, timers, optimistic locking")
+  Component(outbox, "Outbox writer + relay", "messaging lib", "Writes events in the business transaction, relays to Kafka")
+}
+
+Rel(api, cmdApi, "Submit payment, get status", "REST/JSON")
+Rel(backoffice, opsApi, "Resolve exception cases", "REST/JSON")
+Rel(kafka, csmListener, "CreditTransferReceived / Settled / Rejected / NotSent, AnswerSent", "Kafka")
+
+Rel(cmdApi, outSaga, "Starts")
+Rel(csmListener, outSaga, "Delivers CSM outcome or NotSent")
+Rel(csmListener, inSaga, "Delivers incoming pacs.008, AnswerSent and settlement")
+Rel(timers, outSaga, "Deadline reached")
+Rel(timers, inSaga, "Settlement confirmation overdue")
+Rel(opsApi, fsm, "Manual transition")
+
+Rel(outSaga, fsm, "Applies transitions")
+Rel(inSaga, fsm, "Applies transitions")
+Rel(outSaga, riskClient, "Uses")
+Rel(inSaga, riskClient, "Uses")
+Rel(outSaga, ledgerClient, "Uses")
+Rel(inSaga, ledgerClient, "Uses")
+Rel(outSaga, repo, "Persists")
+Rel(inSaga, repo, "Persists")
+Rel(outSaga, outbox, "Emits commands / events")
+Rel(inSaga, outbox, "Emits commands / events")
+Rel(timers, repo, "Polls due timers")
+
+Rel(riskClient, risk, "POST /v1/risk/assessments", "REST/JSON")
+Rel(ledgerClient, ledger, "/v1/holds, /v1/pending-credits", "REST/JSON")
+Rel(repo, db, "Reads / writes", "JDBC")
+Rel(outbox, db, "outbox table", "JDBC")
+Rel(outbox, kafka, "csm.outbound.commands, payments.events", "Kafka")
+
+SHOW_LEGEND()
+@enduml

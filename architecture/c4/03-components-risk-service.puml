@@ -1,0 +1,56 @@
+@startuml 03-components-risk-service
+!include <C4/C4_Component>
+
+title Components — risk-service
+
+AddElementTag("simulated", $bgColor="#8C8C8C", $borderColor="#5E5E5E", $legendText="simulated / test-only")
+
+Container(orch, "payment-orchestrator", "Spring Boot", "Sagas")
+Container(ledger, "ledger-service", "Spring Boot", "Accounts and journal")
+Person(compliance, "Compliance officer")
+System_Ext(sanctions, "Sanctions list provider", "EU / UN lists", $tags="simulated")
+ContainerQueue(kafka, "Kafka", "Apache Kafka", "accounts.events")
+ContainerDb(db, "risk DB", "PostgreSQL", "rules, account_holders, sanctions_list_versions, screening_runs, cases, inbox")
+
+Container_Boundary(risk, "risk-service") {
+  ' --- inbound adapters
+  Component(assessApi, "Assessment API", "Spring MVC REST controller", "POST /v1/risk/assessments (outgoing, incoming); ALLOW / DENY / REVIEW with reason")
+  Component(caseApi, "Screening case API", "Spring MVC REST controller", "Lists, confirms and dismisses sanctions cases")
+  Component(accountListener, "Account events listener", "Spring Kafka listener", "Consumes accounts.events, deduplicates via inbox, poison messages → DLT")
+
+  ' --- application core
+  Component(rules, "Fraud rule engine", "Domain model", "Amount limits, velocity, new payee, non-EU list screening per payment; in-memory, no remote calls")
+  Component(importer, "Sanctions list importer", "Scheduled job", "Daily download, stored as a new version; triggers a screening run; hourly retry on failure")
+  Component(screening, "Customer screening job", "Scheduled job", "Matches every holder against the current list version; records the run")
+  Component(matcher, "Sanctions matcher", "Domain model", "Name, date of birth, country, identifiers; review and freeze thresholds")
+  Component(cases, "Case manager", "Application service", "Creates cases, provisional block on high-confidence hits, confirm / dismiss, remembers decisions")
+
+  ' --- outbound adapters
+  Component(ledgerClient, "Ledger client", "Spring RestClient", "Block / unblock accounts (SANCTIONS, SANCTIONS_PROVISIONAL)")
+  Component(providerClient, "Provider client", "Spring RestClient", "Downloads list files over HTTPS")
+  Component(repo, "Repositories", "Spring Data JDBC", "Rules, holder projection, lists, runs, cases")
+}
+
+Rel(orch, assessApi, "Assess payment", "REST/JSON")
+Rel(compliance, caseApi, "Reviews hits", "REST/JSON")
+Rel(kafka, accountListener, "AccountOpened / Blocked / Unblocked / Closed", "Kafka")
+
+Rel(assessApi, rules, "Evaluates")
+Rel(rules, repo, "Reads rules, holder projection")
+Rel(caseApi, cases, "Confirm / dismiss")
+Rel(importer, providerClient, "Downloads list")
+Rel(importer, screening, "New version → run")
+Rel(screening, matcher, "Matches holders")
+Rel(screening, cases, "Potential hits")
+Rel(cases, ledgerClient, "Block / unblock")
+Rel(accountListener, repo, "Updates holder projection")
+Rel(importer, repo, "Stores list version")
+Rel(screening, repo, "Reads holders, records run")
+Rel(cases, repo, "Persists cases and decisions")
+
+Rel(ledgerClient, ledger, "POST /v1/accounts/{id}/block, /unblock", "REST/JSON")
+Rel(providerClient, sanctions, "Downloads lists", "HTTPS")
+Rel(repo, db, "Reads / writes", "JDBC")
+
+SHOW_LEGEND()
+@enduml

@@ -1,0 +1,47 @@
+@startuml 03-components-notification-service
+!include <C4/C4_Component>
+
+title Components — notification-service
+
+System_Ext(channels, "Customer channels", "Webhook receivers")
+Person(backoffice, "Back-office operator")
+ContainerQueue(kafka, "Kafka", "Apache Kafka", "payments.events")
+ContainerDb(db, "notification DB", "PostgreSQL", "subscriptions, deliveries, delivery_attempts, inbox")
+
+Container_Boundary(notif, "notification-service") {
+  ' --- inbound adapters
+  Component(eventListener, "Payment events listener", "Spring Kafka listener", "Consumes PaymentSettled / PaymentRejected, inbox dedup by event id, poison messages → DLT")
+  Component(subscriptionApi, "Subscription API", "Spring MVC REST controller", "Channels register webhook endpoint, signing secret and formats per account")
+  Component(deliveryApi, "Delivery admin API", "Spring MVC REST controller", "Lists failed deliveries, triggers redelivery")
+
+  ' --- application core
+  Component(resolver, "Subscription resolver", "Application service", "Account ids from the event → subscriptions; no copy of holder data")
+  Component(builder, "Notification builder", "iso20022-model lib", "JSON webhook body, camt.054, optionally pain.002")
+  Component(dispatcher, "Delivery dispatcher", "Application service", "Creates a delivery per event and subscription, signs body (HMAC), Idempotency-Key = event id")
+  Component(retries, "Retry scheduler", "Scheduled job, DB row locks", "Exponential back-off up to 24 h, then FAILED")
+
+  ' --- outbound adapters
+  Component(webhookClient, "Webhook client", "Spring RestClient", "HTTPS POST with short timeout")
+  Component(repo, "Repositories", "Spring Data JDBC", "Subscriptions, deliveries, attempts")
+}
+
+Rel(kafka, eventListener, "payments.events", "Kafka")
+Rel(channels, subscriptionApi, "Register webhooks", "REST/JSON")
+Rel(backoffice, deliveryApi, "Inspect failed deliveries", "REST/JSON")
+
+Rel(eventListener, resolver, "Event")
+Rel(resolver, builder, "Subscriptions")
+Rel(builder, dispatcher, "Notifications")
+Rel(dispatcher, webhookClient, "Delivers")
+Rel(retries, dispatcher, "Due retries")
+Rel(deliveryApi, dispatcher, "Redeliver")
+Rel(subscriptionApi, repo, "Persists subscriptions")
+Rel(resolver, repo, "Reads subscriptions")
+Rel(dispatcher, repo, "Records deliveries and attempts")
+Rel(retries, repo, "Polls due deliveries")
+
+Rel(webhookClient, channels, "Webhook / camt.054", "HTTPS")
+Rel(repo, db, "Reads / writes", "JDBC")
+
+SHOW_LEGEND()
+@enduml

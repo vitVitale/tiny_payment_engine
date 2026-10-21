@@ -1,0 +1,80 @@
+@startuml 02-containers
+!include <C4/C4_Container>
+
+title Containers — Tiny Payment Engine
+
+LAYOUT_TOP_DOWN()
+
+AddElementTag("simulated", $bgColor="#8C8C8C", $borderColor="#5E5E5E", $legendText="simulated / test-only")
+
+Person(backoffice, "Back-office operator")
+Person(compliance, "Compliance officer")
+System_Ext(channels, "Customer channels", "Mobile / online banking")
+System_Ext(sanctions, "Sanctions list provider", "EU / UN lists")
+
+System_Boundary(engine, "Tiny Payment Engine") {
+  Container(api, "payment-api", "Java 25, Spring Boot", "Customer-facing API: pain.001 intake, Idempotency-Key → commandId, VoP proxy and reference check, status queries")
+  Container(orch, "payment-orchestrator", "Java 25, Spring Boot", "Payment state machine, outgoing / incoming sagas, deadlines, compensations")
+  Container(ledger, "ledger-service", "Java 25, Spring Boot", "Accounts, double-entry journal, holds and pending credits (memos), balances")
+  Container(vop, "vop-service", "Java 25, Spring Boot", "Verification of Payee: requesting and responding PSP")
+  Container(risk, "risk-service", "Java 25, Spring Boot", "Per-transaction fraud rules, daily sanctions screening, provisional freezes")
+  Container(gw, "csm-gateway", "Java 25, Spring Boot, JAXB", "ISO 20022 XML adapter to the CSM: build, validate, journal, correlate; owns send-by and answer deadlines")
+  Container(notif, "notification-service", "Java 25, Spring Boot", "Webhooks, camt.054, pain.002 delivery with retries")
+
+  ContainerQueue(kafka, "Kafka", "Apache Kafka (KRaft)", "Topics: csm.outbound.commands, csm.inbound.events, payments.events, accounts.events, *.dlt")
+
+  ContainerDb(orchDb, "payments DB", "PostgreSQL", "payments (unique commandId), saga state, timers, outbox, inbox")
+  ContainerDb(ledgerDb, "ledger DB", "PostgreSQL", "accounts, journal entries, holds, idempotency keys")
+  ContainerDb(vopDb, "vop DB", "PostgreSQL", "account-holder projection, VoP results, audit")
+  ContainerDb(riskDb, "risk DB", "PostgreSQL", "rules, holder projection, sanctions lists, cases")
+  ContainerDb(gwDb, "csm DB", "PostgreSQL", "ISO 20022 message journal (sent / not sent), answer deadlines, correlation, outbox, inbox")
+  ContainerDb(notifDb, "notification DB", "PostgreSQL", "subscriptions, deliveries")
+  ContainerDb(apiDb, "api DB", "PostgreSQL", "idempotency keys and stored responses")
+}
+
+Container(sim, "csm-simulator", "Java 25, Spring Boot", "Simulates TIPS / RT1 and counterparty PSPs (payments and VoP), scripted failure scenarios", $tags="simulated")
+
+' --- customer side
+Rel(channels, api, "pain.001, VoP, status", "REST/JSON, XML")
+Rel(api, apiDb, "Reads / writes", "JDBC")
+Rel(api, orch, "Submit payment, get status", "REST/JSON")
+Rel(api, vop, "Verify payee, check VoP reference", "REST/JSON")
+Rel(notif, channels, "Webhooks, camt.054", "HTTPS")
+Rel(channels, notif, "Register webhook subscriptions", "REST/JSON")
+
+' --- orchestration
+Rel(orch, orchDb, "Reads / writes", "JDBC")
+Rel(orch, risk, "Assess payment", "REST/JSON")
+Rel(orch, ledger, "Hold, settle, release, pending credit", "REST/JSON")
+Rel(orch, kafka, "Commands and verdicts to CSM, payment events", "Kafka, via outbox")
+Rel(kafka, orch, "CSM events", "Kafka")
+
+' --- csm side
+Rel(gw, gwDb, "Reads / writes", "JDBC")
+Rel(kafka, gw, "csm.outbound.commands", "Kafka")
+Rel(gw, kafka, "csm.inbound.events", "Kafka, via outbox")
+BiRel(gw, sim, "pacs.008 / pacs.002 / pacs.028", "ISO 20022 XML over HTTPS")
+
+' --- ledger and projections
+Rel(ledger, ledgerDb, "Reads / writes", "JDBC")
+Rel(ledger, kafka, "accounts.events", "Kafka, via outbox")
+Rel(kafka, vop, "accounts.events", "Kafka")
+Rel(kafka, risk, "accounts.events", "Kafka")
+Rel(kafka, notif, "payments.events", "Kafka")
+
+' --- vop / risk
+Rel(vop, vopDb, "Reads / writes", "JDBC")
+BiRel(vop, sim, "VoP requests / responses", "REST/JSON")
+Rel(risk, riskDb, "Reads / writes", "JDBC")
+Rel(risk, sanctions, "Downloads lists", "HTTPS")
+Rel(risk, ledger, "Block / unblock sanctioned accounts", "REST/JSON")
+Rel(notif, notifDb, "Reads / writes", "JDBC")
+
+' --- people
+Rel(backoffice, ledger, "Manage accounts", "REST/JSON")
+Rel(backoffice, orch, "Resolve exception cases", "REST/JSON")
+Rel(compliance, risk, "Review hits", "REST/JSON")
+Rel(backoffice, notif, "Inspect failed deliveries", "REST/JSON")
+
+SHOW_LEGEND()
+@enduml

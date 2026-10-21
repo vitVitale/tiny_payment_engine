@@ -1,0 +1,48 @@
+@startuml 03-components-ledger-service
+!include <C4/C4_Component>
+
+title Components — ledger-service
+
+Container(orch, "payment-orchestrator", "Spring Boot", "Sagas")
+Container(risk, "risk-service", "Spring Boot", "Sanctions screening")
+Person(backoffice, "Back-office operator")
+ContainerQueue(kafka, "Kafka", "Apache Kafka", "accounts.events")
+ContainerDb(db, "ledger DB", "PostgreSQL", "accounts, journal_entries, postings, balance_snapshots, holds, pending_credits, idempotency_keys, outbox")
+
+Container_Boundary(ledger, "ledger-service") {
+  ' --- inbound adapters
+  Component(postingApi, "Posting API", "Spring MVC REST controller", "Holds: create / settle / settle-on-us / release; pending credits: create / confirm / cancel")
+  Component(accountApi, "Account API", "Spring MVC REST controller", "Open / block / unblock / close, balances, entries, test funding")
+
+  ' --- application core
+  Component(idem, "Idempotency guard", "Application service", "Operation id → stored result; same id + different body → conflict")
+  Component(holds, "Reservation manager", "Application service", "Holds and pending credits as memos (no journal entry); checks account status in the same transaction; converts them into postings at settlement")
+  Component(accounts, "Account service", "Application service", "Account lifecycle, IBAN generation, status checks")
+  Component(engine, "Posting engine", "Domain model", "Balanced journal entries (Σ debit = Σ credit). Customer accounts: available-balance check, optimistic locking. Technical accounts: append-only, no lock")
+
+  ' --- outbound adapters
+  Component(repo, "Account and journal repositories", "Spring Data JDBC", "Accounts, entries, postings, holds")
+  Component(outbox, "Outbox writer + relay", "messaging lib", "AccountOpened / Blocked / Unblocked / Closed events")
+}
+
+Rel(orch, postingApi, "Hold, settle, release, pending credit", "REST/JSON")
+Rel(risk, accountApi, "Block / unblock account", "REST/JSON")
+Rel(backoffice, accountApi, "Manage accounts", "REST/JSON")
+
+Rel(postingApi, idem, "Wraps every call")
+Rel(idem, holds, "Delegates")
+Rel(holds, engine, "Posts entries")
+Rel(accountApi, accounts, "Uses")
+Rel(accounts, engine, "Funding entries")
+Rel(engine, repo, "Persists")
+Rel(holds, repo, "Persists holds and pending credits")
+Rel(accounts, repo, "Persists accounts")
+Rel(accounts, outbox, "Emits account events")
+
+Rel(repo, db, "Reads / writes", "JDBC")
+Rel(idem, db, "idempotency_keys", "JDBC")
+Rel(outbox, db, "outbox table", "JDBC")
+Rel(outbox, kafka, "accounts.events", "Kafka")
+
+SHOW_LEGEND()
+@enduml

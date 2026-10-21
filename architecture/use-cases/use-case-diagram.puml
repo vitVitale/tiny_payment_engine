@@ -1,0 +1,63 @@
+@startuml use-case-diagram
+title Tiny Payment Engine — Use Cases (SCT Inst)
+
+left to right direction
+skinparam packageStyle rectangle
+skinparam actorStyle awesome
+
+actor "Payer" as payer
+actor "Payee" as payee
+actor "Back-office\noperator" as backoffice
+actor "Compliance\nofficer" as compliance
+actor "Scheduler" as scheduler <<time>>
+
+actor "CSM\n(TIPS / RT1)" as csm <<system>>
+actor "Counterparty PSP" as peer <<system>>
+actor "Sanctions list\nprovider" as sanctions <<system>>
+
+rectangle "Tiny Payment Engine" {
+  usecase "UC-01\nInitiate instant\ncredit transfer" as UC01
+  usecase "UC-02\nVerify payee\nbefore sending" as UC02
+  usecase "UC-03\nAnswer VoP request" as UC03
+  usecase "UC-04\nExecute outgoing\npayment" as UC04
+  usecase "UC-05\nResolve missing\nCSM response" as UC05
+  usecase "UC-06\nReceive incoming\ninstant payment" as UC06
+  usecase "UC-07\nQuery payment status" as UC07
+  usecase "UC-08\nNotify customer" as UC08
+  usecase "UC-09\nDaily sanctions\nscreening" as UC09
+  usecase "UC-10\nManage accounts\nand balances" as UC10
+  usecase "UC-11\nRecall a payment\n(later)" as UC11 #EEEEEE
+  usecase "UC-12\nReconcile with CSM\n(later)" as UC12 #EEEEEE
+}
+
+payer --> UC02
+payer --> UC01
+payer --> UC07
+payer --> UC11
+
+UC01 .> UC04 : <<include>>
+UC05 .> UC04 : <<extend>>
+UC04 .> UC08 : <<include>>
+UC06 .> UC08 : <<include>>
+
+UC04 --> csm
+UC05 --> csm
+csm --> UC06
+UC11 --> csm
+
+UC02 --> peer
+peer --> UC03
+
+UC08 --> payer
+UC08 --> payee
+
+scheduler --> UC05
+scheduler --> UC09
+compliance --> UC09
+UC09 --> sanctions
+
+backoffice --> UC10
+backoffice --> UC12
+UC12 --> csm
+
+@enduml

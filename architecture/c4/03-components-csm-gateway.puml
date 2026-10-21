@@ -1,0 +1,61 @@
+@startuml 03-components-csm-gateway
+!include <C4/C4_Component>
+
+title Components — csm-gateway
+
+AddElementTag("simulated", $bgColor="#8C8C8C", $borderColor="#5E5E5E", $legendText="simulated / test-only")
+
+Container(sim, "csm-simulator (CSM)", "Spring Boot", "TIPS / RT1", $tags="simulated")
+ContainerQueue(kafka, "Kafka", "Apache Kafka", "csm.outbound.commands, csm.inbound.events")
+ContainerDb(db, "csm DB", "PostgreSQL", "message_journal, answer_deadlines, correlation, outbox, inbox")
+
+Container_Boundary(gw, "csm-gateway") {
+  ' --- inbound adapters
+  Component(cmdListener, "Command listener", "Spring Kafka listener", "SendCreditTransfer, RequestPaymentStatus, Accept / RejectCreditTransfer; inbox dedup, poison messages → DLT")
+  Component(csmEndpoint, "CSM inbound endpoint", "Spring MVC controller, XML", "Receives pacs.008 and pacs.002 from the CSM")
+
+  ' --- application core
+  Component(sender, "Outgoing payment handler", "Application service", "Send-by guard: sends pacs.008 only before sendBy, else NotSent; status requests via pacs.028 or NotSent")
+  Component(receiver, "Incoming payment handler", "Application service", "Validates, dedups by MsgId / TxId, records answer deadline, publishes CreditTransferReceived")
+  Component(answer, "Answer coordinator", "Application service", "Exactly one answer per TxId: verdict if in time, else RJCT AB05; publishes AnswerSent")
+  Component(correlation, "Correlation service", "Application service", "Matches pacs.002 to the original pacs.008 by TxId; ignores duplicates")
+  Component(timers, "Answer deadline scheduler", "Scheduled job, DB row locks", "Fires answer deadlines for incoming pacs.008")
+  Component(iso, "ISO 20022 codec", "JAXB, iso20022-model lib", "Builds and parses pacs.008 / pacs.002 / pacs.028 with BAH; XSD validation")
+
+  ' --- outbound adapters
+  Component(journal, "Message journal", "Spring Data JDBC", "Every message in and out, status sent / not sent / answered")
+  Component(csmClient, "CSM client", "Spring RestClient, mTLS", "Sends ISO 20022 XML to the CSM")
+  Component(outbox, "Outbox writer + relay", "messaging lib", "CreditTransferReceived / Settled / Rejected / NotSent, AnswerSent")
+}
+
+Rel(kafka, cmdListener, "csm.outbound.commands", "Kafka")
+Rel(sim, csmEndpoint, "pacs.008, pacs.002", "ISO 20022 XML over HTTPS")
+
+Rel(cmdListener, sender, "Send / status request")
+Rel(cmdListener, answer, "Verdict")
+Rel(csmEndpoint, iso, "Parses and validates")
+Rel(csmEndpoint, receiver, "pacs.008")
+Rel(csmEndpoint, correlation, "pacs.002")
+Rel(timers, answer, "Deadline reached")
+Rel(receiver, answer, "Schema error → RJCT FF01")
+Rel(sender, iso, "Builds pacs.008 / pacs.028")
+Rel(answer, iso, "Builds pacs.002")
+Rel(sender, csmClient, "Sends")
+Rel(answer, csmClient, "Sends")
+Rel(sender, journal, "Journals sent / not sent")
+Rel(receiver, journal, "Journals, stores deadline")
+Rel(answer, journal, "Journals answer")
+Rel(correlation, journal, "Matches by TxId")
+Rel(sender, outbox, "NotSent")
+Rel(receiver, outbox, "CreditTransferReceived")
+Rel(answer, outbox, "AnswerSent")
+Rel(correlation, outbox, "Settled / Rejected")
+
+Rel(csmClient, sim, "pacs.008, pacs.002, pacs.028", "ISO 20022 XML over HTTPS")
+Rel(journal, db, "Reads / writes", "JDBC")
+Rel(timers, db, "answer_deadlines", "JDBC")
+Rel(outbox, db, "outbox table", "JDBC")
+Rel(outbox, kafka, "csm.inbound.events", "Kafka")
+
+SHOW_LEGEND()
+@enduml

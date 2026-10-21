@@ -1,0 +1,42 @@
+@startuml 04-dynamic-outgoing-payment
+!include <C4/C4_Dynamic>
+
+title Dynamic — Outgoing instant payment, happy path (UC-01, UC-04)
+
+AddElementTag("simulated", $bgColor="#8C8C8C", $borderColor="#5E5E5E", $legendText="simulated / test-only")
+
+System_Ext(channels, "Customer channel")
+Container(api, "payment-api", "Spring Boot")
+Container(orch, "payment-orchestrator", "Spring Boot")
+Container(risk, "risk-service", "Spring Boot")
+Container(ledger, "ledger-service", "Spring Boot")
+ContainerQueue(kafka, "Kafka", "Apache Kafka")
+Container(gw, "csm-gateway", "Spring Boot")
+Container(csm, "csm-simulator (CSM + Beneficiary PSP)", "Spring Boot", $tags="simulated")
+Container(notif, "notification-service", "Spring Boot")
+
+Rel(channels, api, "POST /v1/payments (pain.001, Idempotency-Key)", "REST")
+Rel(api, orch, "SubmitPayment", "REST")
+Rel(orch, api, "202 RECEIVED, paymentId; deadline = now + 20 s", "REST")
+Rel(orch, risk, "Assess payment → ALLOW", "REST")
+Rel(orch, ledger, "Create hold (holdId = paymentId)", "REST")
+Rel(orch, kafka, "SendCreditTransfer (sendBy = acceptance + 10 s) → csm.outbound.commands", "outbox")
+Rel(kafka, gw, "SendCreditTransfer", "Kafka")
+Rel(gw, csm, "pacs.008 (only before sendBy; journalled as sent)", "ISO 20022 XML")
+Rel(csm, gw, "pacs.002 ACSC (after Beneficiary PSP ACCP and settlement)", "ISO 20022 XML")
+Rel(gw, kafka, "CreditTransferSettled → csm.inbound.events", "outbox")
+Rel(kafka, orch, "CreditTransferSettled", "Kafka")
+Rel(orch, ledger, "Settle hold: Dr payer / Cr CSM settlement account", "REST")
+Rel(orch, kafka, "PaymentSettled → payments.events", "outbox")
+Rel(kafka, notif, "PaymentSettled", "Kafka")
+Rel(notif, channels, "Webhook / camt.054", "HTTPS")
+
+caption
+Alternatives: risk DENY → REJECTED (FR01/RR04), no hold. Insufficient funds → REJECTED (AM04).
+sendBy passed → gateway does not send, CreditTransferNotSent → release hold → REJECTED (AB03).
+pacs.002 RJCT → release hold → REJECTED (received reason code). No pacs.002 by deadline → INVESTIGATING, pacs.028 (UC-05).
+On-us payee → payee risk check, settle-on-us with payee account check: single entry Dr payer / Cr payee, no CSM.
+end caption
+
+SHOW_LEGEND()
+@enduml

@@ -1,0 +1,53 @@
+@startuml 03-components-vop-service
+!include <C4/C4_Component>
+
+title Components — vop-service
+
+AddElementTag("simulated", $bgColor="#8C8C8C", $borderColor="#5E5E5E", $legendText="simulated / test-only")
+
+Container(api, "payment-api", "Spring Boot", "Customer-facing API")
+Container(sim, "csm-simulator (counterparty PSPs)", "Spring Boot", "VoP requesting / responding PSPs", $tags="simulated")
+ContainerQueue(kafka, "Kafka", "Apache Kafka", "accounts.events")
+ContainerDb(db, "vop DB", "PostgreSQL", "account_holders, vop_results, audit_log, inbox")
+
+Container_Boundary(vop, "vop-service") {
+  ' --- inbound adapters
+  Component(verifyApi, "Payee verification API", "Spring MVC REST controller", "Internal: verify payee (UC-02), check VoP reference (UC-01)")
+  Component(responderApi, "VoP responder API", "Spring MVC REST controller", "Scheme endpoint POST /vop/v1/verifications; participant authentication (mTLS, simulated)")
+  Component(accountListener, "Account events listener", "Spring Kafka listener", "Consumes accounts.events, deduplicates via inbox, poison messages → DLT")
+
+  ' --- application core
+  Component(requester, "Requesting service", "Application service", "Routes request: local answer for own customers, remote request otherwise; 5 s timeout → NOT_POSSIBLE")
+  Component(responder, "Responding service", "Application service", "Looks up holder in projection, returns MATCH / CLOSE_MATCH / NO_MATCH / NOT_POSSIBLE")
+  Component(matcher, "Name matcher", "Domain model", "Normalises names (case, diacritics, legal form, word order), similarity score, organisation-id match")
+  Component(routing, "Routing directory", "Domain model", "IBAN bank code → BIC → VoP endpoint")
+  Component(refs, "VoP reference store", "Application service", "vopReference with expiry, bound to debtor account, payee IBAN and name")
+  Component(retention, "Retention job", "Scheduled job", "Deletes expired results and payee names (personal data)")
+
+  ' --- outbound adapters
+  Component(peerClient, "Counterparty VoP client", "Spring RestClient", "EPC VoP API calls to responding PSPs")
+  Component(repo, "Repositories", "Spring Data JDBC", "Holder projection, results, audit log")
+}
+
+Rel(api, verifyApi, "Verify payee, check reference", "REST/JSON")
+Rel(sim, responderApi, "VoP requests", "REST/JSON")
+Rel(kafka, accountListener, "AccountOpened / Blocked / Unblocked / Closed", "Kafka")
+
+Rel(verifyApi, requester, "Verify payee")
+Rel(verifyApi, refs, "Check reference")
+Rel(requester, routing, "Resolves responding PSP")
+Rel(requester, responder, "Own customer")
+Rel(requester, peerClient, "Other PSP")
+Rel(requester, refs, "Stores result")
+Rel(responderApi, responder, "Delegates")
+Rel(responder, matcher, "Scores names")
+Rel(responder, repo, "Reads projection, writes audit")
+Rel(accountListener, repo, "Updates holder projection")
+Rel(refs, repo, "Persists")
+Rel(retention, repo, "Purges expired data")
+
+Rel(peerClient, sim, "POST /vop/v1/verifications", "REST/JSON")
+Rel(repo, db, "Reads / writes", "JDBC")
+
+SHOW_LEGEND()
+@enduml

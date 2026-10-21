@@ -1,0 +1,43 @@
+@startuml 04-dynamic-incoming-payment
+!include <C4/C4_Dynamic>
+
+title Dynamic — Incoming instant payment, happy path (UC-06)
+
+AddElementTag("simulated", $bgColor="#8C8C8C", $borderColor="#5E5E5E", $legendText="simulated / test-only")
+
+Container(csm, "csm-simulator (CSM + Originator PSP)", "Spring Boot", $tags="simulated")
+Container(gw, "csm-gateway", "Spring Boot")
+ContainerQueue(kafka, "Kafka", "Apache Kafka")
+Container(orch, "payment-orchestrator", "Spring Boot")
+Container(ledger, "ledger-service", "Spring Boot")
+Container(risk, "risk-service", "Spring Boot")
+Container(notif, "notification-service", "Spring Boot")
+System_Ext(channels, "Customer channel")
+
+Rel(csm, gw, "pacs.008", "ISO 20022 XML")
+Rel(gw, kafka, "CreditTransferReceived → csm.inbound.events; answer deadline = receipt + 5 s", "outbox")
+Rel(kafka, orch, "CreditTransferReceived", "Kafka")
+Rel(orch, risk, "Assess incoming payment → ALLOW", "REST")
+Rel(orch, ledger, "Create pending credit (id = TxId): checks account, memo only", "REST")
+Rel(orch, kafka, "AcceptCreditTransfer → csm.outbound.commands", "outbox")
+Rel(kafka, gw, "AcceptCreditTransfer", "Kafka")
+Rel(gw, csm, "pacs.002 ACCP (verdict before answer deadline)", "ISO 20022 XML")
+Rel(gw, kafka, "AnswerSent(ACCP) → csm.inbound.events", "outbox")
+Rel(kafka, orch, "AnswerSent(ACCP) → ACCEPTED", "Kafka")
+Rel(csm, gw, "pacs.002 ACSC (settlement confirmation)", "ISO 20022 XML")
+Rel(gw, kafka, "CreditTransferSettled → csm.inbound.events", "outbox")
+Rel(kafka, orch, "CreditTransferSettled", "Kafka")
+Rel(orch, ledger, "Confirm pending credit: Dr CSM settlement account / Cr payee", "REST")
+Rel(orch, kafka, "PaymentSettled → payments.events", "outbox")
+Rel(kafka, notif, "PaymentSettled", "Kafka")
+Rel(notif, channels, "Webhook / camt.054 to payee", "HTTPS")
+
+caption
+Alternatives: invalid XML → pacs.002 RJCT FF01 from csm-gateway. Risk DENY → RejectCreditTransfer FR01/RR04.
+Account unknown/closed/blocked → ledger refuses pending credit → RejectCreditTransfer AC01/AC04/AC06.
+No verdict by answer deadline → csm-gateway sends RJCT AB05 itself, AnswerSent(RJCT) → cancel pending credit.
+CSM RJCT after our ACCP → cancel pending credit. No ACSC in time → INVESTIGATING, pacs.028.
+end caption
+
+SHOW_LEGEND()
+@enduml

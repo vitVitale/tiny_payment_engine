@@ -1,0 +1,49 @@
+@startuml 03-components-payment-api
+!include <C4/C4_Component>
+
+title Components — payment-api
+
+System_Ext(channels, "Customer channels", "Mobile / online banking")
+Container(orch, "payment-orchestrator", "Spring Boot", "Sagas")
+Container(vop, "vop-service", "Spring Boot", "Verification of Payee")
+ContainerDb(db, "api DB", "PostgreSQL", "idempotency_keys, stored_responses")
+
+Container_Boundary(api, "payment-api") {
+  ' --- inbound adapters
+  Component(security, "Security filter chain", "Spring Security, OAuth2 resource server", "Validates access token; debtor-account ownership from token claims")
+  Component(paymentCtl, "Payment controller", "Spring MVC REST controller", "POST /v1/payments, GET /v1/payments/{id}, GET /v1/payments/{id}/pain.002")
+  Component(vopCtl, "Payee verification controller", "Spring MVC REST controller", "POST /v1/payee-verifications")
+
+  ' --- application core
+  Component(idem, "Idempotency guard", "Application service", "Idempotency-Key → stored response; same key + different body → 422; derives commandId")
+  Component(validator, "Payload validator", "JAXB, Bean Validation", "pain.001 XSD / OpenAPI schema, IBAN checksum, BIC, amount, currency")
+  Component(submit, "Payment submission service", "Application service", "Checks VoP reference, sends SubmitPayment with commandId")
+  Component(mapper, "ISO 20022 mapper", "iso20022-model lib", "pain.001 → SubmitPayment; internal state → pain.002 (PDNG / ACSC / RJCT)")
+
+  ' --- outbound adapters
+  Component(orchClient, "Orchestrator client", "Spring RestClient", "SubmitPayment, GetPayment; timeout → 503 Retry-After")
+  Component(vopClient, "VoP client", "Spring RestClient", "Verify payee, check VoP reference")
+  Component(repo, "Idempotency repository", "Spring Data JDBC", "Keys and stored responses, retained ≥ 24 h")
+}
+
+Rel(channels, security, "pain.001, VoP, status", "REST/JSON, XML")
+Rel(security, paymentCtl, "Authenticated request")
+Rel(security, vopCtl, "Authenticated request")
+
+Rel(paymentCtl, idem, "POST /v1/payments")
+Rel(idem, validator, "New key")
+Rel(idem, submit, "Delegates")
+Rel(paymentCtl, mapper, "Maps status")
+Rel(paymentCtl, orchClient, "GET status")
+Rel(submit, mapper, "Maps pain.001")
+Rel(submit, vopClient, "Check reference")
+Rel(submit, orchClient, "SubmitPayment")
+Rel(vopCtl, vopClient, "Verify payee")
+Rel(idem, repo, "Reads / stores responses")
+
+Rel(orchClient, orch, "/v1/payments", "REST/JSON")
+Rel(vopClient, vop, "/v1/verifications", "REST/JSON")
+Rel(repo, db, "Reads / writes", "JDBC")
+
+SHOW_LEGEND()
+@enduml
