@@ -404,3 +404,7 @@ Check digits computed with mod 97-10. Generated IBANs MUST pass `Iban` validatio
 - **LED-AC-17** Opening an account without `customerId` fails `422 CUSTOMER_ID_MISSING`; a customer account row
   without `customer_id` (inserted bypassing the constraint in a test) makes hold and pending-credit creation fail
   `CUSTOMER_ID_MISSING`. (Q-02)
+- **LED-AC-18** Every admin action (open, fund, block, unblock, close) writes one `audit_log` row with the actor
+  (JWT `sub`, or `risk-service` for internal calls), action, account id and time, in the same transaction as the
+  change; a refused action (e.g. `ACCOUNT_NOT_EMPTY`, `403` on a sanctions unblock) changes nothing and writes no
+  success record. (UC-10 NFR)

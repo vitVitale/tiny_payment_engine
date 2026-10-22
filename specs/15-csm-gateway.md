@@ -56,7 +56,7 @@ connection uses mTLS; `local` / `test` use plain HTTP.
 
 | Direction | Topic | Messages | Dedup |
 |---|---|---|---|
-| consume | `csm.outbound.commands` | `SendCreditTransfer`, `RequestPaymentStatus`, `AcceptCreditTransfer`, `RejectCreditTransfer` | `<type>:<txId>[:<attempt>]` |
+| consume | `csm.outbound.commands` | `SendCreditTransfer`, `RequestPaymentStatus`, `AcceptCreditTransfer`, `RejectCreditTransfer` | `<type>:<debtorAgentBic>:<txId>[:<attempt>]` ([02 §3](02-messaging-contracts.md#3-csmoutboundcommands-orchestrator--gateway), ADR-010) |
 | produce | `csm.inbound.events` | `CreditTransferReceived`, `AnswerSent`, `CreditTransferSettled`, `CreditTransferRejected`, `CreditTransferNotSent` | — |
 
 ## 5. Data model
@@ -289,3 +289,9 @@ Incoming: final status known → re-publish; else `pacs.028` as above; no record
 - **GW-AC-13** A duplicate `pacs.002` with the same status publishes nothing; a contradicting one publishes the
   contradicting event and keeps the first status in the record. (UC-04 8a)
 - **GW-AC-14** A `pacs.008` containing a DOCTYPE is rejected without entity resolution. (ISO-AC-02)
+- **GW-AC-15** Two valid `pacs.008` with the same `TxId` and different `DbtrAgt` BICs → two `incoming_transfers`
+  rows, two `CreditTransferReceived`, and verdicts for each produce their own `pacs.002`; neither is treated as a
+  duplicate of the other. (ADR-010)
+- **GW-AC-16** An answer whose transmission keeps failing is retried with the same `answer_msg_id` until
+  `answered_at + answer-transmit-window`, then marked `GAVE_UP`; no attempt is made after that and the published
+  `AnswerSent` stands. (§6.5)

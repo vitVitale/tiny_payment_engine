@@ -110,7 +110,7 @@ Every resolution is written to `exception_cases` and `payment_transitions` with 
 |---|---|---|---|
 | produce | `csm.outbound.commands` | `SendCreditTransfer`, `RequestPaymentStatus`, `AcceptCreditTransfer`, `RejectCreditTransfer` | — |
 | produce | `payments.events` | `PaymentSettled`, `PaymentRejected` | — |
-| consume | `csm.inbound.events` | `CreditTransferReceived`, `AnswerSent`, `CreditTransferSettled`, `CreditTransferRejected`, `CreditTransferNotSent` | `<txId>:<type>:<outcome>` |
+| consume | `csm.inbound.events` | `CreditTransferReceived`, `AnswerSent`, `CreditTransferSettled`, `CreditTransferRejected`, `CreditTransferNotSent` | `<debtorAgentBic>:<txId>:<type>:<outcome>` ([02 §4](02-messaging-contracts.md), ADR-010) |
 
 `DltHook` for `csm.inbound.events.dlt`: open `DLT_MESSAGE` case linked to the payment if the `txId` can be read from
 the key.
@@ -364,3 +364,18 @@ Listener transaction: validate → inbox → load payment by `(direction, debtor
   [scenario catalogue](20-testing-strategy.md#4-end-to-end-scenario-catalogue).
 - **ORC-AC-20** Resolving an `UNRESOLVED_INVESTIGATION` as `CONFIRMED_REJECTED` releases the hold and records the
   operator in `payment_transitions`.
+- **ORC-AC-21** Risk `REVIEW` → `REJECTED FR01`, no ledger call, `PaymentRejected` emitted. (UC-04 2b)
+- **ORC-AC-22** Ledger create-hold failing technically (WireMock `503`) until `send_by − hold-give-up-margin` →
+  `REJECTED MS03`, next `RELEASE_HOLD`; the release is issued (tombstone if the hold never existed) and one
+  `PaymentRejected` is emitted. (UC-04 3, Q-01, ADR-009)
+- **ORC-AC-23** On-us payment in `FUNDS_RESERVED` whose `settle-on-us` call is still in flight when the clock passes
+  `deadline_at`: the `OUTGOING_DEADLINE` timer is a no-op and the payment ends `SETTLED` on the ledger answer, with no
+  `RELEASE_HOLD`. (Q-15, ADR-008)
+- **ORC-AC-24** `CreditTransferSettled` (source `STATUS_REPORT`) while `INVESTIGATING` → `SETTLE_HOLD`, `SETTLED`, the
+  `INVESTIGATION_RETRY` timer cancelled; a following `CreditTransferSettled` (source `INVESTIGATION`) for the same
+  transaction has no effect: one settle call, one `PaymentSettled`. (UC-05, late `pacs.002` during investigation)
+- **ORC-AC-25** Incoming `CreditTransferRejected` in `ACCEPTED` → `REJECTED` with the received reason, next
+  `CANCEL_CREDIT`, the pending credit cancelled, one `PaymentRejected`, `SETTLEMENT_OVERDUE` timer cancelled. (UC-06 8a)
+- **ORC-AC-26** Two `CreditTransferReceived` with the same `txId` and different `debtorAgentBic` create two payments
+  with different `paymentId`s and pending-credit ids; neither is deduplicated against the other, and events for one
+  never change the other. (ADR-010)

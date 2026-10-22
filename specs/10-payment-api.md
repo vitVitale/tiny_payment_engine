@@ -222,7 +222,10 @@ CREATE TABLE payment_rejections (            -- pain.002 FF01 for XML clients
   the current state. (UC-01 2a)
 - **API-AC-04** Same key, different body → `422 IDEMPOTENCY_KEY_REUSED`. (UC-01 2b)
 - **API-AC-05** Debtor IBAN not in the token → `403`; status query for a foreign payment → `404`. (UC-01 1a, UC-07 1a)
-- **API-AC-06** Each field rule of §5.2 has a failing example returning `400` with the listed field code. (UC-01 3a)
+- **API-AC-06** Each field rule of §5.2 has a failing example returning `400` with the listed field code. For an
+  XML request the problem body carries a `rejectionId` whose `pain.002` is `RJCT FF01` and validates against the
+  XSD. `POST /v1/payee-verifications` with an invalid payee IBAN returns `400 INVALID_IBAN` without calling
+  vop-service. (UC-01 3a, UC-02 1a)
 - **API-AC-07** Expired / mismatching / unknown VoP reference → `422 VOP_REQUIRED`. (UC-01 4a)
 - **API-AC-08** Orchestrator down → `503` with `Retry-After`; retry with the same key after recovery → `202`.
   Orchestrator reached but response lost (WireMock delay > timeout) → retry yields the same `paymentId`. (UC-01 5a, 6a)

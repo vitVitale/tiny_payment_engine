@@ -271,7 +271,9 @@ docker compose -f deploy/docker-compose.yml up -d --build    # whole stack incl.
 | mock OAuth2 issuer | 8099 | |
 
 Profiles: `local` (compose hosts, debug logging off, funding endpoint enabled), `test` (Testcontainers),
-`prod` (funding endpoint disabled, simulator URLs forbidden by a startup check).
+`systemtest` (compose stack with shortened deadlines and retry schedules, values in
+[20 §2.1](20-testing-strategy.md#21-systemtest-profile)), `prod` (funding endpoint disabled, simulator URLs
+forbidden by a startup check).
 
 Kafka topics are created by a `kafka-init` compose job (and by `NewTopic` beans in tests), not by auto-creation
 (`auto.create.topics.enable=false`). Topic settings: [02 §2](02-messaging-contracts.md#2-topics).

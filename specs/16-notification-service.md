@@ -162,3 +162,5 @@ Ordering of webhooks is not guaranteed; receivers use `occurredAt` / status.
 - **NTF-AC-07** notification-service down for 10 min → payments keep settling; on restart all missed events are
   delivered. (UC-08 NFR)
 - **NTF-AC-08** Registering a subscription for an IBAN not in the token → `403`; `http://` URL in `prod` → `400`.
+- **NTF-AC-09** `PaymentRejected` with `direction = INCOMING` for a subscribed creditor → recorded in `event_records`,
+  no delivery created. (Q-19)

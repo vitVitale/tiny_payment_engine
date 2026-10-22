@@ -41,9 +41,15 @@ State is in memory; restart = clean slate. Single instance.
 5. `SILENT` → the CSM settles but sends no `pacs.002`; a later `pacs.028` is answered `ACSC` (UC-05 happy path).
 6. `LOST` → the CSM acknowledges the transport (`202`) and drops the message; a later `pacs.028` is answered
    `UNKNOWN_TX` (UC-05 4c).
+7. `LATE_STATUS:<ms>` → settles as `ACCEPT`, but sends the `pacs.002 ACSC` only at `AccptncDtTm + <ms>`; a `pacs.028`
+   before that is answered `ACSC` (late `pacs.002` during an investigation, UC-05).
 
-**Incoming (our bank = beneficiary):** `POST /sim/v1/incoming-payments` builds a `pacs.008` (BAH, new `TxId`)
-and sends it to the gateway. Waits for our `pacs.002` until `answerTimeout` (default 6 s):
+Every settlement, in either direction, is appended to the **settlement log** (`txId`, `debtorAgentBic`, `direction`,
+`amountMinor`, `settledAt`). It is the CSM's view of what moved, used by the ledger reconciliation invariant
+(INV-10 in [20 §3](20-testing-strategy.md#3-global-invariants)).
+
+**Incoming (our bank = beneficiary):** `POST /sim/v1/incoming-payments` builds a `pacs.008` (BAH; new `TxId` and a
+seeded counterparty BIC as `DbtrAgt` unless the request gives `txId` / `debtorAgentBic`) and sends it to the gateway. Waits for our `pacs.002` until `answerTimeout` (default 6 s):
 
 - `ACCP` in time → settle → `pacs.002 ACSC` to the gateway (settlement confirmation), unless the scenario says
   `REJECT_AFTER_ACCP` (→ `RJCT AB05`, UC-06 8a) or `NO_CONFIRMATION` (UC-06 8b).
@@ -81,11 +87,12 @@ and sends it to the gateway. Waits for our `pacs.002` until `answerTimeout` (def
 | Endpoint | Purpose |
 |---|---|
 | `PUT /sim/v1/counterparty-accounts` | Seed counterparty IBANs with holder names and bank codes |
-| `PUT /sim/v1/scenarios/{creditorIban}` | Scenario for payments to that IBAN: `ACCEPT`, `REJECT:<code>`, `TIMEOUT`, `SILENT`, `LOST`, `DELAY:<ms>`, `INVESTIGATION_SILENT`, `VOP_SLOW` |
-| `POST /sim/v1/incoming-payments` | `{ creditorIban, amount, debtorName, debtorIban, scenario }` → returns `txId` |
+| `PUT /sim/v1/scenarios/{creditorIban}` | Scenario for payments to that IBAN: `ACCEPT`, `REJECT:<code>`, `TIMEOUT`, `SILENT`, `LOST`, `LATE_STATUS:<ms>`, `DELAY:<ms>`, `INVESTIGATION_SILENT`, `VOP_SLOW` |
+| `POST /sim/v1/incoming-payments` | `{ creditorIban, amount, debtorName, debtorIban, scenario, txId?, debtorAgentBic? }` → returns `txId` |
 | `POST /sim/v1/incoming-payments/raw` | send an arbitrary (possibly invalid) XML to the gateway |
 | `GET /sim/v1/received?txId=` | every message the simulator received / sent for a transaction, with timestamps |
-| `POST /sim/v1/outage` | `{ "mode": "DOWN" \| "SLOW" \| "UP", "delayMs": … }` for the CSM transport |
+| `GET /sim/v1/settlements?since=` | settlement log entries (§3.2) since an instant |
+| `POST /sim/v1/outage` | `{ "mode": "DOWN" \| "RESET" \| "SLOW" \| "UP", "delayMs": … }` for the CSM transport: `DOWN` answers `503` and discards the message; `RESET` closes the connection without a response and discards the message; `SLOW` delays processing by `delayMs` |
 | `POST /sim/v1/reset` | clear all state |
 
 Default scenario (no explicit one): `ACCEPT` with `beneficiaryDelay` 300 ms. Amount-based shortcuts for manual
@@ -109,3 +116,11 @@ testing: cents `.91` → `REJECT:AC01`, `.92` → `REJECT:AC04`, `.93` → `TIME
   with a logged error (it is a test oracle: invalid messages from us must fail tests loudly).
 - **SIM-AC-03** A `pacs.008` retried with the same `MsgId` is settled once.
 - **SIM-AC-04** A `pacs.008` arriving after `AccptncDtTm + 20s` is never settled.
+- **SIM-AC-05** `LATE_STATUS:<ms>` settles once and delivers exactly one `pacs.002 ACSC` at `AccptncDtTm + <ms>`
+  (± 100 ms); a `pacs.028` received earlier is answered `ACSC`.
+- **SIM-AC-06** The settlement log contains exactly the settled transactions, in both directions; payments rejected,
+  timed out, `LOST` or arriving late have no entry.
+- **SIM-AC-07** Incoming payments created with an explicit `txId` and `debtorAgentBic` carry them in `TxId` and
+  `DbtrAgt`; two with the same `txId` and different BICs are handled as separate transactions.
+- **SIM-AC-08** Outage modes `DOWN` and `RESET` produce a `503` and a closed connection respectively, and in both
+  cases the message is neither recorded as received nor settled.

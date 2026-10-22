@@ -1,100 +1,159 @@
 # 20 Testing strategy and scenario catalogue
 
 Money correctness and deadline behaviour are the two things that must never regress. The test pyramid is built
-around them.
+around them: many fast tests of the domain rules, a component suite per service that proves its acceptance criteria,
+and a small, deliberate set of end-to-end scenarios that cover every use-case flow (§8) and end with global
+invariant checks (§3).
 
 ## 1. Test levels
 
 | Level | Where | Tooling | What it proves |
 |---|---|---|---|
 | Unit | each module, `src/test` | JUnit 5, AssertJ, `MutableClock` | domain rules: state machine transitions, posting engine, matchers, value objects, reason mapping |
-| Property-based | `payment-domain`, ledger domain, `iso20022-model` | jqwik | invariants: Σ DR = Σ CR; available ≥ 0; every builder output is XSD-valid; IBAN round trips |
+| Property-based | `payment-domain`, ledger domain, `iso20022-model` | jqwik | invariants: Σ DR = Σ CR; available ≥ 0; every builder output is XSD-valid; IBAN round trips; `Money.parse` ∘ `toDecimalString` is identity |
+| Stateful property-based | orchestrator `domain.payment`, gateway answer coordinator | jqwik stateful (action sequences) | for random interleavings of CSM events, timer fires and action results ([11 §6.6](11-payment-orchestrator.md#66-concurrency)): a final state is never left; exactly one final event; every rejection after a possible hold / pending credit has `RELEASE_HOLD` / `CANCEL_CREDIT` as next action; result equals the §6.4 / §6.5 tables in either order |
 | Component (service) | each service, `src/integrationTest` (Failsafe) | Spring Boot test, Testcontainers PostgreSQL + Kafka, WireMock for REST neighbours | the service's acceptance criteria (`<SVC>-AC-nn`) in isolation |
-| Contract | `contracts` + each consumer | golden samples, round-trip tests | message compatibility across versions |
+| Concurrency | ledger, gateway, payment-api, `messaging` | component setup + two app contexts / latches | LED-AC-09, -10, GW-AC-12, API-AC-10, MSG-AC-03: races resolved by the DB as specified |
+| Contract | `contracts` + each consumer | golden samples, round-trip tests | message compatibility across versions: every consumer reads the golden samples of the current **and previous** version; unknown fields are ignored |
 | REST contract | provider: OpenAPI drift check; consumer: WireMock stubs generated from the provider's checked-in OpenAPI | springdoc, openapi-diff | internal APIs do not break silently |
+| Schema compatibility | each service, CI on `main` | Flyway + previous release image | the previous release's component suite passes against the new migrations (24/7 rule, [00 §9](00-engineering-baseline.md#9-database-and-migrations)) |
+| Security | each service (component) + system tests | Spring Security test, authorisation matrix generated from OpenAPI | every endpoint × (no token, wrong scope, wrong role, foreign account) → `401` / `403` / `404` per [00 §7, §12](00-engineering-baseline.md#12-security-mvp); DOCTYPE rejected; internal APIs unreachable from outside the compose network |
 | Architecture | each service | ArchUnit | layering, no `Instant.now()`, no `double` money |
-| System (end-to-end) | `tests/system-tests` | JUnit 5 + Testcontainers Compose module, simulator control API, mock OAuth2 tokens | scenario catalogue §4 |
+| Traceability | CI step | script over `specs/*.md` and test sources | every `<SVC>-AC-nn` and every `E2E-*` / `CH-*` id has at least one test carrying it in its name or `@Tag` |
+| System (end-to-end) | `tests/system-tests` | JUnit 5 + Testcontainers Compose module, simulator control API, mock OAuth2 tokens, webhook receiver stub | scenario catalogue §4 |
 | Failure injection | `tests/system-tests` (`@Chaos`, nightly) | Toxiproxy between services / Kafka / DB, container pause / kill | §5 |
 | Performance | `tests/system-tests/perf` (nightly) | Gatling | §6 |
+| Mutation | nightly | PIT | money- and deadline-critical code is actually asserted on (§7) |
 
 ## 2. Rules for writing tests
 
-- Tests never sleep for business time. Services under component test get a `MutableClock` bean; system tests
-  use short configured deadlines (profile `systemtest`: `send-by-offset=3s`, `deadline-offset=6s`,
-  `hold-give-up-margin=1s`, `answer-deadline-offset=2s`, `verdict-give-up-margin=500ms`,
-  `settlement-overdue=5s`, `investigation.backoff=500ms,1s`, `investigation.budget=10s`; simulator
-  `timeout-deadline=6s`, `answer-timeout=3s`) and Awaitility with explicit upper bounds.
+- Tests never sleep for business time. Services under component test get a `MutableClock` bean; system tests use
+  the `systemtest` profile (§2.1) and Awaitility with explicit upper bounds **derived from that profile** (e.g.
+  `deadline-offset + investigation.budget + 2s`), never magic numbers.
 - One test per acceptance criterion at minimum, named after it (`ORC_AC_09_deadlineInSentToCsmStartsInvestigation`).
-- Every system test ends with **global invariant checks** (§3) — failures there are always release blockers.
+  E2E and chaos tests carry their id the same way (`E2E_O_12_gatewayDownPastSendBy`).
+- Every system test ends with the **per-test global invariant checks** (§3) — failures there are always release blockers.
+- Every E2E test asserts what the customer sees, not only internal state: the status through payment-api
+  (UC-07 mapping) and the webhook outcome (INV-13).
 - Test data: unique IBANs / customer ids per test (`TestData.newCustomer()`), no shared fixtures that tests mutate.
+  Shared resources — the `CSM_SETTLEMENT` and `FUNDING` accounts, Kafka topics, the simulator — are asserted on only
+  for the test's own `paymentId`s / `TxId`s, never as totals (totals are checked by the nightly soak only).
+- System tests are order-independent and may run in parallel per class. Simulator scenarios are set per creditor
+  IBAN, so tests do not interfere. `POST /sim/v1/reset` is called once at suite start, never during a run.
+- A system-test failure attaches a debug bundle for the test's transactions: payment transitions, gateway journal
+  (`GET /v1/journal?txId=`), simulator received log, ledger entries, webhook deliveries.
+- No automatic retries of failed system tests. A flaky test is quarantined (`@Quarantined` + ticket) within one
+  working day and fixed or deleted within two weeks. Invariant checks are never quarantined.
 
-## 3. Global invariants (asserted after every system test and continuously in the nightly soak)
+### 2.1 `systemtest` profile
+
+Short deadlines keep the suite fast. They keep the ordering of the production values, so the same races occur.
+
+| Service | Property | `systemtest` | Default | Why |
+|---|---|---|---|---|
+| orchestrator | `tpe.outgoing.send-by-offset` / `deadline-offset` | `3s` / `6s` | `10s` / `20s` | |
+| orchestrator | `tpe.outgoing.hold-give-up-margin` | `1s` | `2s` | |
+| orchestrator | `tpe.incoming.verdict-give-up-margin` | `500ms` | `1s` | |
+| orchestrator | `tpe.incoming.settlement-overdue` | `5s` | `30s` | E2E-I-08 |
+| orchestrator | `tpe.investigation.backoff` / `budget` | `500ms,1s` / `10s` | `5s,…` / `1h` | E2E-O-11 |
+| csm-gateway | `tpe.csm.answer-deadline-offset` | `2s` | `5s` | |
+| csm-gateway | `tpe.csm.answer-transmit-window` | `1s` | `5s` | must stay below the simulator `answer-timeout` |
+| csm-simulator | `tpe.sim.timeout-deadline` / `answer-timeout` | `6s` / `3s` | `20s` / `6s` | equal to the orchestrator deadline, as in production |
+| vop-service | `tpe.vop.reference-validity` | `5s` | `30m` | E2E-O-17 (expired reference) |
+| risk-service | `tpe.risk.sanctions.poll-interval` | `1s` | `15m` | E2E-O-06, -I-11, -S-01, -S-03 |
+| notification-service | `tpe.notification.retry-schedule` / `retry-window` | `200ms,500ms,1s` / `30s` | `10s,…` / `24h` | E2E-N-01, -N-02 |
+| ledger-service | `tpe.ledger.snapshot.interval` | `5s` | `15m` | snapshots are exercised during system tests (LED-AC-11) |
+
+Ordering rule, checked by a unit test over the profile files: `send-by-offset < deadline-offset =
+sim.timeout-deadline`; `answer-deadline-offset + answer-transmit-window ≤ sim.answer-timeout`;
+`settlement-overdue > sim.beneficiary-delay`.
+
+Performance runs (§6) use the **default** values, never this profile.
+
+## 3. Global invariants
+
+Per-test invariants are asserted after every system test for the test's own transactions. The nightly soak (§6)
+asserts all of them every 5 minutes over the whole database, plus the totals marked *soak*.
 
 | # | Invariant | How it is checked |
 |---|---|---|
 | INV-1 | Every journal entry balances | SQL on ledger DB |
 | INV-2 | No customer account has `available < 0` or `booked < 0` | SQL |
-| INV-3 | Every final outgoing payment has no `ACTIVE` hold; `SETTLED` ⇔ hold `SETTLED`; `REJECTED` ⇔ hold `RELEASED` or never created | join orchestrator DB ↔ ledger DB via admin APIs |
-| INV-4 | Every final incoming payment has no `ACTIVE` pending credit; `SETTLED` ⇔ `CONFIRMED` | same |
-| INV-5 | No `pacs.008` was transmitted after its `sendBy` | simulator received-log vs gateway `outgoing_transfers` |
-| INV-6 | Exactly one answer `pacs.002` per incoming `TxId`, and the orchestrator state agrees with it | simulator log vs orchestrator |
-| INV-7 | Exactly one `PaymentSettled` / `PaymentRejected` per final payment | test consumer on `payments.events` |
-| INV-8 | Σ derived CSM settlement account balance = Σ settled incoming − Σ settled outgoing (per test window) | ledger + orchestrator |
+| INV-3 | Every final outgoing payment has no `ACTIVE` hold; `SETTLED` ⇔ hold `SETTLED` (on-us: settled on-us); `REJECTED` ⇔ hold `RELEASED`, tombstoned or never created | join orchestrator DB ↔ ledger DB via admin APIs |
+| INV-4 | Every final incoming payment has no `ACTIVE` pending credit; `SETTLED` ⇔ `CONFIRMED`; `REJECTED` ⇔ `CANCELLED`, tombstoned or never created | same |
+| INV-5 | No `pacs.008` was transmitted after its `sendBy`, and none for a transfer the gateway records as `NOT_SENT` | simulator received-log vs gateway `outgoing_transfers` |
+| INV-6 | Exactly one answer `pacs.002` per incoming (`debtorAgentBic`, `TxId`) ([ADR-010](../architecture/decisions/ADR-010-incoming-transaction-identity.md)), and the orchestrator state agrees with it | simulator log vs orchestrator |
+| INV-7 | Exactly one `PaymentSettled` / `PaymentRejected` per final payment, none for a non-final payment | test consumer on `payments.events` |
+| INV-8 | Each `SETTLED` non-on-us outgoing payment has exactly one `CR CSM_SETTLEMENT` posting of its amount; each `SETTLED` incoming payment exactly one `DR CSM_SETTLEMENT`; on-us and rejected payments none. *Soak:* derived balance (Σ CR − Σ DR, [12 §6](12-ledger-service.md)) = Σ settled outgoing − Σ settled incoming | ledger entries by `paymentId` |
 | INV-9 | No DLT message, no unexpected exception case | Kafka DLT topics, case API |
+| INV-10 | **Our ledger agrees with the CSM**: for every `TxId` the simulator settled, the ledger has the matching `CSM_SETTLEMENT` posting; for every `TxId` it did not settle, none | simulator settlement log ([17 §3.2](17-csm-simulator.md#32-scheme-behaviour), `GET /sim/v1/settlements`) vs ledger |
+| INV-11 | Nothing is stuck: every payment is final or has an `OPEN` exception case; no `SCHEDULED` timer belongs to a final payment; no `pending_action` is overdue by more than `lease + max-backoff`; no gateway row is `PENDING` past its give-up window | SQL / admin APIs after quiescence |
+| INV-12 | Per customer account: `booked` = Σ postings; `available` = `booked` − Σ `ACTIVE` holds; pending credits change neither | SQL |
+| INV-13 | Webhooks match outcomes: one delivery per subscription for every final outgoing payment (on-us `SETTLED`: payer and payee); one for every `SETTLED` incoming payment; none for a `REJECTED` incoming payment ([Q-19](40-open-questions.md#q-19-notifications-for-rejected-incoming-payments)); every signature verifies | webhook receiver stub |
+| INV-14 | No personal data in logs: no IBAN or name generated by `TestData` appears in any container log at INFO or above ([00 §11](00-engineering-baseline.md#11-logging-tracing-metrics)) | log scan, once per suite |
 
 ## 4. End-to-end scenario catalogue
 
 Each scenario lists the setup through the simulator control API and the expected outcome. `@smoke` scenarios run on
-every PR.
+every PR. New ids are appended; existing ids are never renumbered ([30](30-delivery-plan.md) refers to them).
 
 ### Outgoing
 
 | Id | Scenario | Setup | Expected |
 |---|---|---|---|
-| E2E-O-01 `@smoke` | Happy path to another PSP | default `ACCEPT` | `202` → `ACSC`; payer debited; CSM settlement credited; webhook to payer |
-| E2E-O-02 `@smoke` | On-us | payee is our customer | `ACSC`; single entry Dr payer / Cr payee; webhooks to both; no `pacs.008` |
-| E2E-O-03 | Insufficient funds | balance < amount | `RJCT AM04`; no hold left |
-| E2E-O-04 | Payer blocked | block payer (`OPERATOR`) | `RJCT AC06` |
+| E2E-O-01 `@smoke` | Happy path to another PSP | default `ACCEPT` | `202` → `ACSC` (JSON and `pain.002`); payer debited; CSM settlement credited; webhook to payer |
+| E2E-O-02 `@smoke` | On-us | payee is our customer (VoP answered locally) | `ACSC`; single entry Dr payer / Cr payee; webhooks to both; no `pacs.008` |
+| E2E-O-03 | Insufficient funds | balance < amount | `RJCT AM04`; no hold left; webhook to payer |
+| E2E-O-04 | Payer blocked / closed | block payer (`OPERATOR`); variant: close payer | `RJCT AC06` / `RJCT AC04` |
 | E2E-O-05 | Fraud rule | amount > 50 000 | `RJCT FR01`; no ledger call |
 | E2E-O-06 | Non-EU sanctions creditor | UN list contains creditor name | `RJCT RR04` |
-| E2E-O-07 | Beneficiary rejects | `REJECT:AC04` | `RJCT AC04`; hold released |
+| E2E-O-07 `@smoke` | Beneficiary rejects | `REJECT:AC04` | `RJCT AC04`; hold released |
 | E2E-O-08 | Beneficiary timeout | `TIMEOUT` | `RJCT AB05` via CSM `pacs.002`, or via investigation — either way released, never settled |
-| E2E-O-09 | No `pacs.002`, settled | `SILENT` | `INVESTIGATING` → `pacs.028` → `ACSC`; payer debited |
+| E2E-O-09 | No `pacs.002`, settled | `SILENT` | `INVESTIGATING` (status `PDNG`) → `pacs.028` → `ACSC`; payer debited |
 | E2E-O-10 | No `pacs.002`, unknown | `LOST` | `INVESTIGATING` → `UNKNOWN_TX` after deadline → `RJCT AB05`; released |
 | E2E-O-11 | Investigation unanswered | `SILENT` + `INVESTIGATION_SILENT` | retries, then `UNRESOLVED_INVESTIGATION` case; hold stays; status `PDNG`; operator resolves → final |
-| E2E-O-12 | Gateway down past `sendBy` | stop csm-gateway before submit, start after `sendBy` | `RJCT AB03`; simulator received nothing |
-| E2E-O-13 | CSM unreachable past `sendBy` | simulator outage `DOWN` during send | no `pacs.008` after `sendBy`; outcome resolved by investigation; no invariant violation |
-| E2E-O-14 | Late contradicting `pacs.002` | `REJECT` then inject `ACSC` via raw endpoint | `RJCT`; `CONTRADICTING_CSM_OUTCOME` case; no money movement |
+| E2E-O-12 | Gateway down past `sendBy` | stop csm-gateway before submit, start it between `sendBy` and the deadline | `RJCT AB03` from `SENT_TO_CSM`; simulator received nothing |
+| E2E-O-13 | CSM unreachable past `sendBy` | simulator outage `DOWN` (variant: `RESET`) from submit until after the deadline, then `UP` | no `pacs.008` after `sendBy`; investigation → `UNKNOWN_TX` → `RJCT AB05`; released |
+| E2E-O-14 | Late contradicting `pacs.002` | `REJECT` then inject `ACSC` via raw endpoint; variant: `ACCEPT` then inject `RJCT` | first outcome kept (`RJCT` / `ACSC`); `CONTRADICTING_CSM_OUTCOME` case; no money movement after the first outcome |
 | E2E-O-15 | On-us payee blocked | block payee | `RJCT AC06`; hold released |
 | E2E-O-16 | Idempotent retry | submit twice with same key; once with lost response (Toxiproxy) | one payment |
-| E2E-O-17 | VoP required | no / expired reference | `422 VOP_REQUIRED`; no payment |
+| E2E-O-17 | VoP required | no / expired / mismatching reference | `422 VOP_REQUIRED`; no payment |
+| E2E-O-18 | On-us payee unknown / closed / risk deny | IBAN with our bank code and no account; closed payee; payee trips `MULE_NEW_ACCOUNT` | `RJCT AC01` / `AC04` / `FR01`; hold released |
+| E2E-O-19 | Risk `REVIEW` | first payment of 6 000 EUR to a counterparty with VoP `CLOSE_MATCH` (`NEW_PAYEE_HIGH_AMOUNT`) | `RJCT FR01`; no ledger call |
+| E2E-O-20 | Late `pacs.002` during investigation | `LATE_STATUS:<deadline + 1s>` | `INVESTIGATING` → `ACSC` from the late `pacs.002`; the `pacs.028` answer is a no-op; one settlement |
+| E2E-O-21 | Gateway down past the deadline | stop csm-gateway before submit, start it after the deadline | `INVESTIGATING` → `CreditTransferNotSent` → `RJCT AB03`; no `pacs.028`, simulator received nothing |
 
 ### Incoming
 
 | Id | Scenario | Setup | Expected |
 |---|---|---|---|
 | E2E-I-01 `@smoke` | Happy path | incoming payment to open account | `ACCP` then `ACSC`; payee credited; webhook to payee |
-| E2E-I-02 | Unknown account | creditor IBAN not ours | `RJCT AC01`; no pending credit |
+| E2E-I-02 `@smoke` | Unknown account | creditor IBAN has our bank code but no account | `RJCT AC01`; no pending credit |
 | E2E-I-03 | Blocked account | block payee | `RJCT AC06` |
 | E2E-I-04 | Closed account | close payee | `RJCT AC04` |
-| E2E-I-05 | Risk deny | mule rule triggers | `RJCT FR01` |
+| E2E-I-05 | Risk deny | mule rule triggers (account opened today has already received more than 10 incoming payments within 24 h) | `RJCT FR01` |
 | E2E-I-06 | Orchestrator slow | Toxiproxy delay orchestrator ↔ Kafka > answer deadline | gateway sends `RJCT AB05` itself; late verdict ignored; pending credit cancelled |
 | E2E-I-07 | CSM rejects after `ACCP` | `REJECT_AFTER_ACCP` | `REJECTED`; pending credit cancelled; payee not credited, not notified |
-| E2E-I-08 | No settlement confirmation | `NO_CONFIRMATION` | `INVESTIGATING` → `pacs.028` → resolved |
-| E2E-I-09 | Invalid XML | raw invalid `pacs.008` | `RJCT FF01`; no payment created |
-| E2E-I-10 | Duplicate `pacs.008` | send same twice | one payment, one credit; answer re-sent for the late duplicate |
+| E2E-I-08 | No settlement confirmation | `NO_CONFIRMATION` | `INVESTIGATING` → `pacs.028` → `ACSC` → `SETTLED`; payee credited only then |
+| E2E-I-09 | Invalid XML | raw invalid `pacs.008`; variant: with a DOCTYPE | `RJCT FF01`; no payment created; no entity resolved |
+| E2E-I-10 | Duplicate `pacs.008` | send the same message twice: before our answer, and after it | one payment, one credit; early duplicate dropped; the same answer re-sent for the late duplicate |
+| E2E-I-11 | Non-EU sanctions debtor | UN list contains debtor name | `RJCT RR04`; no pending credit |
+| E2E-I-12 | Same `TxId` from two PSPs | two raw `pacs.008` with equal `TxId` and different `DbtrAgt` BICs | two independent payments, two answers, two credits ([ADR-010](../architecture/decisions/ADR-010-incoming-transaction-identity.md)) |
+| E2E-I-13 | Incoming without VoP and notifications | stop vop-service and notification-service | incoming payments answered and settled within budget; webhooks delivered after restart (UC-06 NFR) |
 
 ### VoP, sanctions, accounts, notifications
 
 | Id | Scenario | Expected |
 |---|---|---|
-| E2E-V-01 | VoP against counterparty: match / close match / no match / unknown | results as seeded; `CLOSE_MATCH` returns actual name |
+| E2E-V-01 | VoP against own customer and counterparty: match / close match / no match / unknown | results as seeded; `CLOSE_MATCH` returns actual name; own customer answered without calling the simulator |
 | E2E-V-02 | Counterparty VoP slow (`VOP_SLOW`) | `NOT_POSSIBLE` within 5.2 s; payment still possible |
-| E2E-V-03 | Counterparty asks our responder | correct result; audit row hashed |
+| E2E-V-03 | Counterparty asks our responder: known, unknown and closed IBAN | correct result (`NOT_POSSIBLE` for unknown / closed); audit row hashed |
 | E2E-S-01 | New EU list with a customer | provisional block within minutes; outgoing and incoming payments `AC06`; confirm → `SANCTIONS`; dismiss → unblocked and not re-raised |
 | E2E-S-02 | Provider outage | previous list kept; alert metric |
+| E2E-S-03 | Listed person opens a new account | screened on `AccountOpened`; provisionally blocked; first payment `AC06` |
 | E2E-A-01 | Open, fund, block, unblock, close | events reach vop / risk projections; close refused while not empty |
-| E2E-N-01 | Webhook receiver down for 2 min | delivered after recovery; payments unaffected |
+| E2E-N-01 | Webhook receiver down for 10 s | delivered after recovery; payments unaffected |
+| E2E-N-02 | Webhook receiver down longer than `retry-window` | delivery `FAILED`, visible in the admin API; payments unaffected |
 
 ## 5. Failure-injection scenarios
 
@@ -103,25 +162,141 @@ is quiesced:
 
 | Id | Injection | Specifically checks |
 |---|---|---|
-| CH-01 | Kill a random payment-orchestrator instance every 30 s | saga resume (ADR-003) |
-| CH-02 | Kill csm-gateway instance during sends | INV-5, `GAVE_UP` with 0 attempts → `NOT_SENT` |
+| CH-01 | Kill a random payment-orchestrator instance every 30 s | saga resume (ADR-003, ADR-008) |
+| CH-02 | Kill csm-gateway instance during sends | INV-5, `GAVE_UP` with 0 attempts → `NOT_SENT` (ADR-011) |
 | CH-03 | Pause outbox relay (orchestrator) for 15 s | ADR-004 send-by race: no `pacs.008` after `sendBy` |
 | CH-04 | Delay `csm.outbound.commands` consumption past the answer deadline | ADR-004 answer race: INV-6 |
-| CH-05 | Ledger latency 2 s / ledger down 30 s | holds give up correctly, settlements retried, no stuck holds after recovery |
+| CH-05 | Ledger latency 2 s / ledger down 30 s | holds give up correctly (`MS03`), settlements retried, no stuck holds after recovery; on-us payments past `FUNDS_RESERVED` end on a ledger answer, never `AB03` ([Q-15](40-open-questions.md#q-15-on-us-payments-and-the-20-s-deadline)) |
 | CH-06 | PostgreSQL failover / restart of one service DB | consumers block and resume, no DLT |
 | CH-07 | Kafka broker restart | no message loss (INV-7 counts) |
-| CH-08 | Clock skew +200 ms on gateway | margins hold; no invariant broken |
+| CH-08 | Clock skew +200 ms on gateway (twice the limit of [00 §6](00-engineering-baseline.md#6-time), on purpose) | margins hold; no invariant broken |
+| CH-09 | Reset the consumer groups of orchestrator, gateway and notification-service to the start of the test window | redelivery has no business effect: no new `pacs.008` / answer, INV-7 and INV-13 counts unchanged |
+| CH-10 | risk-service down for 30 s | outgoing `RJCT FR01` (fail closed); incoming answered `RJCT` (`FR01` or `AB05`) before the answer deadline; nothing settled without an `ALLOW` |
+| CH-11 | Kill the active outbox relay of orchestrator and gateway | per-key order kept: no `RequestPaymentStatus` processed before its `SendCreditTransfer` (ADR-006) |
 
 ## 6. Performance
 
 Target load ([Q-13](40-open-questions.md#q-13-target-load)): 100 payments/s sustained, 300/s peak for 5 min, 60 / 40
-outgoing / incoming mix, 10 % on-us.
+outgoing / incoming mix, 10 % on-us, 5 % scenario rejections (`REJECT:AC04`) so compensation runs under load.
 
-| Metric | Target |
+Rules:
+
+- Default timing configuration (not `systemtest`); the numbers feed the `sendBy` / answer-deadline tuning of M5.
+- Test data must not trip velocity or mule rules unintentionally: at least 12 000 funded payers (≤ 20 outgoing
+  payments each per hour at 60/s), amounts sized so no payer exceeds `VELOCITY_AMOUNT_24H` over the run, and
+  creditor accounts older than 7 days, all seeded before the run. Rules stay enabled so their cost is measured.
+- Nightly: 30 min sustained + 5 min peak, invariants (§3, including *soak* totals) every 5 min. Weekly: 8 h soak.
+
+| Metric | Target | Source |
+|---|---|---|
+| `POST /v1/payments` p99 | ≤ 300 ms | UC-01 |
+| `GET /v1/payments/{id}` p99 | ≤ 200 ms | UC-07 |
+| accepted → `SendCreditTransfer` in outbox p99 | ≤ 1 s | UC-04, [11 §8](11-payment-orchestrator.md#8-non-functional-requirements) |
+| incoming `pacs.008` received → answer sent p99 | ≤ 2 s | UC-06 |
+| accepted → `SETTLED` p99 (simulator beneficiary delay 300 ms) | ≤ 3 s | |
+| answers decided by `DEADLINE` under peak | 0 | ADR-004 |
+| `pacs.008` not sent (`AB03`) under peak | 0 | ADR-004 |
+| `csm.*` consumer lag | < 1 s (alert threshold of ADR-002) | |
+| VoP responder p99 at 200 req/s | ≤ 1 s | UC-03, VOP-AC-09 |
+| risk assessment p99 | ≤ 50 ms | RSK-AC-04 |
+| full sanctions run, 100 000 customers × 5 000 entries | ≤ 6 min | RSK-AC-10 |
+
+## 7. Coverage targets
+
+Line coverage is a weak signal for this system; traceability and mutation score are the gates.
+
+| Target | Gate |
 |---|---|
-| `POST /v1/payments` p99 | ≤ 300 ms |
-| accepted → `SendCreditTransfer` in outbox p99 | ≤ 1 s |
-| incoming `pacs.008` received → answer sent p99 | ≤ 2 s |
-| accepted → `SETTLED` p99 (simulator beneficiary delay 300 ms) | ≤ 3 s |
-| answers decided by `DEADLINE` under peak | 0 |
-| `csm.*` consumer lag | < 1 s (alert threshold of ADR-002) |
+| Every `<SVC>-AC-nn` has a named test | CI traceability step fails the build |
+| Every use-case step and alternative flow maps to a test | §8 reviewed with every change to a use case or spec |
+| Every scenario in §4 / §5 is assigned to a milestone exit in [30](30-delivery-plan.md) | review |
+| Branch coverage of `domain` packages and `libs/payment-domain` | ≥ 90 % (JaCoCo, build fails below) |
+| Mutation score (PIT) of `payment-domain`, ledger posting engine, orchestrator `domain.payment`, gateway answer coordinator / send-by guard | ≥ 85 %; surviving mutants reviewed weekly |
+| Other packages | no numeric gate; covered by component tests |
+
+## 8. Use-case traceability
+
+| Use case flow | Component / AC | E2E / chaos |
+|---|---|---|
+| **UC-01** main | API-AC-01, -02, ORC-AC-01 | O-01 |
+| 1a not owner | API-AC-05 | — |
+| 2a / 2b idempotency | API-AC-03, -04, -10 | O-16 |
+| 3a validation (incl. `FF01` `pain.002`) | API-AC-06, -11 | — |
+| 4a VoP reference | API-AC-07, VOP-AC-03 | O-17 |
+| 5a orchestrator down | API-AC-08 | — |
+| 6a lost response | API-AC-08, ORC-AC-01 | O-16 |
+| **UC-02** main (local / remote) | VOP-AC-01 | V-01 |
+| 1a invalid IBAN | API-AC-06 | — |
+| 3a responder slow | VOP-AC-02 | V-02 |
+| 5 / 7 reference binding | VOP-AC-03 | O-17 |
+| **UC-03** main | VOP-AC-04 | V-03 |
+| 2a unknown / closed | VOP-AC-05 | V-03 |
+| 3a organisation id | VOP-AC-06 | — |
+| audit, retention | VOP-AC-08 | V-03 |
+| **UC-04** main | ORC-AC-02, GW-AC-01, LED-AC-05 | O-01 |
+| 2a `FR01` / `RR04` | ORC-AC-03, RSK-AC-01, -03 | O-05, O-06 |
+| 2b `REVIEW` | ORC-AC-21 | O-19 |
+| 2c risk unavailable | ORC-AC-04 | CH-10 |
+| 3a `AM04` | ORC-AC-05, LED-AC-03 | O-03 |
+| 3b blocked / closed payer | ORC reason mapping | O-04 |
+| hold technical failure → `MS03` | ORC-AC-22 | CH-05 |
+| 4a on-us | ORC-AC-11 | O-02 |
+| 4a-1 on-us payee refused | ORC-AC-12, LED-AC-06 | O-15, O-18 |
+| on-us exempt from deadline (Q-15) | ORC-AC-23 | CH-05 |
+| 5a send-by passed | ORC-AC-06, -07, GW-AC-02, -03, -04 | O-12, O-13, CH-02, CH-03 |
+| 6a CSM rejects | ORC-AC-08 | O-07 |
+| 8a late / contradicting `pacs.002` | ORC-AC-10, GW-AC-13 | O-14 |
+| crash at any step | ORC-AC-13 | CH-01 |
+| **UC-05** 1 deadline → investigation | ORC-AC-09 | O-09 |
+| 2a never sent | GW-AC-05 | O-21 |
+| 3–5 `pacs.028` answered | GW-AC-06 | O-09 |
+| 4a / 4b unanswered → case → operator | ORC-AC-09, -20 | O-11 |
+| 4c `UNKNOWN_TX` | GW-AC-07, SIM-AC-04 | O-10, O-13 |
+| late `pacs.002` during investigation | ORC-AC-24, SIM-AC-05 | O-20 |
+| **UC-06** main | GW-AC-08, ORC-AC-14, LED-AC-07 | I-01 |
+| 1a invalid | GW-AC-09, -14 | I-09 |
+| 1b duplicate | GW-AC-10 | I-10 |
+| 3a risk deny `FR01` / `RR04` | ORC-AC-15, RSK-AC-03 | I-05, I-11 |
+| 4a account refused | LED-AC-08, -09 | I-02, I-03, I-04 |
+| 6b answer deadline | GW-AC-11, -12, -16, ORC-AC-16 | I-06, CH-04 |
+| 8a CSM rejects after `ACCP` | ORC-AC-25 | I-07 |
+| 8b no confirmation | ORC-AC-17 | I-08 |
+| identity (`debtorAgentBic`, `TxId`) | GW-AC-15, ORC-AC-26, SIM-AC-07 | I-12 |
+| NFR: no dependency on VoP / notifications | NTF-AC-07 | I-13 |
+| **UC-07** status mapping | API-AC-09 | every E2E (§2) |
+| 1a not found / not owner | API-AC-05 | — |
+| **UC-08** main, signature, `camt.054` | NTF-AC-01, -03 | O-01, I-01 (INV-13) |
+| on-us: both parties | NTF-AC-02 | O-02 |
+| 2a no subscription | NTF-AC-05 | — |
+| 5a retries → `FAILED` | NTF-AC-04 | N-01, N-02 |
+| rejected incoming not delivered (Q-19) | NTF-AC-09 | I-07 (INV-13) |
+| at-least-once, dedup | NTF-AC-06 | CH-09 |
+| **UC-09** 1–4 screening, provisional block | RSK-AC-05 | S-01 |
+| 5–7 confirm → `AC06` | RSK-AC-06 | S-01 |
+| 5a dismiss | RSK-AC-07 | S-01 |
+| 1a provider down | RSK-AC-08 | S-02 |
+| new account screened | RSK-AC-09 | S-03 |
+| **UC-10** open, fund, read | LED-AC-01, -17 | A-01 |
+| block / unblock, sanctions lift rights | LED-AC-13 | A-01, S-01 |
+| close | LED-AC-14 | A-01 |
+| 3a funding in `prod` | LED-AC-15 | — |
+| NFR: admin actions audited | LED-AC-18 | — |
+
+## 9. Supporting changes in other specs
+
+The scenarios and invariants above rely on these criteria and features, added to the other specs together with
+this strategy:
+
+| Spec | Added | Used by |
+|---|---|---|
+| [00](00-engineering-baseline.md#13-local-development) | `systemtest` profile listed | §2.1 |
+| [10](10-payment-api.md) | API-AC-06 extended: XML `FF01` `pain.002`, invalid IBAN on `/v1/payee-verifications` | UC-01 3a, UC-02 1a |
+| [11](11-payment-orchestrator.md) | ORC-AC-21 … -26; CSM event dedup key includes `debtorAgentBic` (aligned with [02 §4](02-messaging-contracts.md)) | E2E-O-19, -O-20, -I-07, -I-12, CH-05 |
+| [12](12-ledger-service.md) | LED-AC-18 (admin audit) | UC-10 NFR |
+| [15](15-csm-gateway.md) | GW-AC-15, -16; command dedup key includes `debtorAgentBic` (aligned with [02 §3](02-messaging-contracts.md#3-csmoutboundcommands-orchestrator--gateway)) | E2E-I-12, I-06 |
+| [16](16-notification-service.md) | NTF-AC-09 (Q-19) | INV-13 |
+| [17](17-csm-simulator.md) | `LATE_STATUS:<ms>`, settlement log + `GET /sim/v1/settlements`, explicit `txId` / `debtorAgentBic` for incoming payments, outage modes `DOWN` / `RESET`; SIM-AC-05 … -08 | E2E-O-13, -O-20, -I-12, INV-10 |
+| [30](30-delivery-plan.md) | every scenario of §4 / §5 assigned to a milestone or track exit; rule for scenarios that span tracks | §7 |
+
+Still open, at implementation time: the `application-systemtest.yml` of each service with the values of §2.1, and the
+unit test of the ordering rule.
