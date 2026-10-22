@@ -142,8 +142,9 @@ CREATE TABLE inbox (
 ```
 
 Published outbox rows are deleted after `tpe.messaging.outbox.retention` (default 7 d); inbox rows after
-`tpe.messaging.inbox.retention` (default 7 d, MUST be longer than Kafka topic retention of consumed topics, so a
-replayed message is still deduplicated).
+`tpe.messaging.inbox.retention` (default 8 d, MUST be longer than Kafka topic retention of consumed topics — 7 d,
+[02 §2](02-messaging-contracts.md#2-topics) — so a replayed message is still deduplicated). The compacted
+`accounts.events` is exempt: its consumers deduplicate by `revision`, which holds for any replay.
 
 ### 3.2 Outbox writer
 

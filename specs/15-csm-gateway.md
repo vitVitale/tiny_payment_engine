@@ -49,8 +49,11 @@ connection uses mTLS; `local` / `test` use plain HTTP.
 
 ### 3.2 Admin API (role `BACKOFFICE_OPERATOR`, read-only)
 
-- `GET /v1/journal?txId=…` — all journalled messages for a transaction (XML, direction, timestamps, transport status).
-- `GET /v1/transactions/{txId}` — outgoing or incoming transaction record (§5).
+- `GET /v1/journal?txId=…[&debtorAgentBic=…]` — all journalled messages for a `TxId` (XML, direction, debtor agent BIC,
+  timestamps, transport status); `debtorAgentBic` narrows it to one transaction.
+- `GET /v1/transactions/{txId}[?debtorAgentBic=…]` — every outgoing and incoming transaction record with that `TxId`
+  (§5), each with its `debtorAgentBic`. A `TxId` alone is not an identity: two Originator PSPs may send the same one
+  ([ADR-010](../architecture/decisions/ADR-010-incoming-transaction-identity.md)).
 
 ## 4. Messaging
 
@@ -108,10 +111,11 @@ CREATE TABLE incoming_transfers (
 CREATE INDEX incoming_unanswered ON incoming_transfers (answer_deadline) WHERE answer_status IS NULL;
 
 CREATE TABLE status_requests (
+  debtor_agent_bic VARCHAR(11) NOT NULL,          -- ADR-010; our own BIC for outgoing transfers
   tx_id VARCHAR(35) NOT NULL, direction VARCHAR(8) NOT NULL, attempt INT NOT NULL,
   msg_id VARCHAR(35) NOT NULL UNIQUE, created_at TIMESTAMPTZ NOT NULL,
   transmit_status VARCHAR(10) NOT NULL, transmit_attempts INT NOT NULL DEFAULT 0, next_transmit_at TIMESTAMPTZ,
-  PRIMARY KEY (tx_id, direction, attempt)
+  PRIMARY KEY (debtor_agent_bic, tx_id, direction, attempt)
 );
 
 CREATE TABLE message_journal (
@@ -120,6 +124,7 @@ CREATE TABLE message_journal (
   message_type VARCHAR(20) NOT NULL,          -- pacs.008.001.08, …
   msg_id      VARCHAR(35),
   tx_id       VARCHAR(35),
+  debtor_agent_bic VARCHAR(11),               -- with tx_id the transaction identity (ADR-010); NULL if unreadable
   xml         TEXT NOT NULL,
   valid       BOOLEAN NOT NULL,
   validation_errors JSONB,
@@ -226,7 +231,9 @@ Endpoint transaction: validate, journal, then match `OrgnlTxId` + `OrgnlTxRef/Db
   lease` and `transmit_attempts + 1`; the HTTP call happens after the claim commits (no lock held during I/O);
   an `afterCommit` fast path transmits immediately.
 - `2xx` → `DELIVERED`. Error / timeout → `next_transmit_at = now + 200 ms × 2^(attempts−1)` capped at 1 s.
-- Give-up windows: `pacs.008` at `sendBy` (§6.1); answers at `answered_at + answer-transmit-window`; status requests
+- Give-up windows: `pacs.008` at `sendBy` (§6.1); answers at `answer_deadline + answer-transmit-window`, for verdict and
+  deadline answers alike (the CSM stops waiting for our answer shortly after the deadline, so later retries are only
+  traffic); status requests
   after 5 attempts (the orchestrator's next retry sends a new one).
 - Timeouts: connect 200 ms, read 1 s.
 
@@ -239,9 +246,11 @@ Listener transaction; per direction:
 | none (the `SendCreditTransfer` never arrived, e.g. it went to the DLT) | outbox `CreditTransferNotSent(AB03)` — nothing was sent |
 | `NOT_SENT` | outbox `CreditTransferNotSent` again (orchestrator dedups) (UC-05 2a) |
 | final status known | re-publish the final event (orchestrator dedups) |
-| `SENT`, no final status | insert `status_requests` row, build `pacs.028` for `OrgnlTxId`, journal, transmit (UC-05 3) |
+| `SENT`, no final status | insert `status_requests` row (`debtor_agent_bic` = own BIC), build `pacs.028` for `OrgnlTxId`, journal, transmit (UC-05 3) |
 
-Incoming: final status known → re-publish; else `pacs.028` as above; no record → journal + alert.
+Incoming: look up `incoming_transfers` by the command's (`debtorAgentBic`, `txId`); final status known → re-publish;
+else insert a `status_requests` row with that `debtor_agent_bic` and send a `pacs.028` (with `OrgnlTxRef/DbtrAgt`) as
+above; no record → journal + alert.
 
 ## 7. Configuration
 
@@ -249,7 +258,7 @@ Incoming: final status known → re-publish; else `pacs.028` as above; no record
 |---|---|
 | `tpe.csm.base-url` | `http://csm-simulator:8090` |
 | `tpe.csm.answer-deadline-offset` | `5s` |
-| `tpe.csm.answer-transmit-window` | `5s` |
+| `tpe.csm.answer-transmit-window` | `1s` (after `answer_deadline`; `answer-deadline-offset` + this ≤ the CSM's answer timeout, [20 §2.1](20-testing-strategy.md#21-systemtest-profile)) |
 | `tpe.csm.transmit.lease` | `2s` |
 | `tpe.csm.timeouts.connect` / `.read` | `200ms` / `1s` |
 | `tpe.csm.mtls.*` | keystore / truststore, `prod` only |
@@ -297,5 +306,8 @@ Incoming: final status known → re-publish; else `pacs.028` as above; no record
   rows, two `CreditTransferReceived`, and verdicts for each produce their own `pacs.002`; neither is treated as a
   duplicate of the other. (ADR-010)
 - **GW-AC-16** An answer whose transmission keeps failing is retried with the same `answer_msg_id` until
-  `answered_at + answer-transmit-window`, then marked `GAVE_UP`; no attempt is made after that and the published
+  `answer_deadline + answer-transmit-window`, then marked `GAVE_UP`; no attempt is made after that and the published
   `AnswerSent` stands. (§6.5)
+- **GW-AC-17** Two incoming transfers with the same `TxId` and different `DbtrAgt` BICs, both without a settlement
+  confirmation: their `RequestPaymentStatus(INCOMING, attempt 1)` commands produce two `status_requests` rows and
+  two `pacs.028`; each `pacs.002` answer settles or rejects only its own transfer. (ADR-010)

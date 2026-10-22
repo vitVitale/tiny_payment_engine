@@ -53,7 +53,8 @@ Not responsible for: idempotency of the customer request (payment-api), ISO XML 
   "amountMinor": 12345,
   "currency": "EUR",
   "remittanceInformation": "Invoice 42",
-  "vopReference": "VOP-01JAB…"
+  "vopReference": "VOP-01JAB…",
+  "vopResult": "CLOSE_MATCH"
 }
 ```
 
@@ -63,6 +64,10 @@ Not responsible for: idempotency of the customer request (payment-api), ISO XML 
 | Payment exists for `commandId`, same request hash | `200` with the existing payment's current `state` (UC-01 6a) |
 | Payment exists for `commandId`, different hash | `409 COMMAND_CONFLICT` (payment-api bug; alert) |
 | Creditor bank not in directory / not reachable | `422 CREDITOR_AGENT_NOT_REACHABLE` (payment-api validates first; defensive) |
+
+`vopResult` (required: `MATCH`, `CLOSE_MATCH`, `NO_MATCH`, `NOT_POSSIBLE`) is the result of payment-api's reference check
+([10 §5.3](10-payment-api.md#53-vop-reference-check)). It is stored as `vop_result` and sent with the outgoing risk
+assessment.
 
 Processing (one transaction): insert payment (`direction = OUTGOING`, `state = RECEIVED`, `accepted_at = clock.now()`,
 `send_by = accepted_at + send-by-offset`, `deadline_at = accepted_at + deadline-offset`, `on_us` from
@@ -95,7 +100,7 @@ Resolve body: `{ "resolution": "<value>", "reasonCode": "AB05", "comment": "…"
 
 | Case type | Allowed resolutions | Effect |
 |---|---|---|
-| `UNRESOLVED_INVESTIGATION` | `RETRY_INVESTIGATION` | new `RequestPaymentStatus`, retry schedule restarts |
+| `UNRESOLVED_INVESTIGATION` | `RETRY_INVESTIGATION` | new `RequestPaymentStatus` with the next attempt number (§6.4); `investigation_started_at` and the back-off schedule restart from the resolution |
 | | `CONFIRMED_SETTLED` | as if `CreditTransferSettled` arrived (settle hold / confirm credit) |
 | | `CONFIRMED_REJECTED` (+ `reasonCode`) | as if `CreditTransferRejected` arrived (release / cancel) |
 | `CONTRADICTING_CSM_OUTCOME` | `ACKNOWLEDGED` | none — money correction is a manual ledger process outside the MVP (UC-12) |
@@ -143,6 +148,7 @@ CREATE TABLE payments (
   creditor_account_id UUID,
   remittance        VARCHAR(140),
   vop_reference     VARCHAR(40),
+  vop_result        VARCHAR(12) CHECK (vop_result IN ('MATCH','CLOSE_MATCH','NO_MATCH','NOT_POSSIBLE')),  -- outgoing
   accepted_at       TIMESTAMPTZ NOT NULL,        -- outgoing: our acceptance; incoming: gateway receipt
   send_by           TIMESTAMPTZ,                 -- outgoing
   deadline_at       TIMESTAMPTZ,                 -- outgoing 20 s deadline
@@ -155,6 +161,8 @@ CREATE TABLE payments (
   pending_action    VARCHAR(30),
   next_action_at    TIMESTAMPTZ,
   action_attempts   INT NOT NULL DEFAULT 0,
+  investigation_started_at TIMESTAMPTZ,          -- start of the current investigation; reset by RETRY_INVESTIGATION
+  status_request_attempt INT NOT NULL DEFAULT 0, -- attempt of the last RequestPaymentStatus; never reset (§6.4)
   final_event_emitted BOOLEAN NOT NULL DEFAULT false,
   finalised_at      TIMESTAMPTZ,
   trace_context     VARCHAR(55),                 -- W3C traceparent of the payment trace (ADR-014); NULL → new root
@@ -213,7 +221,7 @@ This is what makes the saga resumable after a crash (ADR-003).
 
 | `pending_action` | Remote call | On success | On definitive refusal | On technical failure |
 |---|---|---|---|---|
-| `ASSESS_RISK` (outgoing) | risk `POST /v1/risk/assessments` direction `OUTGOING` | `ALLOW` → `RISK_CHECKED`, next `CREATE_HOLD` | `DENY`/`REVIEW` → `REJECTED` `FR01`/`RR04` (UC-04 2a, 2b) | timeout 500 ms, retry once, then `REJECTED FR01` (2c, fail closed) |
+| `ASSESS_RISK` (outgoing) | risk `POST /v1/risk/assessments` direction `OUTGOING`, with `vopResult` | `ALLOW` → `RISK_CHECKED`, next `CREATE_HOLD` | `DENY`/`REVIEW` → `REJECTED` `FR01`/`RR04` (UC-04 2a, 2b) | timeout 500 ms, retry once, then `REJECTED FR01` (2c, fail closed) |
 | `CREATE_HOLD` | ledger create hold | `FUNDS_RESERVED`; next `ASSESS_PAYEE_RISK` if on-us, else `SEND` | `REJECTED` with mapped reason, no release needed (3a, 3b) | retry with back-off until `send_by − hold-give-up-margin`, then `REJECTED MS03`, next `RELEASE_HOLD` |
 | `SEND` (local, no remote call) | — | if `now < send_by`: outbox `SendCreditTransfer`, `SENT_TO_CSM`, no next action | if `now ≥ send_by`: `REJECTED AB03`, next `RELEASE_HOLD` | — |
 | `ASSESS_PAYEE_RISK` (on-us) | risk, direction `INCOMING`, same payment | next `SETTLE_ON_US` | `REJECTED FR01`/`RR04`, next `RELEASE_HOLD` (4a-1) | as `ASSESS_RISK`, then `REJECTED FR01`, next `RELEASE_HOLD` |
@@ -265,11 +273,19 @@ Handled by a `PollingWorker` over `payment_timers` (100 ms). Handlers only chang
 
 | Timer | Created | When it fires |
 |---|---|---|
-| `OUTGOING_DEADLINE` at `deadline_at` | with the payment | final state or `csm_outcome` set → no-op. `RECEIVED` → `REJECTED AB03`, emit `PaymentRejected`. `RISK_CHECKED`, or `FUNDS_RESERVED` (not on-us) → `REJECTED AB03`, next `RELEASE_HOLD`. On-us in `FUNDS_RESERVED` → no-op (no scheme deadline without a CSM; its actions retry to a definitive answer). `SENT_TO_CSM` → `INVESTIGATING`, outbox `RequestPaymentStatus(attempt 1)`, schedule `INVESTIGATION_RETRY` (UC-05 1). |
-| `SETTLEMENT_OVERDUE` at `AnswerSent(ACCP).sentAt + settlement-overdue` | on `AnswerSent(ACCP)` | if still `ACCEPTED` without `csm_outcome` → `INVESTIGATING`, `RequestPaymentStatus(INCOMING, 1)`, schedule retry (UC-06 8b). |
-| `INVESTIGATION_RETRY` | after each status request | if still `INVESTIGATING` without outcome: next attempt per `investigation.backoff`; when `now − first request > investigation.budget` → open `UNRESOLVED_INVESTIGATION`, no further automatic retries (UC-05 4a, 4b). |
+| `OUTGOING_DEADLINE` at `deadline_at` | with the payment | final state or `csm_outcome` set → no-op. `RECEIVED` → `REJECTED AB03`, emit `PaymentRejected`. `RISK_CHECKED`, or `FUNDS_RESERVED` (not on-us) → `REJECTED AB03`, next `RELEASE_HOLD`. On-us in `FUNDS_RESERVED` → no-op (no scheme deadline without a CSM; its actions retry to a definitive answer). `SENT_TO_CSM` → `INVESTIGATING`, `investigation_started_at = now`, outbox `RequestPaymentStatus` (next attempt), schedule `INVESTIGATION_RETRY` (UC-05 1). |
+| `SETTLEMENT_OVERDUE` at `AnswerSent(ACCP).sentAt + settlement-overdue` | on `AnswerSent(ACCP)` | if still `ACCEPTED` without `csm_outcome` → `INVESTIGATING`, `investigation_started_at = now`, `RequestPaymentStatus(INCOMING)` (next attempt), schedule retry (UC-06 8b). |
+| `INVESTIGATION_RETRY` | after each status request | if still `INVESTIGATING` without outcome: next attempt per `investigation.backoff`; when `now − investigation_started_at > investigation.budget` → open `UNRESOLVED_INVESTIGATION`, no further automatic retries (UC-05 4a, 4b). |
 
 Recording a CSM outcome cancels all `SCHEDULED` timers of the payment.
+
+**Status request attempts.** Every `RequestPaymentStatus` of a payment carries `attempt = status_request_attempt + 1`,
+and the column is incremented in the transaction that writes the outbox row. It is never reset — not by
+`RETRY_INVESTIGATION`, not by a second investigation — because the gateway deduplicates status requests per attempt
+([02 §3](02-messaging-contracts.md#3-csmoutboundcommands-orchestrator--gateway)): a reused number would be dropped as a
+duplicate and no `pacs.028` would be sent. `RETRY_INVESTIGATION` restarts the back-off at its first value and sets
+`investigation_started_at` to the resolution time, so a further `UNRESOLVED_INVESTIGATION` case opens only after
+another full `investigation.budget`.
 
 ### 6.5 CSM event handling
 
@@ -382,3 +398,7 @@ Listener transaction: validate → inbox → load payment by `(direction, debtor
 - **ORC-AC-26** Two `CreditTransferReceived` with the same `txId` and different `debtorAgentBic` create two payments
   with different `paymentId`s and pending-credit ids; neither is deduplicated against the other, and events for one
   never change the other. (ADR-010)
+- **ORC-AC-27** Resolving an `UNRESOLVED_INVESTIGATION` as `RETRY_INVESTIGATION` after attempts 1 … n writes
+  `RequestPaymentStatus` attempt n + 1, which the gateway turns into a new `pacs.028`; retries follow the back-off
+  from its first value, and a new `UNRESOLVED_INVESTIGATION` case opens only once `investigation.budget` has passed
+  since the resolution. (UC-05 4b)

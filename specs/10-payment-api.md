@@ -70,7 +70,8 @@ Processing order (UC-01 1–8):
 2. Idempotency guard (§5.1): replay / conflict / in-progress.
 3. Validate (§5.2) → `400` with field errors.
 4. VoP reference check with vop-service (§5.3) → `422 VOP_REQUIRED`.
-5. Derive `commandId = CommandId.derive(client_id, Idempotency-Key)`; call orchestrator `POST /v1/payments`.
+5. Derive `commandId = CommandId.derive(client_id, Idempotency-Key)`; call orchestrator `POST /v1/payments` with the
+   check's `result` as `vopResult`.
 6. Orchestrator `201` or `200` → store response for the key, return `202` (same body in both cases, UC-01 6a).
 7. Orchestrator timeout / `5xx` / connect failure → delete the in-progress key, `503 ORCHESTRATOR_UNAVAILABLE`
    with `Retry-After: 1` (UC-01 5a).
@@ -196,7 +197,10 @@ CREATE TABLE payment_rejections (            -- pain.002 FF01 for XML clients
 `POST /v1/verifications/{vopReference}/check` with `{ debtorIban, payeeIban, payeeName }`. vop-service answers
 `200 { "valid": true, "result": "MATCH" }` or `200 { "valid": false, "problem": "EXPIRED" | "MISMATCH" | "UNKNOWN" }`.
 `valid = false` → `422 VOP_REQUIRED` with `problem` in `detail`. The payer may proceed with any VoP *result*
-(`NO_MATCH`, `NOT_POSSIBLE` included, UC-02 6a); only a valid, matching *reference* is required.
+(`NO_MATCH`, `NOT_POSSIBLE` included, UC-02 6a); only a valid, matching *reference* is required. The `result` of a
+valid check is passed on as `vopResult` in `SubmitPayment`: the fraud rules weigh it
+([14 §6.1](14-risk-service.md#61-fraud-rules-mvp-rule-set), `NEW_PAYEE_HIGH_AMOUNT`). It is taken from the check, never from
+the client.
 
 ## 6. Configuration
 
@@ -224,7 +228,7 @@ CREATE TABLE payment_rejections (            -- pain.002 FF01 for XML clients
 ## 8. Acceptance criteria
 
 - **API-AC-01** Valid JSON `pain.001` with a valid VoP reference → `202`, `Location` header, one `SubmitPayment`
-  with the derived `commandId`. (UC-01)
+  with the derived `commandId` and the `vopResult` returned by the reference check. (UC-01)
 - **API-AC-02** Valid XML `pain.001.001.09` produces the same `SubmitPayment` as the equivalent JSON.
 - **API-AC-03** Repeat with same key and body → same `paymentId`, no second orchestrator payment; status reflects
   the current state. (UC-01 2a)

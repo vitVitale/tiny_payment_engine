@@ -27,7 +27,7 @@ invariant checks (§3).
 | Mutation | nightly | PIT | money- and deadline-critical code is actually asserted on (§7) |
 | Telemetry contract | each service, component test | scrape `/actuator/prometheus` | every metric of [25 §11](25-service-levels.md#11-metrics-to-add) and of the service spec exists with its tags and an exact histogram bucket at every SLO threshold of [25 §5](25-service-levels.md#5-component-slos); no high-cardinality tag ([00 §11](00-engineering-baseline.md#11-logging-tracing-metrics)) |
 | Alert rules | `deploy/slo`, CI | `promtool test rules` | the burn-rate rules generated from the SLO files fire and reset as [25 §9.1](25-service-levels.md#91-burn-rate-alerts-every-slo-with-a-percentage) specifies (both windows, 100-event minimum); every cause alert of [25 §9.2](25-service-levels.md#92-cause-alerts-page-regardless-of-budget) fires on its condition and stays silent in the tolerated cases (relay overlap or gap < 5 s); fixtures include recorded series of CH runs |
-| Configuration consistency | parent, unit test over the default `application.yml` files and `deploy/slo` | JUnit | the timing order of §2.1 and the timeout headroom of [25 §7](25-service-levels.md#7-dependency-check-timeouts-against-slos): every caller timeout lies above the callee's highest-percentile SLO threshold |
+| Configuration consistency | parent, unit test over the default `application.yml` files and `deploy/slo` | JUnit | `tpe.messaging.inbox.retention` above the retention of every consumed `delete` topic ([01 §3.1](01-shared-libraries.md#31-tables-flyway-classpathdbmigrationmessaging)); the timing order of §2.1 and the timeout headroom of [25 §7](25-service-levels.md#7-dependency-check-timeouts-against-slos): every caller timeout lies above the callee's highest-percentile SLO threshold |
 | Synthetic probes | probe code of [25 §9.3](25-service-levels.md#93-low-traffic-and-synthetic-probes), run against the system-test stack on every PR | the production probes | each probe passes on a healthy stack and fails when its target is stopped |
 | Recovery drill | quarterly, staging | point-in-time restore of each tier-0 database | the restore completes, INV-1, -2 and -12 hold on the restored ledger, the restore time is measured and published ([25 §8](25-service-levels.md#8-durability-and-recovery)) |
 
@@ -69,14 +69,14 @@ Short deadlines keep the suite fast. They keep the ordering of the production va
 | orchestrator | `tpe.incoming.settlement-overdue` | `5s` | `30s` | E2E-I-08 |
 | orchestrator | `tpe.investigation.backoff` / `budget` | `500ms,1s` / `10s` | `5s,…` / `1h` | E2E-O-11 |
 | csm-gateway | `tpe.csm.answer-deadline-offset` | `2s` | `5s` | |
-| csm-gateway | `tpe.csm.answer-transmit-window` | `1s` | `5s` | must stay below the simulator `answer-timeout` |
+| csm-gateway | `tpe.csm.answer-transmit-window` | `1s` | `1s` | counted from `answer_deadline`; deadline + window must not exceed the simulator `answer-timeout` |
 | csm-simulator | `tpe.sim.timeout-deadline` / `answer-timeout` | `6s` / `3s` | `20s` / `6s` | equal to the orchestrator deadline, as in production |
 | vop-service | `tpe.vop.reference-validity` | `5s` | `30m` | E2E-O-17 (expired reference) |
 | risk-service | `tpe.risk.sanctions.poll-interval` | `1s` | `15m` | E2E-O-06, -I-11, -S-01, -S-03 |
 | notification-service | `tpe.notification.retry-schedule` / `retry-window` | `200ms,500ms,1s` / `30s` | `10s,…` / `24h` | E2E-N-01, -N-02 |
 | ledger-service | `tpe.ledger.snapshot.interval` | `5s` | `15m` | snapshots are exercised during system tests (LED-AC-11) |
 
-Ordering rule, checked by a unit test over the profile files: `send-by-offset < deadline-offset =
+Ordering rule, checked by a unit test over the default and the `systemtest` profile files: `send-by-offset < deadline-offset =
 sim.timeout-deadline`; `answer-deadline-offset + answer-transmit-window ≤ sim.answer-timeout`;
 `settlement-overdue > sim.beneficiary-delay`.
 
@@ -128,7 +128,7 @@ every PR. New ids are appended; existing ids are never renumbered ([30](30-deliv
 | E2E-O-08 | Beneficiary timeout | `TIMEOUT` | `RJCT AB05` via CSM `pacs.002`, or via investigation — either way released, never settled |
 | E2E-O-09 | No `pacs.002`, settled | `SILENT` | `INVESTIGATING` (status `PDNG`) → `pacs.028` → `ACSC`; payer debited |
 | E2E-O-10 | No `pacs.002`, unknown | `LOST` | `INVESTIGATING` → `UNKNOWN_TX` after deadline → `RJCT AB05`; released |
-| E2E-O-11 | Investigation unanswered | `SILENT` + `INVESTIGATION_SILENT` | retries, then `UNRESOLVED_INVESTIGATION` case; hold stays; status `PDNG`; operator resolves → final |
+| E2E-O-11 | Investigation unanswered | `SILENT` + `INVESTIGATION_SILENT` | retries, then `UNRESOLVED_INVESTIGATION` case; hold stays; status `PDNG`; operator resolves → final. Variant: operator chooses `RETRY_INVESTIGATION` after clearing `INVESTIGATION_SILENT` → a new `pacs.028` reaches the simulator → `ACSC` |
 | E2E-O-12 | Gateway down past `sendBy` | stop csm-gateway before submit, start it between `sendBy` and the deadline | `RJCT AB03` from `SENT_TO_CSM`; simulator received nothing |
 | E2E-O-13 | CSM unreachable past `sendBy` | simulator outage `DOWN` (variant: `RESET`) from submit until after the deadline, then `UP` | no `pacs.008` after `sendBy`; investigation → `UNKNOWN_TX` → `RJCT AB05`; released |
 | E2E-O-14 | Late contradicting `pacs.002` | `REJECT` then inject `ACSC` via raw endpoint; variant: `ACCEPT` then inject `RJCT` | first outcome kept (`RJCT` / `ACSC`); `CONTRADICTING_CSM_OUTCOME` case; no money movement after the first outcome |
@@ -136,7 +136,7 @@ every PR. New ids are appended; existing ids are never renumbered ([30](30-deliv
 | E2E-O-16 | Idempotent retry | submit twice with same key; once with lost response (Toxiproxy) | one payment |
 | E2E-O-17 | VoP required | no / expired / mismatching reference | `422 VOP_REQUIRED`; no payment |
 | E2E-O-18 | On-us payee unknown / closed / risk deny | IBAN with our bank code and no account; closed payee; payee trips `MULE_NEW_ACCOUNT` | `RJCT AC01` / `AC04` / `FR01`; hold released |
-| E2E-O-19 | Risk `REVIEW` | first payment of 6 000 EUR to a counterparty with VoP `CLOSE_MATCH` (`NEW_PAYEE_HIGH_AMOUNT`) | `RJCT FR01`; no ledger call |
+| E2E-O-19 | Risk `REVIEW` | first payment of 6 000 EUR to a counterparty with VoP `CLOSE_MATCH` (`NEW_PAYEE_HIGH_AMOUNT`); variant: VoP `MATCH` | `RJCT FR01`; no ledger call. Variant: `ACSC` |
 | E2E-O-20 | Late `pacs.002` during investigation | `LATE_STATUS:<deadline + 1s>` | `INVESTIGATING` → `ACSC` from the late `pacs.002`; the `pacs.028` answer is a no-op; one settlement |
 | E2E-O-21 | Gateway down past the deadline | stop csm-gateway before submit, start it after the deadline | `INVESTIGATING` → `CreditTransferNotSent` → `RJCT AB03`; no `pacs.028`, simulator received nothing |
 
@@ -314,7 +314,7 @@ Line coverage is a weak signal for this system; traceability and mutation score 
 | audit, retention | VOP-AC-08 | V-03 |
 | **UC-04** main | ORC-AC-02, GW-AC-01, LED-AC-05 | O-01 |
 | 2a `FR01` / `RR04` | ORC-AC-03, RSK-AC-01, -03 | O-05, O-06 |
-| 2b `REVIEW` | ORC-AC-21 | O-19 |
+| 2b `REVIEW` | ORC-AC-21, RSK-AC-11 | O-19 |
 | 2c risk unavailable | ORC-AC-04 | CH-10 |
 | 3a `AM04` | ORC-AC-05, LED-AC-03 | O-03 |
 | 3b blocked / closed payer | ORC reason mapping | O-04 |
@@ -329,7 +329,7 @@ Line coverage is a weak signal for this system; traceability and mutation score 
 | **UC-05** 1 deadline → investigation | ORC-AC-09 | O-09 |
 | 2a never sent | GW-AC-05 | O-21 |
 | 3–5 `pacs.028` answered | GW-AC-06 | O-09 |
-| 4a / 4b unanswered → case → operator | ORC-AC-09, -20 | O-11 |
+| 4a / 4b unanswered → case → operator | ORC-AC-09, -20, -27 | O-11 |
 | 4c `UNKNOWN_TX` | GW-AC-07, SIM-AC-04 | O-10, O-13 |
 | late `pacs.002` during investigation | ORC-AC-24, SIM-AC-05 | O-20 |
 | **UC-06** main | GW-AC-08, ORC-AC-14, LED-AC-07 | I-01 |
@@ -340,7 +340,7 @@ Line coverage is a weak signal for this system; traceability and mutation score 
 | 6b answer deadline | GW-AC-11, -12, -16, ORC-AC-16 | I-06, CH-04 |
 | 8a CSM rejects after `ACCP` | ORC-AC-25 | I-07 |
 | 8b no confirmation | ORC-AC-17 | I-08 |
-| identity (`debtorAgentBic`, `TxId`) | GW-AC-15, ORC-AC-26, SIM-AC-07 | I-12 |
+| identity (`debtorAgentBic`, `TxId`) | GW-AC-15, -17, ORC-AC-26, SIM-AC-07 | I-12 |
 | NFR: no dependency on VoP / notifications | NTF-AC-07 | I-13 |
 | **UC-07** status mapping | API-AC-09 | every E2E (§2) |
 | 1a not found / not owner | API-AC-05 | — |
@@ -404,9 +404,9 @@ Pacticipant names are the Maven `artifactId`s, plus the logical provider `vop-re
 
 | Id | Consumer → provider | Interface | Interactions (at least) |
 |---|---|---|---|
-| P-01 | payment-api → payment-orchestrator | `POST /v1/payments`, `GET /v1/payments/{id}` | new payment `201`; existing `commandId` `200`; `409 COMMAND_CONFLICT`; `422 CREDITOR_AGENT_NOT_REACHABLE`; status in each internal state; `404 PAYMENT_NOT_FOUND` |
+| P-01 | payment-api → payment-orchestrator | `POST /v1/payments`, `GET /v1/payments/{id}` | submit carries `vopResult`; new payment `201`; existing `commandId` `200`; `409 COMMAND_CONFLICT`; `422 CREDITOR_AGENT_NOT_REACHABLE`; status in each internal state; `404 PAYMENT_NOT_FOUND` |
 | P-02 | payment-api → vop-service | `POST /v1/verifications`, `POST /v1/verifications/{ref}/check` | `201` per result (`CLOSE_MATCH` with `actualName`); `422 PAYEE_BANK_UNKNOWN`; check `valid`, `EXPIRED`, `MISMATCH`, `UNKNOWN` |
-| P-03 | payment-orchestrator → risk-service | `POST /v1/risk/assessments` | `ALLOW`; `DENY FR01`; `DENY RR04`; `REVIEW`; replayed `assessmentId` → same decision; both directions |
+| P-03 | payment-orchestrator → risk-service | `POST /v1/risk/assessments` | outgoing requests carry `vopResult`; `ALLOW`; `DENY FR01`; `DENY RR04`; `REVIEW`; replayed `assessmentId` → same decision; both directions |
 | P-04 | payment-orchestrator → ledger-service | holds and pending credits ([12 §3.1](12-ledger-service.md)) | every success and every refusal the orchestrator maps: create hold `201` / replay `200` / `INSUFFICIENT_FUNDS` / `ACCOUNT_NOT_FOUND` / `ACCOUNT_BLOCKED` / `ACCOUNT_CLOSED` / `CUSTOMER_ID_MISSING` / `HOLD_RELEASED`; settle `200` / replay / `HOLD_RELEASED`; settle-on-us `200` / payee refusals; release `200` / unknown id (tombstone) / `409 HOLD_SETTLED`; pending credit create / confirm / cancel with the same pattern; `409 IDEMPOTENCY_CONFLICT` |
 | P-05 | risk-service → ledger-service | `GET /v1/customers/{customerId}/accounts`, `POST /v1/accounts/{id}/block`, `/unblock` | list accounts; block `SANCTIONS_PROVISIONAL` and `SANCTIONS`; unblock; repeated block; unknown account |
 | P-06 | csm-gateway → csm-simulator | `POST /csm/v1/messages` (XML envelope) | `202` for `pacs.008`, `pacs.002`, `pacs.028`; `400` for an unparsable envelope |

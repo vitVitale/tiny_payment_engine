@@ -57,7 +57,9 @@ instant-payment decision for `REVIEW` (orchestrator treats it as `DENY`).
 - `assessmentId` = `<paymentId>:<direction>` (on-us payments are assessed twice: `OUTGOING` for the payer,
   `INCOMING` for the payee). Idempotent: same id → stored decision returned.
 - `reasonCode` is `FR01` for fraud rules, `RR04` for a non-EU sanctions hit, absent for `ALLOW`.
-- `vopResult` is optional (outgoing only; orchestrator does not have it in the MVP → may be `null`).
+- `vopResult` is required for `OUTGOING`: the VoP result the payer saw, checked by payment-api and passed on by the
+  orchestrator ([10 §5.3](10-payment-api.md#53-vop-reference-check)). It is absent for `INCOMING` (on-us payee
+  assessment included). An `OUTGOING` request without it → `400 VALIDATION_FAILED`.
 - p99 ≤ 50 ms service-side. No outbound I/O except the local DB.
 
 ### 3.2 Screening case API (role `COMPLIANCE_OFFICER`)
@@ -235,3 +237,6 @@ EU-list screening is **never** done per payment (UC-09 NFR).
 - **RSK-AC-09** A newly opened account of a listed person is screened on `AccountOpened` and blocked provisionally.
 - **RSK-AC-10** Full run over 100 000 synthetic customers × 5 000 entries completes in ≤ 6 min on CI hardware
   (extrapolates to the 1 h / 1 M target).
+- **RSK-AC-11** `NEW_PAYEE_HIGH_AMOUNT`: a first payment of 6 000 EUR to a creditor IBAN with `vopResult = MATCH` →
+  `ALLOW`; the same with `CLOSE_MATCH`, `NO_MATCH` or `NOT_POSSIBLE` → `REVIEW`; an `OUTGOING` request without
+  `vopResult` → `400`. (UC-04 2b)

@@ -43,7 +43,9 @@ the stored one.
 ## 3. `csm.outbound.commands` (orchestrator → gateway)
 
 Dedup key at the gateway: `<type>:<debtorAgentBic>:<txId>` (each command type is sent at most once per payment,
-except `RequestPaymentStatus`, deduplicated as `RequestPaymentStatus:<debtorAgentBic>:<txId>:<attempt>`).
+except `RequestPaymentStatus`, deduplicated as `RequestPaymentStatus:<debtorAgentBic>:<txId>:<attempt>`). `attempt` starts
+at 1 and increases with every status request of a payment, across investigations and operator retries; it is never
+reused ([11 §6.4](11-payment-orchestrator.md#64-timers)).
 
 ### 3.1 `SendCreditTransfer` v1
 
