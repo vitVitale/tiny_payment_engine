@@ -375,6 +375,8 @@ Check digits computed with mod 97-10. Generated IBANs MUST pass `Iban` validatio
   excluding network). These calls are on the 1 s internal budget of UC-04.
 - No lost updates: a load test with 50 concurrent holds on one account never lets `available` go below 0.
 - All admin actions write `audit_log` (actor = JWT `sub`, or `risk-service` for internal calls).
+- Service levels: SLO-LED-01 … -04 in [25 §5.3](25-service-levels.md#53-ledger-service); RPO 0, RTO ≤ 30 s
+  ([25 §8](25-service-levels.md#8-durability-and-recovery)).
 
 ## 9. Acceptance criteria
 

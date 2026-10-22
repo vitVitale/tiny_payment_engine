@@ -159,7 +159,15 @@ and `actual_name` to `NULL`; delete rows older than 30 days. `responder_audit` k
 | `tpe.vop.legal-forms` | list above |
 | `tpe.vop.audit-pepper` | env var, required |
 
-## 8. Acceptance criteria
+## 8. Non-functional requirements
+
+- Reference check p99 ≤ 50 ms: it runs inside the 300 ms initiation budget of payment-api.
+- Verification ≤ 5 s by construction (responder timeout); responder p99 ≤ 1 s at 200 requests/s (UC-03).
+- Tier 0: payment-api needs a valid reference for every payment, so a vop-service outage stops initiation.
+- Metrics: `tpe.vop.requests{role,route,result,cause}`, `tpe.vop.retention.overdue`.
+- Service levels: SLO-VOP-01 … -06 in [25 §5.4](25-service-levels.md#54-vop-service); SLA-03, SLA-07 rest on them.
+
+## 9. Acceptance criteria
 
 - **VOP-AC-01** Verification of an own-customer IBAN with the exact holder name → `MATCH` without any HTTP call. (UC-02 3)
 - **VOP-AC-02** Counterparty responder slower than 5 s → `NOT_POSSIBLE` within 5.2 s, and a reference is issued. (UC-02 3a)

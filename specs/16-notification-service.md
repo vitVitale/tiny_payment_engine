@@ -150,7 +150,15 @@ Ordering of webhooks is not guaranteed; receivers use `occurredAt` / status.
 | `tpe.notification.secret-key` | env var, required |
 | `tpe.notification.dispatch.concurrency` | `64` |
 
-## 8. Acceptance criteria
+## 8. Non-functional requirements
+
+- Final event → first delivery attempt p99 ≤ 5 s; retries start ≤ 5 s after their scheduled time.
+- Never on the payment path: an outage of this service must not change any payment-path service level (UC-08 NFR).
+- Metrics: `tpe.notification.dispatch.delay{format}`, `tpe.notification.attempt.lateness{format}`,
+  `tpe.notification.deliveries{outcome}`.
+- Service levels: SLO-NTF-01 … -04 in [25 §5.7](25-service-levels.md#57-notification-service); SLA-05 rests on them.
+
+## 9. Acceptance criteria
 
 - **NTF-AC-01** `PaymentSettled` for a subscribed debtor → one signed JSON webhook with `Idempotency-Key = eventId`;
   signature verifies with the registered secret. (UC-08 1–5)

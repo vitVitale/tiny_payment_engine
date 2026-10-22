@@ -209,7 +209,16 @@ EU-list screening is **never** done per payment (UC-09 NFR).
 | `tpe.risk.rules.refresh-interval` | `30s` |
 | `tpe.clients.ledger.base-url` | `http://ledger-service:8082` |
 
-## 8. Acceptance criteria
+## 8. Non-functional requirements
+
+- Assessment p99 ≤ 50 ms service-side (§3.1). Every failed assessment rejects a payment (the orchestrator fails closed).
+- Full screening run over 1 M customers ≤ 1 h (UC-09); provisional blocks applied as hits are found (§6.3).
+- Metrics: `tpe.risk.assessment.duration{direction,decision}`, `tpe.risk.rules.age`, `tpe.sanctions.list.age`,
+  `tpe.sanctions.run.duration{type}`, `tpe.sanctions.run.last_success{type}`, `tpe.sanctions.freeze.latency`,
+  `tpe.sanctions.import.failures`.
+- Service levels: SLO-RSK-01 … -08 in [25 §5.5](25-service-levels.md#55-risk-service); the regulatory SLA-08 rests on them.
+
+## 9. Acceptance criteria
 
 - **RSK-AC-01** Each rule in §6.1 has an allow and a deny example; decision aggregation follows the stated order.
 - **RSK-AC-02** Same `assessmentId` twice → same stored decision, one row.

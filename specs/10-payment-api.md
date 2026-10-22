@@ -212,6 +212,8 @@ CREATE TABLE payment_rejections (            -- pain.002 FF01 for XML clients
 - Stateless apart from the idempotency DB; horizontally scalable.
 - Metrics: `tpe.api.requests{endpoint,status}`, `tpe.api.idempotency{outcome=new|replay|reused|in_progress}`.
 - Request bodies are never logged.
+- Service levels: SLO-API-01 … -05 in [25 §5.1](25-service-levels.md#51-payment-api); the customer-channel SLAs
+  SLA-01 … -03 in [25 §4](25-service-levels.md#4-slas) rest on them.
 
 ## 8. Acceptance criteria
 

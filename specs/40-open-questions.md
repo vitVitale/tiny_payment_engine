@@ -34,6 +34,11 @@ every proposal, so development can start. Each question is in one of these state
 | Q-18 | Package and group naming | `com.tpe` | Assumption | M0 |
 | Q-19 | Notifications for rejected incoming payments | event emitted, not delivered | Assumption | notifications track |
 | Q-20 | Gateway transmission rule | send-by checked before every attempt; never attempted ⇒ not sent | Decided — [ADR-011](../architecture/decisions/ADR-011-send-by-guard-per-transmission.md) | M3 |
+| Q-21 | SLO and SLA figures | SLOs and SLAs of [25](25-service-levels.md) | SLOs: Assumption · SLAs: Needs input (product owner, compliance, payments operations) | M5 |
+| Q-22 | Funds availability for incoming payments | booked on `CreditTransferSettled`; SLO measured from there | Needs input (compliance) | M4 |
+| Q-23 | Synthetic probes in production | read-only probes; 0.01 EUR on-us probe only if approved | Needs input (compliance, accounting) | M5 |
+| Q-24 | Service token lifetime and IdP availability | refresh at 50 % of lifetime, alert on refresh failure; lifetime open | Needs input (security) | M5 |
+| Q-25 | Back-office and compliance staffing | exception cases acknowledged ≤ 1 h in staffed hours, resolved ≤ 1 business day | Needs input (payments operations) | before production |
 
 ## Details
 
@@ -239,3 +244,59 @@ support calls.
 See [ADR-011](../architecture/decisions/ADR-011-send-by-guard-per-transmission.md). Summary: the send-by check runs before
 every transmission attempt, not only when the command is consumed. A transfer journalled as *sent* but never
 attempted (gateway crash) becomes *not sent* as soon as the send-by time passes, without waiting for an investigation.
+
+### Q-21 SLO and SLA figures
+
+**Context.** The architecture and the use cases give latency targets but no availability targets, and nothing says
+what the engine promises to its channels, the scheme or compliance. [25](25-service-levels.md) derives both from the
+scheme timings, the use-case NFRs and the target load (Q-13).
+
+**Proposal.** The SLOs of [25 §5](25-service-levels.md#5-component-slos) (tier 0 at 99.99 % per component, 99.95 % for
+the customer journeys) and the SLAs of [25 §4](25-service-levels.md#4-slas), each looser than its SLO.
+
+**Decision needed.** SLOs: confirm, then recalibrate once with the M5 performance runs. SLAs: each party confirms its
+row (channel teams SLA-01 … -05, payments operations for the scheme SLA-06 / -07, compliance SLA-08).
+
+### Q-22 Funds availability for incoming payments
+
+**Context.** The ledger books an incoming payment when the CSM reports settlement (`CONFIRM_CREDIT` after
+`CreditTransferSettled`); until then it is a pending credit and not available to the payee
+([ADR-005](../architecture/decisions/ADR-005-ledger-booking-model.md)). SLO-ORC-05 therefore measures funds
+availability from the settlement report.
+
+**Decision needed.** Compliance confirms against the current SCT Inst rulebook and Regulation (EU) 2024/886 whether
+funds must be available from the settlement report (current design) or already from our positive confirmation. If
+the latter, the booking model and CUJ-4 change, not only the SLO.
+
+### Q-23 Synthetic probes in production
+
+**Context.** At low traffic, burn-rate alerts have too few events, and server-side metrics do not see ingress
+failures ([25 §9.3](25-service-levels.md#93-low-traffic-and-synthetic-probes)).
+
+**Proposal.** Read-only probes (own-bank VoP verification, status of a fixed payment) every 30 s from outside the
+cluster. An on-us payment of 0.01 EUR every minute between two probe customer accounts would test the whole outgoing
+path, but it creates real postings and needs probe customers with a `customerId`.
+
+**Decision needed.** Compliance and accounting approve or refuse the payment probe; read-only probes need no approval.
+
+### Q-24 Service token lifetime and IdP availability
+
+**Context.** [ADR-012](../architecture/decisions/ADR-012-service-and-staff-authentication.md) gives service tokens a
+5 min lifetime. Once internal authentication is mandatory, an IdP outage longer than the time between refresh and
+expiry stops every internal call, so the IdP becomes a tier-0 dependency ([25 §13](25-service-levels.md#13-risks-and-what-to-revisit) R-3).
+
+**Options.** (a) Keep 5 min, refresh at 50 %, IdP SLO 99.99 %. (b) 30 min lifetime, refresh at 50 % — rides through a
+15 min IdP outage at the cost of a longer window for a leaked token. (c) mTLS for service identity, tokens only for
+staff.
+
+**Decision needed.** Security chooses; amend ADR-012.
+
+### Q-25 Back-office and compliance staffing
+
+**Context.** Exception cases (orchestrator) hold customer money or contradict the CSM; screening cases keep a
+customer provisionally frozen. Their resolution time is a human service level (OLA-ORC-01 in
+[25 §5.2](25-service-levels.md#52-payment-orchestrator)).
+
+**Decision needed.** Staffed hours of back office and compliance, and whether OLA-ORC-01 (acknowledge ≤ 1 h, resolve
+≤ 1 business day) is achievable. Cases that need engineering (`LEDGER_ACTION_STUCK`, `DLT_MESSAGE` on `csm.*`) page
+on-call 24/7 regardless.

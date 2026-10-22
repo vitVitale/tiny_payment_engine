@@ -162,9 +162,18 @@ row, and issues `NOTIFY tpe_outbox` (delivered at commit by PostgreSQL).
 
 - **Single active relay per service** ([ADR-006](../architecture/decisions/ADR-006-ordered-outbox-relay.md)). Each
   instance tries `pg_try_advisory_lock(hashtext('<service>-outbox'))` on a dedicated connection that is never returned
-  to the pool; only the holder publishes. Others retry every 2 s. Reason: two relays publishing different batches
+  to the pool; only the holder publishes. Others retry every 1 s. Reason: two relays publishing different batches
   concurrently could reorder messages of the same key (e.g. `SendCreditTransfer` before `RequestPaymentStatus`),
   which ADR-004 relies on.
+- **Bounded failover** ([ADR-006 amendment](../architecture/decisions/ADR-006-ordered-outbox-relay.md#amendment-2026-10-22-bounded-failover)):
+  the lock connection runs `SET idle_session_timeout = '3s'`; the leader sends `SELECT 1` on it every 1 s, but only
+  while its publish loop has completed an iteration (a failed send with back-off counts) within the last 2 s. A stalled
+  loop stops heartbeating, closes the lock connection and reports not live. Before each batch the leader checks that
+  its last heartbeat succeeded; if not, it stops publishing and rejoins as a follower on a new connection. Gauge
+  `tpe.relay.active` is 1 on the leader. Config: `tpe.messaging.outbox.lock-session-timeout` (`3s`),
+  `.heartbeat-interval` (`1s`), `.takeover-retry` (`1s`), `.stall-after` (`2s`).
+- **No skipping:** the relay MUST read from the oldest unpublished row in `id` order — no `SKIP LOCKED`, no
+  relay-local offset. An old and a new leader overlapping after a failover then produce duplicates, never reordering.
 - **Visibility window:** `BIGSERIAL` ids can commit out of order, so the relay reads only rows with
   `created_at < now() − 20 ms` (configurable `tpe.messaging.outbox.visibility-window`). A row that commits later than
   that is still published, just after rows with higher ids of *other* keys; rows of the same key are written by
@@ -233,6 +242,10 @@ retries, notification retries, ledger snapshot job.
 - **MSG-AC-05** A handler failing with a DB exception is retried until the DB is back; no message reaches the DLT.
 - **MSG-AC-06** The same message consumed twice produces exactly one business effect.
 - **MSG-AC-07** p99 publish latency < 50 ms at 300 inserts/s on the CI Testcontainers setup.
+- **MSG-AC-08** With two instances under load: freezing the leader (container pause) or blackholing its DB traffic
+  lets the other instance publish within 5 s; after unfreezing, the old leader stops before its next batch, per-key
+  order on the consumer is kept and only duplicates appear; a leader whose publish loop is blocked hands over within
+  5 s and reports not live. (ADR-006 amendment)
 
 ## 4. `contracts`
 

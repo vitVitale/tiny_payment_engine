@@ -327,7 +327,9 @@ Listener transaction: validate → inbox → load payment by `(direction, debtor
 - Horizontally scalable: no in-memory state that matters; any instance can run any action or timer.
 - Metrics: `tpe.payment.duration{direction,outcome}` (accepted → final), `tpe.saga.action.duration{action,result}`,
   `tpe.payment.state{direction,state}` (gauge of non-final payments), `tpe.timer.fired{type}`,
-  `tpe.exception.cases.open{type}`, `tpe.deadline.reject{reason}`.
+  `tpe.exception.cases.open{type}`, `tpe.deadline.reject{reason}`, plus `tpe.payment.stage.duration` and
+  `tpe.payment.rejected` ([25 §11](25-service-levels.md#11-metrics-to-add)).
+- Service levels: SLO-ORC-01 … -10 and OLA-ORC-01 in [25 §5.2](25-service-levels.md#52-payment-orchestrator).
 
 ## 9. Acceptance criteria
 

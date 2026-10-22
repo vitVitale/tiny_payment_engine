@@ -261,7 +261,9 @@ Incoming: final status known → re-publish; else `pacs.028` as above; no record
 - Deployable with ≥ 2 instances; all coordination through the DB.
 - Metrics: `tpe.csm.messages{direction,type}`, `tpe.csm.notsent{reason}`, `tpe.csm.answer{status,decidedBy}`,
   `tpe.csm.verdict.ignored`, `tpe.csm.answer.margin` (deadline − answered_at, histogram),
-  `tpe.csm.transmit.attempts{type}`, `tpe.csm.uncorrelated`.
+  `tpe.csm.transmit.attempts{type}`, `tpe.csm.uncorrelated`, plus `tpe.csm.stage.duration`
+  ([25 §11](25-service-levels.md#11-metrics-to-add)).
+- Service levels: SLO-GW-01 … -09 in [25 §5.6](25-service-levels.md#56-csm-gateway); the scheme SLA-06 rests on them.
 
 ## 9. Acceptance criteria
 

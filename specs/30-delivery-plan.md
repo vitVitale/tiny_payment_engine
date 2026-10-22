@@ -27,7 +27,7 @@ notifications track exit, then apply to every scenario already green. Scenarios 
 | Repo & build | parent POM, Maven wrapper, module skeletons for all services / libs, Enforcer + ArchUnit rules, CI pipeline (build, test, plantuml check, AC traceability check of [20 §1](20-testing-strategy.md#1-test-levels)) | M | [00 §1, §3, §14](00-engineering-baseline.md) |
 | Local stack | `deploy/docker-compose.yml` (PostgreSQL with per-service DBs, Kafka KRaft + topic init, mock OAuth2), `local` profiles | S | [00 §13](00-engineering-baseline.md#13-local-development) |
 | `payment-domain` | value objects, reason codes, ids, `MutableClock`, `BankDirectory` | M | [01 §1](01-shared-libraries.md#1-payment-domain) |
-| `messaging` | outbox writer + single-leader relay, inbox, error handler + DLT, `PollingWorker`, metrics; MSG-AC-01…07 | L | [01 §3](01-shared-libraries.md#3-messaging) |
+| `messaging` | outbox writer + single-leader relay, inbox, error handler + DLT, `PollingWorker`, metrics; MSG-AC-01…08 | L | [01 §3](01-shared-libraries.md#3-messaging) |
 | `contracts` | all records of [02](02-messaging-contracts.md) + golden samples; internal REST DTOs added per milestone | M | [01 §4](01-shared-libraries.md#4-contracts) |
 | `iso20022-model` | XSDs, JAXB generation, codec, envelope, XXE-safe validator; builders added in M3 / M4 | M | [01 §2](01-shared-libraries.md#2-iso20022-model) |
 | Observability baseline | structured logs, MDC, OTel, actuator endpoints in a shared Spring Boot starter config | S | [00 §11](00-engineering-baseline.md#11-logging-tracing-metrics) |
@@ -95,10 +95,10 @@ Exit: E2E-I-01 … -10, -12, -13 green; GW-AC-12 race test; CH-04 green; pacts P
 
 | Epic | Stories |
 |---|---|
-| Failure injection | Toxiproxy wiring, CH-01 … CH-11 nightly |
+| Failure injection | Toxiproxy wiring, CH-01 … CH-13 nightly |
 | Test gates | schema-compatibility job against the previous release, PIT mutation gate, nightly soak with invariant sweeps ([20 §1, §6, §7](20-testing-strategy.md)) |
 | Performance | Gatling profile of [20 §6](20-testing-strategy.md#6-performance), tuning of `sendBy` / answer deadline from measured latency (ADR-002 / ADR-004 consequence) |
-| Operations | dashboards (payment latency vs 10 s budget, consumer lag, DLT, open cases, timer lag), alert rules |
+| Operations | SLI metrics of [25 §11](25-service-levels.md#11-metrics-to-add), SLO definition files and generated burn-rate rules ([25 §9](25-service-levels.md#9-alerting)), dashboards (budget remaining per SLO, payment latency vs 10 s budget, consumer lag, DLT, open cases, timer lag), production invariant checks ([25 §6](25-service-levels.md#6-correctness-invariants-zero-budget)), error-budget policy agreed ([25 §10](25-service-levels.md#10-error-budget-policy)) |
 | Cross-cutting gaps | decisions for the open items of the architecture README (service auth, HA, liquidity) — ADRs before code |
 
 Exit: full catalogue + chaos + performance targets green on `main` for 5 consecutive nightly runs.
