@@ -25,6 +25,11 @@ invariant checks (§3).
 | Failure injection | `tests/system-tests` (`@Chaos`, nightly) | Toxiproxy between services / Kafka / DB, container pause / kill | §5 |
 | Performance | `tests/system-tests/perf` (nightly) | Gatling | §6 |
 | Mutation | nightly | PIT | money- and deadline-critical code is actually asserted on (§7) |
+| Telemetry contract | each service, component test | scrape `/actuator/prometheus` | every metric of [25 §11](25-service-levels.md#11-metrics-to-add) and of the service spec exists with its tags and an exact histogram bucket at every SLO threshold of [25 §5](25-service-levels.md#5-component-slos); no high-cardinality tag ([00 §11](00-engineering-baseline.md#11-logging-tracing-metrics)) |
+| Alert rules | `deploy/slo`, CI | `promtool test rules` | the burn-rate rules generated from the SLO files fire and reset as [25 §9.1](25-service-levels.md#91-burn-rate-alerts-every-slo-with-a-percentage) specifies (both windows, 100-event minimum); every cause alert of [25 §9.2](25-service-levels.md#92-cause-alerts-page-regardless-of-budget) fires on its condition and stays silent in the tolerated cases (relay overlap or gap < 5 s); fixtures include recorded series of CH runs |
+| Configuration consistency | parent, unit test over the default `application.yml` files and `deploy/slo` | JUnit | the timing order of §2.1 and the timeout headroom of [25 §7](25-service-levels.md#7-dependency-check-timeouts-against-slos): every caller timeout lies above the callee's highest-percentile SLO threshold |
+| Synthetic probes | probe code of [25 §9.3](25-service-levels.md#93-low-traffic-and-synthetic-probes), run against the system-test stack on every PR | the production probes | each probe passes on a healthy stack and fails when its target is stopped |
+| Recovery drill | quarterly, staging | point-in-time restore of each tier-0 database | the restore completes, INV-1, -2 and -12 hold on the restored ledger, the restore time is measured and published ([25 §8](25-service-levels.md#8-durability-and-recovery)) |
 
 ## 2. Rules for writing tests
 
@@ -36,6 +41,12 @@ invariant checks (§3).
 - Every system test ends with the **per-test global invariant checks** (§3) — failures there are always release blockers.
 - Every E2E test asserts what the customer sees, not only internal state: the status through payment-api
   (UC-07 mapping) and the webhook outcome (INV-13).
+- Every E2E test that ends in a rejection also asserts the `cause` tag of `tpe.payment.rejected`
+  ([25 §11](25-service-levels.md#11-metrics-to-add)), because a wrong tag silently moves SLO-ORC-06: `BUSINESS` for a
+  refusal by a rule or an account state (`AM04`, `AC01` / `AC04` / `AC06`, `FR01` / `RR04` from a rule), `TECHNICAL`
+  for our own failures (`MS03`, `AB03` with `NOT_SENT`, `FR01` after a risk timeout, incoming `AB05` decided by our
+  answer deadline), `EXTERNAL` for rejections received from the CSM or the Beneficiary PSP (including outgoing `AB05`).
+  VoP scenarios assert the `cause` tag of `tpe.vop.requests` the same way (`LOCAL` vs `EXTERNAL`).
 - Test data: unique IBANs / customer ids per test (`TestData.newCustomer()`), no shared fixtures that tests mutate.
   Shared resources — the `CSM_SETTLEMENT` and `FUNDING` accounts, Kafka topics, the simulator — are asserted on only
   for the test's own `paymentId`s / `TxId`s, never as totals (totals are checked by the nightly soak only).
@@ -74,7 +85,12 @@ Performance runs (§6) use the **default** values, never this profile.
 ## 3. Global invariants
 
 Per-test invariants are asserted after every system test for the test's own transactions. The nightly soak (§6)
-asserts all of them every 5 minutes over the whole database, plus the totals marked *soak*.
+asserts all of them every 5 minutes over the whole database, plus the totals marked *soak*. In production the
+money-related ones run continuously as reconciliation checks ([25 §6](25-service-levels.md#6-correctness-invariants-zero-budget)).
+
+Each check has one implementation, used by the system tests, the soak and the production checks, and each has a
+**negative test**: a test database seeded with exactly that violation must make the check fail. A check that cannot
+fire would report a clean system forever.
 
 | # | Invariant | How it is checked |
 |---|---|---|
@@ -159,23 +175,44 @@ every PR. New ids are appended; existing ids are never renumbered ([30](30-deliv
 ## 5. Failure-injection scenarios
 
 Run nightly with a steady load of 20 payments/s (both directions) and assert the global invariants after the system
-is quiesced:
+is quiesced.
 
-| Id | Injection | Specifically checks |
-|---|---|---|
-| CH-01 | Kill a random payment-orchestrator instance every 30 s | saga resume (ADR-003, ADR-008) |
-| CH-02 | Kill csm-gateway instance during sends | INV-5, `GAVE_UP` with 0 attempts → `NOT_SENT` (ADR-011) |
-| CH-03 | Pause outbox relay (orchestrator) for 15 s | ADR-004 send-by race: no `pacs.008` after `sendBy` |
-| CH-04 | Delay `csm.outbound.commands` consumption past the answer deadline | ADR-004 answer race: INV-6 |
-| CH-05 | Ledger latency 2 s / ledger down 30 s | holds give up correctly (`MS03`), settlements retried, no stuck holds after recovery; on-us payments past `FUNDS_RESERVED` end on a ledger answer, never `AB03` ([Q-15](40-open-questions.md#q-15-on-us-payments-and-the-20-s-deadline)) |
-| CH-06 | PostgreSQL failover / restart of one service DB | consumers block and resume, no DLT |
-| CH-07 | Kafka broker restart | no message loss (INV-7 counts) |
-| CH-08 | Clock skew +200 ms on gateway (twice the limit of [00 §6](00-engineering-baseline.md#6-time), on purpose) | margins hold; no invariant broken |
-| CH-09 | Reset the consumer groups of orchestrator, gateway and notification-service to the start of the test window | redelivery has no business effect: no new `pacs.008` / answer, INV-7 and INV-13 counts unchanged |
-| CH-10 | risk-service down for 30 s | outgoing `RJCT FR01` (fail closed); incoming answered `RJCT` (`FR01` or `AB05`) before the answer deadline; nothing settled without an `ALLOW` |
-| CH-11 | Kill the active outbox relay of orchestrator and gateway | per-key order kept: no `RequestPaymentStatus` processed before its `SendCreditTransfer` (ADR-006) |
-| CH-12 | Stop every notification-service instance for 10 min, then start them | isolation (UC-08 NFR): no tier-0 SLI of [25 §5](25-service-levels.md#5-component-slos) moves during the outage; after restart the `payments.events` lag is back under 10 s within 5 min and INV-13 holds |
-| CH-13 | Lose the active outbox relay without closing its socket, for orchestrator and gateway: (a) `docker pause` the leader for 15 s, then unpause; (b) Toxiproxy blackhole on the leader's DB traffic for 15 s | another instance publishes within 5 s (SLO-MSG-02); no `AB03` (SLO-GW-03) and no `DEADLINE` answers (SLO-GW-05); after (a) the old leader stops before its next batch: per-key order kept, `tpe.inbox.duplicates` may rise, INV-7 counts unchanged ([ADR-006 amendment](../architecture/decisions/ADR-006-ordered-outbox-relay.md#amendment-2026-10-22-bounded-failover)) |
+Rules:
+
+- **Environment.** Not the local compose stack. Tier-0 databases run as primary + synchronous standby with automatic
+  failover ([25 §8](25-service-levels.md#8-durability-and-recovery)); Kafka runs 3 brokers with RF 3 and
+  `min.insync.replicas=2` ([02 §2](02-messaging-contracts.md#2-topics)); every tier-0 service runs two instances;
+  Prometheus evaluates the generated SLO and cause alert rules ([25 §9](25-service-levels.md#9-alerting)) and sends
+  them to an Alertmanager receiver stub. Without this, CH-06, CH-07 and the page assertions test nothing.
+- **Timing.** Default (production) values, not `systemtest`: the scenarios check that the real margins of
+  [25 §3.2](25-service-levels.md#32-outgoing-latency-budget-scheme-target-10-s-sendby-10-s-deadline-20-s) absorb the
+  failure.
+- **Budget.** Each run reports the error budget consumed per SLO of [25 §5](25-service-levels.md#5-component-slos),
+  computed with the SLI queries of `deploy/slo/<service>.yml` over the run window ([25 §12](25-service-levels.md#12-verification)).
+  The "Specifically checks" column holds hard expectations; budget figures are compared with earlier runs, and a rise
+  of more than 50 % is investigated.
+- **Pages.** Each scenario lists the pages it must raise. Any other page during the run fails it. The recorded
+  series of each run are kept as fixtures for the alert-rule tests (§1).
+
+| Id | Injection | Specifically checks | Expected pages |
+|---|---|---|---|
+| CH-01 | Kill a random payment-orchestrator instance every 30 s | saga resume (ADR-003, ADR-008); no `AB03` (SLO-GW-03), no `DEADLINE` answers (SLO-GW-05) | none |
+| CH-02 | Kill a csm-gateway instance during sends every 30 s (one instance always alive) | INV-5; transmissions claimed by the killed instance are taken over after the 2 s lease, before `sendBy`: no `AB03`, no `DEADLINE` answers. The never-attempted path of ADR-011 needs every gateway down until `sendBy`; GW-AC-04, E2E-O-12 and -O-21 cover it | none |
+| CH-03 | Block Kafka produce of every orchestrator instance for 15 s (Toxiproxy) | ADR-004 send-by race: no `pacs.008` after `sendBy`; payments whose `sendBy` passed during the block end `AB03` with `NOT_SENT`. Leadership does not flap: failed sends count as relay progress, `tpe.relay.active` stays on one instance ([ADR-006 amendment](../architecture/decisions/ADR-006-ordered-outbox-relay.md#amendment-2026-10-22-bounded-failover)) | burn of SLO-GW-03 / SLO-ORC-06 allowed |
+| CH-04 | Delay `csm.outbound.commands` consumption past the answer deadline | ADR-004 answer race: INV-6 | burn of SLO-GW-05 / SLO-GW-09 allowed |
+| CH-05 | Ledger latency 2 s / ledger down 30 s | holds give up correctly (`MS03`), settlements retried, no stuck holds after recovery; technical rejections only during the outage (SLO-ORC-06); on-us payments past `FUNDS_RESERVED` end on a ledger answer, never `AB03` ([Q-15](40-open-questions.md#q-15-on-us-payments-and-the-20-s-deadline)) | burn of SLO-LED-01 / SLO-ORC-06 allowed |
+| CH-06 | Fail over the primary of one tier-0 database (each run takes the next of `payments`, `ledger`, `csm`, `risk`) | RPO 0: every request acknowledged before the failover (`201` / `202` / ledger `200` / Kafka ack) exists afterwards; errors only within RTO ≤ 30 s, measured and reported; consumers block and resume, no DLT | burn of the affected service's availability SLO; "Synchronous standby missing" until the old primary rejoins |
+| CH-07 | Restart one Kafka broker; variant: lose one broker for 10 min | no message loss (INV-7 counts); produce stays available with `acks=all` (SLO-PLT-02) | none |
+| CH-08 | Clock skew +200 ms on gateway (twice the limit of [00 §6](00-engineering-baseline.md#6-time), on purpose) | margins hold; no invariant broken | "Clock offset" SEV-1 |
+| CH-09 | Reset the consumer groups of orchestrator, gateway and notification-service to the start of the test window — the recovery runbook of [25 §8](25-service-levels.md#8-durability-and-recovery) | redelivery has no business effect: no new `pacs.008` / answer, INV-7 and INV-13 counts unchanged; `tpe.inbox.duplicates` rises | none |
+| CH-10 | risk-service down for 30 s | outgoing `RJCT FR01` (fail closed); incoming answered `RJCT` (`FR01` or `AB05`) before the answer deadline; nothing settled without an `ALLOW`; technical rejections only during the outage (SLO-ORC-06) | burn of SLO-RSK-01 / SLO-ORC-06 allowed |
+| CH-11 | Kill the active outbox relay of orchestrator and gateway | per-key order kept: no `RequestPaymentStatus` processed before its `SendCreditTransfer` (ADR-006); no `AB03`, no `DEADLINE` answers | none |
+| CH-12 | Stop every notification-service instance for 10 min, then start them | isolation (UC-08 NFR): no tier-0 SLI of [25 §5](25-service-levels.md#5-component-slos) moves during the outage; after restart the `payments.events` lag is back under 10 s within 5 min and INV-13 holds | SLO-NTF-01 fast burn only |
+| CH-13 | Lose the active outbox relay without closing its socket, for orchestrator and gateway: (a) `docker pause` the leader for 15 s, then unpause; (b) Toxiproxy blackhole on the leader's DB traffic for 15 s | another instance publishes within 5 s (SLO-MSG-02); no `AB03` (SLO-GW-03) and no `DEADLINE` answers (SLO-GW-05); after (a) the old leader stops before its next batch: per-key order kept, `tpe.inbox.duplicates` may rise, INV-7 counts unchanged ([ADR-006 amendment](../architecture/decisions/ADR-006-ordered-outbox-relay.md#amendment-2026-10-22-bounded-failover)) | none: neither "No active relay" (gap ≤ 5 s) nor "Two active relays" (overlap < 5 s) |
+| CH-14 | Stop every vop-service instance for 2 min | tier-0 dependency ([25 §2](25-service-levels.md#2-service-tiers)): initiation answers `503 VOP_UNAVAILABLE` with `Retry-After`; a retry with the same key after recovery gives `202` and one payment; accepted and incoming payments are unaffected | burn of SLO-API-01 / -05 and SLO-VOP-01 / -02 allowed |
+| CH-15 | Rolling upgrade from the last release to this commit under the chaos load: migrations first, then every service one instance at a time | the 24/7 rule end to end: mixed versions ([00 §9](00-engineering-baseline.md#9-database-and-migrations), §10.3), consumer rebalances ([25 §13](25-service-levels.md#13-risks-and-what-to-revisit) R-2): no `AB03`, no `DEADLINE` answers, `csm.*` lag within SLO-ORC-09 / SLO-GW-09 | none |
+| CH-16 | Identity provider unavailable for 15 min with internal authentication enabled (from M5) | internal calls keep working for at least the token refresh lead; refresh failures alert ([25 §13](25-service-levels.md#13-risks-and-what-to-revisit) R-3). Pass criteria pending [Q-24](40-open-questions.md#q-24-service-token-lifetime-and-idp-availability) | token refresh failure |
+| CH-17 | Publish one undeserialisable record to `csm.inbound.events` | the record reaches the DLT after 3 attempts and the next message is processed (MSG-AC-04 at system level); a `DLT_MESSAGE` case is opened; INV-9 is waived for this record only | "DLT message" SEV-2 |
 
 ## 6. Performance
 
@@ -184,25 +221,57 @@ outgoing / incoming mix, 10 % on-us, 5 % scenario rejections (`REJECT:AC04`) so 
 
 Rules:
 
-- Default timing configuration (not `systemtest`); the numbers feed the `sendBy` / answer-deadline tuning of M5.
+- Same environment as §5 and default timing configuration (not `systemtest`); the numbers feed the `sendBy` /
+  answer-deadline tuning of M5 and the SLO recalibration of [25 §10](25-service-levels.md#10-error-budget-policy).
+- SLOs are evaluated from the services' own metrics with the SLI queries of `deploy/slo/<service>.yml` — the queries
+  that drive production alerts, so the run validates them too. Gatling's client-side percentiles are reported
+  alongside; a gap of more than 50 ms at p99 between the two views of an endpoint is investigated
+  ([25 §13](25-service-levels.md#13-risks-and-what-to-revisit) R-4).
+- A run fails if any target below is missed. Every SLO is reported by id with the value achieved, because every SLO
+  must stay looser than what the component achieves ([25 §1](25-service-levels.md#1-terms-and-rules)).
+- The simulator's own processing overhead beyond its configured delays is reported; above 10 ms p99 the run is
+  invalid ([25 §5.10](25-service-levels.md#510-csm-simulator)).
 - Test data must not trip velocity or mule rules unintentionally: at least 12 000 funded payers (≤ 20 outgoing
   payments each per hour at 60/s), amounts sized so no payer exceeds `VELOCITY_AMOUNT_24H` over the run, and
   creditor accounts older than 7 days, all seeded before the run. Rules stay enabled so their cost is measured.
 - Nightly: 30 min sustained + 5 min peak, invariants (§3, including *soak* totals) every 5 min. Weekly: 8 h soak.
+- Weekly **capacity test**: from 100/s, add 50/s every 5 min until an SLO is missed or errors appear. It records the
+  saturation throughput of every tier-0 service and the maximum throughput of each outbox relay — the denominators of
+  the capacity alert ([25 §9.2](25-service-levels.md#92-cause-alerts-page-regardless-of-budget)) and the check of the
+  4–8× relay headroom assumed in R-5.
 
-| Metric | Target | Source |
+Targets: the latency SLOs of [25 §5](25-service-levels.md#5-component-slos) at the same thresholds, plus stricter
+zero targets where a bad event costs a scheme obligation. Availability SLOs of tier 0 are reported and must hold
+over the run window.
+
+| Id | Measure | Target (main / tail) |
 |---|---|---|
-| `POST /v1/payments` p99 | ≤ 300 ms | UC-01 |
-| `GET /v1/payments/{id}` p99 | ≤ 200 ms | UC-07 |
-| accepted → `SendCreditTransfer` in outbox p99 | ≤ 1 s | UC-04, [11 §8](11-payment-orchestrator.md#8-non-functional-requirements) |
-| incoming `pacs.008` received → answer sent p99 | ≤ 2 s | UC-06 |
-| accepted → `SETTLED` p99 (simulator beneficiary delay 300 ms) | ≤ 3 s | |
-| answers decided by `DEADLINE` under peak | 0 | ADR-004 |
-| `pacs.008` not sent (`AB03`) under peak | 0 | ADR-004 |
-| `csm.*` consumer lag | < 1 s (alert threshold of ADR-002) | |
-| VoP responder p99 at 200 req/s | ≤ 1 s | UC-03, VOP-AC-09 |
-| risk assessment p99 | ≤ 50 ms | RSK-AC-04 |
-| full sanctions run, 100 000 customers × 5 000 entries | ≤ 6 min | RSK-AC-10 |
+| SLO-API-02 | `POST /v1/payments` | 99 % ≤ 300 ms / 99.9 % ≤ 1 s |
+| SLO-API-04 | `GET /v1/payments/{id}` | 99 % ≤ 200 ms |
+| SLO-API-05 | `POST /v1/payee-verifications` | 99.9 % ≤ 5.5 s |
+| SLO-ORC-02 | orchestrator submit and status | 99 % ≤ 50 ms |
+| SLO-ORC-03 | accepted → `SendCreditTransfer` in outbox; on-us accepted → `SETTLED` | 99 % ≤ 1 s / 99.99 % ≤ 5 s |
+| SLO-ORC-04 | `CreditTransferReceived` consumed → verdict in outbox | 99 % ≤ 1.2 s / 99.99 % ≤ 3 s |
+| SLO-ORC-05 | CSM outcome consumed → ledger effect and final event | 99 % ≤ 500 ms / 99.99 % ≤ 5 s |
+| SLO-ORC-07, CUJ-3 | outgoing accepted → final (simulator beneficiary delay 300 ms) | 99 % ≤ 3 s / 99.9 % ≤ 20 s |
+| SLO-ORC-08 | timer and sweeper lag ≤ 500 ms | 99.9 % of minutes |
+| SLO-ORC-09, SLO-GW-09 | `csm.*` consumer lag ≤ 1 s | 99.9 % of minutes |
+| SLO-LED-02 | posting operation, service-side | 99 % ≤ 50 ms / 99.99 % ≤ 200 ms |
+| SLO-VOP-01 | reference check | 99 % ≤ 50 ms |
+| SLO-VOP-02 | own-bank verification | 99 % ≤ 200 ms |
+| SLO-VOP-04 | responder at 200 req/s (separate load step) | 99 % ≤ 1 s / 99.9 % ≤ 2 s |
+| SLO-RSK-02 | risk assessment, service-side | 99 % ≤ 50 ms / 99.99 % ≤ 250 ms |
+| SLO-GW-02 | command consumed → `pacs.008` accepted by the CSM | 99 % ≤ 100 ms / 99.99 % ≤ 2 s |
+| SLO-GW-03 | `pacs.008` not sent (`AB03`) under peak | 0 |
+| SLO-GW-04 | inbound `pacs.008` → event in outbox | 99 % ≤ 50 ms |
+| SLO-GW-05 | answers decided by `DEADLINE` under peak | 0 |
+| SLO-GW-06 | `pacs.008` received → answer transmitted (`answer.margin` ≥ 3 s) | 99 % ≤ 2 s / 99.99 % before the deadline |
+| SLO-GW-07 | answer-deadline worker lag | 99 % of minutes ≤ 100 ms |
+| SLO-GW-08 | inbound `pacs.002` → event in outbox | 99 % ≤ 100 ms |
+| SLO-MSG-01 | outbox insert → Kafka ack | 99 % ≤ 50 ms / 99.99 % ≤ 1 s |
+| SLO-MSG-03 | `payments.events` lag ≤ 10 s | 99.9 % of minutes |
+| SLO-NTF-01 | final event → first webhook attempt | 99 % ≤ 5 s / 99.9 % ≤ 30 s |
+| RSK-AC-10 | full sanctions run, 100 000 customers × 5 000 entries | ≤ 6 min |
 
 ## 7. Coverage targets
 
@@ -218,6 +287,10 @@ Line coverage is a weak signal for this system; traceability and mutation score 
 | Every integration of §10.1 has a pact produced by the build and verified by its provider(s), in all three checks of §10.3 | CI traceability step and `-Ppact-verify` fail the build |
 | Every response branch a consumer handles has an interaction | review; for P-03 / P-04 checked row by row against the mapping tables of [11 §6.2](11-payment-orchestrator.md#62-pending-actions) |
 | Every business WireMock stub matches a pact interaction | `StubConformanceTest` (§10.4) |
+| Every tier-0 latency SLO of [25 §5](25-service-levels.md#5-component-slos) is reported by id in the nightly performance run | the run fails if one is missing |
+| Every generated burn-rate rule and every cause alert has an alert-rule test | CI |
+| Every invariant check has a negative test (§3) | CI |
+| Every CH scenario declares its expected pages, and every run reports the error budget consumed per SLO | review; the run fails on an undeclared page |
 | Other packages | no numeric gate; covered by component tests |
 
 ## 8. Use-case traceability
@@ -305,6 +378,7 @@ this strategy:
 | [30](30-delivery-plan.md) | every scenario of §4 / §5 assigned to a milestone or track exit; rule for scenarios that span tracks; contract-testing epic in M0 and the pacts of §10.1 in each exit | §7, §10 |
 | [00](00-engineering-baseline.md) | Pact JVM in the stack; internal REST request bodies tolerate unknown fields; `pacts/released/`; CI steps for provider verification and the forward check | §10.3 |
 | [README](README.md#definition-of-done-every-story) | Definition of Done: a new or changed integration call has a pact interaction | §10 |
+| [30](30-delivery-plan.md) | M5: chaos / performance environment, CH-01 … CH-17, capacity test, alert-rule and probe tests; telemetry contract test in the M0 observability baseline | §1, §5, §6 |
 
 Still open, at implementation time: the `application-systemtest.yml` of each service with the values of §2.1, and the
 unit test of the ordering rule.
