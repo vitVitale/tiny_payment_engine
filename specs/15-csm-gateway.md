@@ -80,6 +80,7 @@ CREATE TABLE outgoing_transfers (
   final_status     VARCHAR(10) CHECK (final_status IN ('SETTLED','REJECTED')),
   final_reason     VARCHAR(35),
   final_at         TIMESTAMPTZ,
+  trace_context    VARCHAR(55),                  -- W3C traceparent of the payment trace (ADR-014)
   version          BIGINT NOT NULL DEFAULT 0
 );
 
@@ -100,6 +101,7 @@ CREATE TABLE incoming_transfers (
   final_status     VARCHAR(10) CHECK (final_status IN ('SETTLED','REJECTED')),
   final_reason     VARCHAR(35),
   final_at         TIMESTAMPTZ,
+  trace_context    VARCHAR(55),                  -- root of the incoming payment trace (ADR-014)
   version          BIGINT NOT NULL DEFAULT 0,
   PRIMARY KEY (debtor_agent_bic, tx_id)
 );

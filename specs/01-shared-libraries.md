@@ -197,7 +197,7 @@ row, and issues `NOTIFY tpe_outbox` (delivered at commit by PostgreSQL).
 | `tpe-schema-version` | integer |
 | `tpe-occurred-at` | ISO instant of the outbox insert |
 | `tpe-producer` | service name |
-| `traceparent` | W3C trace context of the transaction that wrote the row |
+| `traceparent` | W3C trace context of the transaction that wrote the row; the relay replaces it with its `send <topic>` span. Consumers of `csm.*` continue it as parent, all others link to it ([ADR-014](../architecture/decisions/ADR-014-payment-trace-model.md)) |
 
 ### 3.5 Polling worker
 

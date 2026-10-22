@@ -39,6 +39,10 @@ every proposal, so development can start. Each question is in one of these state
 | Q-23 | Synthetic probes in production | read-only probes; 0.01 EUR on-us probe only if approved | Needs input (compliance, accounting) | M5 |
 | Q-24 | Service token lifetime and IdP availability | refresh at 50 % of lifetime, alert on refresh failure; lifetime open | Needs input (security) | M5 |
 | Q-25 | Back-office and compliance staffing | exception cases acknowledged ≤ 1 h in staffed hours, resolved ≤ 1 business day | Needs input (payments operations) | before production |
+| Q-26 | Telemetry hosting | self-hosted Grafana stack (Mimir, Loki, Tempo) on in-house object storage | Needs input (security, procurement) | M5 |
+| Q-27 | Telemetry retention and personal data | metrics 13 months, logs 30 d, traces 14 d; payment identifiers in logs and traces, no names / IBANs | Needs input (data-protection officer) | M5 |
+| Q-28 | Paging and ticketing tools | Alertmanager routes `page` to a paging tool, `ticket` to the issue tracker; tools not chosen | Needs input (payments operations) | M5 |
+| Q-29 | Telemetry stack and payment trace model | [ADR-013](../architecture/decisions/ADR-013-telemetry-stack-otel-grafana.md), [ADR-014](../architecture/decisions/ADR-014-payment-trace-model.md) | Assumption — ADRs proposed | M0 |
 
 ## Details
 
@@ -300,3 +304,44 @@ customer provisionally frozen. Their resolution time is a human service level (O
 **Decision needed.** Staffed hours of back office and compliance, and whether OLA-ORC-01 (acknowledge ≤ 1 h, resolve
 ≤ 1 business day) is achievable. Cases that need engineering (`LEDGER_ACTION_STUCK`, `DLT_MESSAGE` on `csm.*`) page
 on-call 24/7 regardless.
+
+### Q-26 Telemetry hosting
+
+**Context.** [ADR-013](../architecture/decisions/ADR-013-telemetry-stack-otel-grafana.md) chooses the Grafana stack.
+It can run self-hosted or as Grafana Cloud. Telemetry carries pseudonymous payment identifiers (`paymentId`, `txId`,
+`uetr`), so a SaaS backend is an ICT outsourcing arrangement under DORA, with data-residency and exit requirements.
+
+**Proposal.** Self-hosted (Mimir, Loki, Tempo, Grafana on in-house object storage, [26 §7](26-observability.md#7-backends)).
+The Alloy configuration differs from Grafana Cloud only in endpoints and credentials, so the choice can be revisited.
+
+**Decision needed.** Security and procurement confirm self-hosting, or approve Grafana Cloud (region, contract).
+
+### Q-27 Telemetry retention and personal data
+
+**Context.** Names, IBANs and remittance text never reach telemetry ([00 §11](00-engineering-baseline.md#11-logging-tracing-metrics),
+[26 §4.4, §6.2](26-observability.md)). Logs and traces do carry `paymentId`, `txId` and `uetr`, which the payments
+database links to a person.
+
+**Proposal.** Metrics 13 months (monthly SLO reports, year-on-year), logs 30 d, traces 14 d; Loki access restricted to
+on-call ([26 §7](26-observability.md#7-backends)). Telemetry is never the record used for audits or disputes.
+
+**Decision needed.** The data-protection officer confirms the identifiers may be kept for these periods and who may
+read them.
+
+### Q-28 Paging and ticketing tools
+
+**Context.** Alertmanager needs receivers for pages (24/7, tier 0 and 1), tickets, chat and the Watchdog heartbeat
+([26 §8.4](26-observability.md#84-routing)).
+
+**Decision needed.** Payments operations name the paging tool and escalation policies per team, the issue tracker
+for tickets, and the external heartbeat service.
+
+### Q-29 Telemetry stack and payment trace model
+
+**Context.** The architecture README listed the production telemetry stack and per-payment tracing as open.
+
+**Proposal.** [ADR-013](../architecture/decisions/ADR-013-telemetry-stack-otel-grafana.md) (Micrometer + OTel, Alloy,
+Mimir / Loki / Tempo, rules in the Mimir ruler) and [ADR-014](../architecture/decisions/ADR-014-payment-trace-model.md)
+(one trace per payment lifecycle, parent / child across `csm.*`, 100 % sampling). The specs follow both.
+
+**Decision needed.** Accept both ADRs before the M0 observability baseline is built.

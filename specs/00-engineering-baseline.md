@@ -14,6 +14,7 @@ tiny_payment_engine/
 │   ├── payment-domain/             # value objects: Money, Iban, Bic, TxId, ReasonCode, BankDirectory, ...
 │   ├── iso20022-model/             # XSDs, JAXB-generated classes, codec + XSD validation
 │   ├── messaging/                  # outbox, relay, inbox, DLT handling, polling workers
+│   ├── observability/              # telemetry setup, payment span attributes, trace context codec (26 §4)
 │   └── contracts/                  # Kafka message records, internal REST DTOs, golden samples
 ├── services/
 │   ├── payment-api/
@@ -25,6 +26,10 @@ tiny_payment_engine/
 │   └── notification-service/
 ├── simulators/
 │   └── csm-simulator/
+├── tools/                          # operational tools, never on the payment path (26 §8, §10, §12)
+│   ├── slo-rules/                  # SLO files → Prometheus rules + SLO dashboards
+│   ├── consumer-lag-exporter/
+│   └── invariant-checker/
 ├── tests/
 │   └── system-tests/               # end-to-end scenarios against the full docker-compose stack
 ├── pacts/
@@ -32,7 +37,9 @@ tiny_payment_engine/
 ├── deploy/
 │   ├── docker-compose.yml          # PostgreSQL, Kafka, mock OAuth2 issuer, all services
 │   ├── postgres/init.sql           # one database + one role per service
-│   └── config/bank-directory.yml   # shared routing directory (see 01 §1.4)
+│   ├── config/bank-directory.yml   # shared routing directory (see 01 §1.4)
+│   ├── slo/<service>.yml           # SLO definitions (25 §9.1)
+│   └── observability/              # Alloy, backend values, Grafana, rules, Alertmanager, runbooks, probes (26)
 ├── architecture/
 └── specs/
 ```
@@ -48,6 +55,9 @@ Dependency rules (enforced by the Maven Enforcer plugin and ArchUnit):
 - `libs/contracts` depends only on `payment-domain` and Jackson annotations.
 - `libs/messaging` depends on `contracts`, Spring Kafka, Spring JDBC. It contains no business logic.
 - `libs/iso20022-model` depends only on `payment-domain` and Jakarta XML Binding.
+- `libs/observability` depends only on `payment-domain`, Micrometer, Micrometer Tracing, OpenTelemetry and Spring
+  Boot autoconfigure. It contains no business logic. `messaging` depends on it.
+- `tools/*` MAY depend on `libs/*` and MUST NOT be called by any service.
 - `csm-simulator` MUST NOT be packaged into any production image.
 
 ## 2. Technology stack
@@ -64,7 +74,7 @@ Dependency rules (enforced by the Maven Enforcer plugin and ArchUnit):
 | JSON | Jackson; `FAIL_ON_UNKNOWN_PROPERTIES = false` for consumed messages and internal REST request bodies (a newer caller may add optional fields during a rolling deploy, [20 §10.3](20-testing-strategy.md#103-verifying-pacts)), `true` for customer-facing REST request bodies (payment-api, notification subscriptions) |
 | XML | Jakarta XML Binding (JAXB) via `iso20022-model` |
 | Security | Spring Security OAuth2 resource server (JWT) |
-| Observability | Micrometer metrics, Micrometer Tracing with OpenTelemetry (OTLP export), JSON structured logs |
+| Observability | Micrometer metrics (Prometheus scrape), Micrometer Tracing with OpenTelemetry (OTLP export), JSON structured logs; pipeline Grafana Alloy → Mimir, Loki, Tempo, Grafana ([ADR-013](../architecture/decisions/ADR-013-telemetry-stack-otel-grafana.md), [26](26-observability.md)) |
 | Testing | JUnit 5, AssertJ, Testcontainers (PostgreSQL, Kafka), WireMock, ArchUnit, Awaitility, Pact JVM (consumer `junit5`, provider `junit5spring`, Pact specification V4) |
 | Performance tests | Gatling (Java DSL) in `tests/system-tests` |
 
@@ -217,11 +227,14 @@ SELECT … FROM <timer table>
 ## 11. Logging, tracing, metrics
 
 - Logs are JSON (Spring Boot structured logging, ECS format) to stdout.
-- MDC keys, set by inbound adapters and propagated: `paymentId`, `txId`, `uetr`, `commandId`, `eventId`, `traceId`.
+- MDC keys, set by inbound adapters and propagated: `paymentId`, `txId`, `uetr`, `commandId`, `eventId`, `traceId`,
+  `spanId`.
 - **Personal data:** names, IBANs, dates of birth, remittance information are personal data. They MUST NOT be logged
   at INFO or above. At DEBUG, IBANs are masked (`DE89****3000`). Names are never logged.
-- Tracing: W3C `traceparent` propagated over HTTP and as a Kafka header; one trace spans a payment across services
-  where the flow is synchronous, and links (not parent/child) across Kafka hops.
+- Tracing: W3C `traceparent` propagated over HTTP and as a Kafka header. One trace covers a payment's automated
+  lifecycle, parent / child across `csm.*` topics; notifications, account events, DLT handling and human actions
+  start linked traces; no trace headers to or from external parties
+  ([ADR-014](../architecture/decisions/ADR-014-payment-trace-model.md), [26 §5](26-observability.md#5-payment-trace-model)).
 - Every service exposes `/actuator/health/liveness`, `/actuator/health/readiness`, `/actuator/prometheus`.
   Readiness includes DB and (for Kafka consumers) Kafka connectivity.
 - Common metrics provided by `messaging`: `tpe.outbox.pending` (gauge), `tpe.outbox.publish.latency` (timer: insert →
@@ -229,6 +242,8 @@ SELECT … FROM <timer table>
   oldest due timer age, tag `worker`).
 - Service-specific metrics are listed in each spec. Metric names are `tpe.<area>.<name>`, tags low-cardinality only
   (never `paymentId`).
+- Telemetry never blocks a business operation: span export drops on overload, logs go to stdout, metrics are pulled.
+  Pipeline, storage, dashboards and alert delivery: [26](26-observability.md).
 
 ## 12. Security (MVP)
 

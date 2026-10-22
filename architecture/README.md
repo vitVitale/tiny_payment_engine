@@ -67,7 +67,7 @@ These are known gaps. Each needs its own decision before the system can run 24/7
 | CSM liquidity | Our prefunded position at TIPS / RT1, its monitoring and the CSM's rejection when liquidity is insufficient. Today the CSM settlement account only mirrors postings; reconciliation is UC-12. |
 | 24/7 operation | Zero-downtime deployments, backward-compatible DB migrations, PostgreSQL and Kafka high availability. SCT Inst has no maintenance window. |
 | Service-to-service security | Authentication between services (e.g. mTLS or signed tokens), and authentication of back-office and compliance users. |
-| Observability | SLOs, SLAs, alert rules and the metrics behind them are specified in [specs/25](../specs/25-service-levels.md). Still missing: the production telemetry stack, dashboards, per-payment tracing against the 10 s budget. |
+| Observability | Designed, pending acceptance: SLOs, SLAs, alert rules and metrics in [specs/25](../specs/25-service-levels.md); telemetry stack in [ADR-013](decisions/ADR-013-telemetry-stack-otel-grafana.md), per-payment tracing against the 10 s budget in [ADR-014](decisions/ADR-014-payment-trace-model.md), pipeline, dashboards and alert delivery in [specs/26](../specs/26-observability.md). Open: hosting and retention ([Q-26, Q-27](../specs/40-open-questions.md#q-26-telemetry-hosting)). |
 
 ## Rendering diagrams
 

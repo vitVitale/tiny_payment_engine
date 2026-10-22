@@ -249,6 +249,8 @@ DLT publishes are not budgeted: any `tpe.dlt.messages` increase alerts.
 | SLO-PLT-02 | Kafka | 99.99 % produce available with `acks=all`; produce p99 ≤ 20 ms; one broker lost → no unavailability | RF 3, `min.insync.replicas=2` ([02 §2](02-messaging-contracts.md#2-topics)) |
 | SLO-PLT-03 | Identity provider (JWKS, from M5 also service tokens) | 99.99 % while service tokens are mandatory, else 99.9 % | see §13 R-3 and [Q-24](40-open-questions.md#q-24-service-token-lifetime-and-idp-availability) |
 | SLO-PLT-04 | Time sync | 100 % of minutes with host clock offset < 100 ms; alert at 50 ms | [00 §6](00-engineering-baseline.md#6-time) |
+| SLO-PLT-05 | Alert path (rule evaluation → Alertmanager → paging tool) | 99.9 % of minutes with the `Watchdog` heartbeat received | external heartbeat check, [26 §8.3](26-observability.md#83-cause-and-meta-alerts) |
+| SLO-PLT-06 | Telemetry ingest | 99.5 % of minutes with metrics queryable ≤ 60 s and logs / traces ≤ 30 s after emission | [26 §1](26-observability.md#1-requirements); not on the payment path, so tier 1 |
 
 ### 5.10 csm-simulator
 
@@ -278,7 +280,7 @@ the ones that money depends on also run continuously, as reconciliation checks:
 | Exactly one final event per final payment | INV-7 | hourly | SEV-1 |
 | No `pacs.008` after `sendBy`; exactly one answer per incoming transaction | INV-5, INV-6 | hourly, from the gateway journal | SEV-1 + scheme report |
 | Ledger agrees with the CSM | INV-10 | with UC-12 reconciliation (later) | SEV-1 |
-| No personal data in logs | INV-14 | daily log scan | SEV-2, data-protection officer informed |
+| No personal data in logs | INV-14 | continuous: redaction flag in the telemetry gateway ([26 §6.2](26-observability.md#62-gateway)) | SEV-2, data-protection officer informed |
 
 ## 7. Dependency check: timeouts against SLOs
 

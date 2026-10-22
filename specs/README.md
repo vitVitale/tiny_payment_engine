@@ -25,6 +25,7 @@ to decide something the architecture leaves open, it says so and the decision is
 | 17 | [csm-simulator](17-csm-simulator.md) | test infrastructure: CSM, counterparty PSPs, sanctions provider |
 | 20 | [Testing strategy and scenario catalogue](20-testing-strategy.md) | write tests; the end-to-end scenarios every milestone must pass |
 | 25 | [Service levels](25-service-levels.md) | set up metrics, alerts or dashboards; change a timeout, deadline or dependency on the payment path; agree what the engine promises to its users |
+| 26 | [Observability](26-observability.md) | instrument a service, add a span or log field, change the telemetry pipeline, a dashboard, an alert route or a runbook; trace a single payment |
 | 30 | [Delivery plan](30-delivery-plan.md) | plan work: milestones, epics, dependencies, parallel tracks |
 | 40 | [Open questions and decisions](40-open-questions.md) | something is unclear; the decisions made where the architecture was silent, and the assumptions still open |
 

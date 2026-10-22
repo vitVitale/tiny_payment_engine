@@ -157,6 +157,7 @@ CREATE TABLE payments (
   action_attempts   INT NOT NULL DEFAULT 0,
   final_event_emitted BOOLEAN NOT NULL DEFAULT false,
   finalised_at      TIMESTAMPTZ,
+  trace_context     VARCHAR(55),                 -- W3C traceparent of the payment trace (ADR-014); NULL → new root
   version           BIGINT NOT NULL DEFAULT 0,
   created_at        TIMESTAMPTZ NOT NULL,
   updated_at        TIMESTAMPTZ NOT NULL,
