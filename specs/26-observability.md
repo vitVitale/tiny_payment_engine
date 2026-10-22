@@ -457,8 +457,8 @@ The probes of [25 §9.3](25-service-levels.md#93-low-traffic-and-synthetic-probe
 `deploy/observability/probes/`, run every 30 s / 60 s by a k6 runner **outside the engine's cluster** (separate
 small cluster or VM in another zone), authenticated as OAuth2 client `tpe-probe`. Results go to Mimir by remote write
 (`k6_*` metrics with label `probe`); the runner's own liveness is covered by `absent_over_time` on its metrics.
-payment-api tags probe traffic `tpe.probe=true` on the root span from the `client_id`. The 0.01 EUR on-us probe stays
-behind [Q-23](40-open-questions.md#q-23-synthetic-probes-in-production).
+payment-api tags probe traffic `tpe.probe=true` on the root span from the `client_id`. The 0.01 EUR on-us probe runs in `perf`
+and staging only ([Q-23](40-open-questions.md#q-23-synthetic-probes-in-production)).
 
 ## 12. Production invariant checks
 

@@ -6,8 +6,8 @@ the service specs and the target load of [Q-13](40-open-questions.md#q-13-target
 that no other document has, it says so; those numbers are design targets until the M5 performance runs recalibrate
 them (ADR-002 / ADR-004 consequence).
 
-Status ([Q-21](40-open-questions.md#q-21-slo-and-sla-figures)): the SLOs are an **Assumption** the specs follow;
-the SLAs **need input** from the parties they are made with.
+Status ([Q-21](40-open-questions.md#q-21-slo-and-sla-figures)): the SLOs are **decided** and recalibrated once from
+the M5 runs; the SLAs are the engine's offer, **pending sign-off** by the parties they are made with.
 
 ## 1. Terms and rules
 
@@ -63,7 +63,7 @@ allows roughly eight such failovers a month per component, which is the operatin
 | CUJ-1 | Customer verifies a payee (UC-02) | 99.95 % answered without `5xx`; 99.9 % ≤ 5.5 s | payment-api, vop-service, remote responder |
 | CUJ-2 | Customer initiates a payment (UC-01) | 99.95 % accepted or refused without `5xx`; 99 % ≤ 300 ms | payment-api, vop-service, payment-orchestrator |
 | CUJ-3 | Outgoing payment reaches a final status (UC-04, UC-05) | 99.9 % final ≤ 20 s of acceptance; 99 % ≤ 3 s at simulator beneficiary delay 300 ms ([20 §6](20-testing-strategy.md#6-performance)) | orchestrator, risk, ledger, relay, Kafka, gateway, CSM |
-| CUJ-4 | Incoming payment is answered and credited (UC-06) | 99.99 % answered by our verdict before the answer deadline; 99 % answered ≤ 2 s; 99 % credited ≤ 1 s after the settlement report | gateway, relay, Kafka, orchestrator, risk, ledger |
+| CUJ-4 | Incoming payment is answered and credited (UC-06) | 99.99 % answered by our verdict before the answer deadline; 99 % answered ≤ 2 s; 99 % credited ≤ 1 s after the settlement report; 99.9 % of settled payments credited ≤ 10 s after the gateway received the `pacs.008` (Regulation (EU) 2024/886, [Q-22](40-open-questions.md#q-22-funds-availability-for-incoming-payments); late CSM reports count as `EXTERNAL`) | gateway, relay, Kafka, orchestrator, risk, ledger |
 | CUJ-5 | Customer reads a payment status (UC-07) | 99.95 % without `5xx`; 99 % ≤ 200 ms | payment-api, orchestrator |
 | CUJ-6 | Customer channel is notified (UC-08) | 99 % first attempt ≤ 5 s after the final state | orchestrator relay, notification-service |
 | CUJ-7 | A newly listed person cannot transact (UC-09) | every list version screened ≤ 1 h after it is stored; every calendar day a completed daily run | risk-service, ledger-service |
@@ -161,7 +161,7 @@ Columns: **SLI** good / valid; **Source** metric (§11 lists the ones to add); *
 | SLO-ORC-10 | exception-case API available; ≤ 1 s | `http.server.requests` | 99.5 % / 99 % |
 
 OLA-ORC-01 (back office, [Q-25](40-open-questions.md#q-25-back-office-and-compliance-staffing)): open exception
-cases acknowledged ≤ 1 h of opening in staffed hours, resolved ≤ 1 business day. `LEDGER_ACTION_STUCK` and
+cases acknowledged ≤ 1 h of opening in staffed hours (every day 08:00–20:00 CET), resolved ≤ 1 staffed day. `LEDGER_ACTION_STUCK` and
 `DLT_MESSAGE` on `csm.*` page engineering on-call 24/7: both mean customer money is held or a fact was not applied.
 
 ### 5.3 ledger-service
@@ -247,7 +247,7 @@ DLT publishes are not budgeted: any `tpe.dlt.messages` increase alerts.
 |---|---|---|---|
 | SLO-PLT-01 | PostgreSQL, tier-0 databases (`payments`, `ledger`, `csm`, `risk`, `api`, `vop`) | 99.99 % available; failover RTO ≤ 30 s; RPO per §8 | the service SLIs include their DB; this SLO is for the platform team |
 | SLO-PLT-02 | Kafka | 99.99 % produce available with `acks=all`; produce p99 ≤ 20 ms; one broker lost → no unavailability | RF 3, `min.insync.replicas=2` ([02 §2](02-messaging-contracts.md#2-topics)) |
-| SLO-PLT-03 | Identity provider (JWKS, from M5 also service tokens) | 99.99 % while service tokens are mandatory, else 99.9 % | see §13 R-3 and [Q-24](40-open-questions.md#q-24-service-token-lifetime-and-idp-availability) |
+| SLO-PLT-03 | Identity provider (JWKS, from M5 also service tokens) | 99.9 % | service tokens live 30 min and refresh at 50 %, so outages up to 15 min do not reach the payment path (§13 R-3, [Q-24](40-open-questions.md#q-24-service-token-lifetime-and-idp-availability)) |
 | SLO-PLT-04 | Time sync | 100 % of minutes with host clock offset < 100 ms; alert at 50 ms | [00 §6](00-engineering-baseline.md#6-time) |
 | SLO-PLT-05 | Alert path (rule evaluation → Alertmanager → paging tool) | 99.9 % of minutes with the `Watchdog` heartbeat received | external heartbeat check, [26 §8.3](26-observability.md#83-cause-and-meta-alerts) |
 | SLO-PLT-06 | Telemetry ingest | 99.5 % of minutes with metrics queryable ≤ 60 s and logs / traces ≤ 30 s after emission | [26 §1](26-observability.md#1-requirements); not on the payment path, so tier 1 |
@@ -373,8 +373,8 @@ minimum of 100 valid events in the short window; below that, alerting relies on 
 
 - VoP verification against an own-bank probe account every 30 s (no money moves).
 - `GET /v1/payments/{id}` of a fixed probe payment every 30 s.
-- An on-us payment of 0.01 EUR between two probe customer accounts every minute — only with compliance and accounting
-  approval ([Q-23](40-open-questions.md#q-23-synthetic-probes-in-production)).
+- An on-us payment of 0.01 EUR between two probe customer accounts every minute — in `perf` and staging only, never
+  in production ([Q-23](40-open-questions.md#q-23-synthetic-probes-in-production)).
 - Probes run outside the cluster, so they also see ingress, DNS and TLS failures that server-side SLIs miss.
 
 ## 10. Error-budget policy
@@ -443,10 +443,10 @@ so every threshold in §5 is an exact histogram bucket:
 |---|---|---|---|
 | R-1 | The relay's advisory lock is held by a session; if the holder's **node** disappears, PostgreSQL keeps the session until TCP keepalive gives up (default: hours). A process kill closes the socket and is fine. | No relay → every payment accepted meanwhile ends `AB03`; incoming verdicts miss the deadline (SLO-GW-03, -05) | Decided in the [ADR-006 amendment](../architecture/decisions/ADR-006-ordered-outbox-relay.md#amendment-2026-10-22-bounded-failover): heartbeat plus `idle_session_timeout = 3s` on the lock session, progress watchdog, no-skipping rule; failover ≤ 5 s; a resumed old leader causes duplicates only. Verified by CH-13 and MSG-AC-08. |
 | R-2 | Consumer-group rebalances during rolling deploys stop `csm.*` consumption for seconds | lag spikes against `sendBy` and the answer deadline (SLO-ORC-09, SLO-GW-09) | cooperative-sticky assignor and static membership (`group.instance.id`, session timeout above restart time); deploy one instance at a time |
-| R-3 | Service tokens live 5 min ([ADR-012](../architecture/decisions/ADR-012-service-and-staff-authentication.md)); an IdP outage longer than the refresh lead stops every internal call from M5 on | the IdP becomes an undeclared tier-0 dependency | refresh at 50 % of lifetime and alert on refresh failures; longer lifetime or IdP SLO 99.99 % — [Q-24](40-open-questions.md#q-24-service-token-lifetime-and-idp-availability) |
+| R-3 | An IdP outage longer than the refresh lead stops every internal call from M5 on ([ADR-012](../architecture/decisions/ADR-012-service-and-staff-authentication.md)) | the IdP would become an undeclared tier-0 dependency | Decided ([Q-24](40-open-questions.md#q-24-service-token-lifetime-and-idp-availability)): service tokens live 30 min and refresh at 50 %, riding through 15 min (CH-16); refresh failures alert after 5 min; IdP SLO-PLT-03 99.9 % |
 | R-4 | Server-side SLIs do not see failures in front of the service | edge SLOs look better than reality | ingress metrics in production and external probes (§9.3) |
 | R-5 | One relay per service is a throughput ceiling (ADR-006: 4–8× peak) | latency SLOs degrade before errors appear | capacity alert at 50 % (§9.2); sharding by key is the upgrade path |
-| R-6 | Funds for an incoming payment are booked on `CreditTransferSettled`, not when we send `ACCP` | SLO-ORC-05 measures from settlement; if the scheme requires availability from the positive confirmation, the journey is defined wrongly | [Q-22](40-open-questions.md#q-22-funds-availability-for-incoming-payments) |
+| R-6 | Funds for an incoming payment are booked on `CreditTransferSettled`, not when we send `ACCP` | a slow CSM report delays funds availability beyond the regulatory 10 s | Decided ([Q-22](40-open-questions.md#q-22-funds-availability-for-incoming-payments), compliance sign-off): booking stays on settlement; CUJ-4 tracks ≤ 10 s from receipt |
 | R-7 | Site or region loss | RPO / RTO of §8 do not apply | needs its own ADR together with the "24/7 operation" gap of the architecture README |
 
 Revisit as the system grows: per-scheme SLOs when RT1 and TIPS are both connected; SLOs for recall (UC-11) and

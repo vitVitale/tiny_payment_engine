@@ -33,7 +33,7 @@ stored idempotent responses.
 ## 3. REST API (external)
 
 OpenAPI document `payment-api.yaml` is the contract for channel teams. Authentication: Bearer JWT
-([00 §12](00-engineering-baseline.md#12-security-mvp)).
+([00 §12](00-engineering-baseline.md#121-authentication-and-authorisation)).
 
 ### 3.1 `POST /v1/payments` — initiate (UC-01)
 
@@ -65,7 +65,8 @@ Response `202 Accepted`, `Location: /v1/payments/{paymentId}`:
 
 Processing order (UC-01 1–8):
 
-1. Authenticate; scope check; `debtor.iban` ∈ token `accounts` claim, else `403 DEBTOR_ACCOUNT_NOT_OWNED`.
+1. Authenticate; scope check; rate limits (`429 RATE_LIMITED`, before any database access); `debtor.iban` ∈ token
+   `accounts` claim, else `403 DEBTOR_ACCOUNT_NOT_OWNED`.
 2. Idempotency guard (§5.1): replay / conflict / in-progress.
 3. Validate (§5.2) → `400` with field errors.
 4. VoP reference check with vop-service (§5.3) → `422 VOP_REQUIRED`.
@@ -122,6 +123,7 @@ the 5 s responder timeout and returns `NOT_POSSIBLE`, so payment-api only sees a
 | 422 | `IDEMPOTENCY_KEY_REUSED` | UC-01 2b |
 | 422 | `VOP_REQUIRED` | UC-01 4a (missing, unknown, expired or mismatching reference) |
 | 422 | `CREDITOR_AGENT_NOT_REACHABLE` | creditor bank not in directory or not SCT Inst reachable |
+| 429 | `RATE_LIMITED` | over a per-client or per-subject limit, with `Retry-After` ([00 §12.3](00-engineering-baseline.md#123-production-requirements) SEC-04, limits in [Q-33](40-open-questions.md#q-33-rate-limits)) |
 | 503 | `ORCHESTRATOR_UNAVAILABLE`, `VOP_UNAVAILABLE` | with `Retry-After` |
 
 Field error codes: `INVALID_IBAN`, `INVALID_BIC`, `INVALID_AMOUNT` (≤ 0, > 2 decimals, > 999 999 999.99),
@@ -204,7 +206,11 @@ CREATE TABLE payment_rejections (            -- pain.002 FF01 for XML clients
 | `tpe.api.idempotency.retention` | `24h` |
 | `tpe.api.idempotency.in-progress-takeover` | `10s` |
 | `tpe.clients.orchestrator.base-url`, `.timeout` | `http://payment-orchestrator:8081`, `1s` |
-| `tpe.clients.vop.base-url` | `http://vop-service:8083` |
+| `tpe.clients.vop.base-url` | `http://vop-service:8083` (`https://` in `prod`, [ADR-016](../architecture/decisions/ADR-016-tls-inside-the-cluster.md)) |
+| `tpe.api.rate-limit.clients.<client_id>` | per channel, set at onboarding ([ADR-018](../architecture/decisions/ADR-018-rate-limiting.md)) |
+| `tpe.api.rate-limit.payments-per-subject` | `30/1m` |
+| `tpe.api.rate-limit.verifications-per-subject` | `20/10m`, `100/1d` |
+| `tpe.api.rate-limit.instances` | instance count the per-subject limits are divided by |
 
 ## 7. Non-functional requirements
 

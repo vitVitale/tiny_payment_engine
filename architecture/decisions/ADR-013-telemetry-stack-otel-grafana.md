@@ -1,6 +1,6 @@
 # ADR-013 Telemetry stack: OpenTelemetry instrumentation, Grafana Alloy, Mimir, Loki, Tempo
 
-- **Status:** Proposed
+- **Status:** Accepted (2026-10-22, [Q-29](../../specs/40-open-questions.md#q-29-telemetry-stack-and-payment-trace-model); self-hosted, [Q-26](../../specs/40-open-questions.md#q-26-telemetry-hosting) decided)
 - **Date:** 2026-10-22
 - **Resolves:** the "production telemetry stack" part of the Observability gap in the
   [architecture README](../README.md#cross-cutting-concerns-not-yet-designed). Build details:
@@ -57,7 +57,7 @@ Forces:
 | Option | Fit with specs/25 | Operations | Data residency | Cost | Assessment |
 |---|---|---|---|---|---|
 | A. Prometheus + Jaeger + OpenSearch | PromQL rules work as written | three unrelated systems, three UIs, weak correlation between signals | self-hosted | medium | Works, but trace↔log↔metric correlation is hand-made and the project chose Grafana. |
-| B. Grafana Cloud (managed LGTM) | same as C | lowest: nothing to run | provider's region; DORA outsourcing contract | per series / GB, grows with volume | Fastest start. Blocked until Q-26 is answered; config in C ports to B by changing endpoints. |
+| B. Grafana Cloud (managed LGTM) | same as C | lowest: nothing to run | provider's region; DORA outsourcing contract | per series / GB, grows with volume | Fastest start, but a DORA outsourcing arrangement; not chosen (Q-26). Config in C ports to B by changing endpoints. |
 | **C. Self-hosted Grafana LGTM + Alloy** | PromQL rules, `promtool` tests and `mimirtool` sync as written | medium: three stateful backends on object storage | in-house | infrastructure only | Chosen. Same configuration shape as B, so moving later is cheap. |
 | D. Commercial APM (Datadog, Dynatrace) | rules rewritten in the vendor's language | lowest | vendor | highest | Proprietary query and alert languages break the "one SLO file → rules + tests" chain of specs/25. |
 
@@ -82,7 +82,7 @@ Forces:
 ## Trade-off analysis
 C costs us the operation of three stateful backends; in return the alert chain of specs/25 (SLO file → generated
 PromQL → `promtool` tests → evaluation) runs unchanged, data stays in-house, and B stays available as a
-configuration change if Q-26 goes that way. Alloy trades a little vendor neutrality *inside the pipeline* for
+configuration change if Q-26 is ever reopened. Alloy trades a little vendor neutrality *inside the pipeline* for
 exact metric names; the services speak only OTLP and Prometheus exposition, so replacing Alloy with the upstream
 collector later is a pipeline change, not an application change.
 
@@ -96,7 +96,7 @@ collector later is a pipeline change, not an application change.
   [specs/25 §5.9](../../specs/25-service-levels.md#59-platform)).
 - Revisit: native histograms once Micrometer and Mimir support them for SLO buckets; tail sampling when trace volume
   exceeds the sizing of [specs/26 §14](../../specs/26-observability.md#14-capacity-estimate); Grafana Cloud if Q-26
-  allows it.
+  is reopened.
 
 ## Action items
 1. [ ] M0: `libs/observability`, compose `observability` profile, pipeline conformance test (OBS-AC-01 … -04).

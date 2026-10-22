@@ -45,7 +45,7 @@ POST /v1/subscriptions
 
 - `format`: `JSON` or `CAMT054` (one format per subscription; register two subscriptions for both).
 - `url` must be `https` (except in `local` / `test`), no private / loopback addresses in `prod` (SSRF guard).
-- `signingSecret` ≥ 32 bytes; stored encrypted (AES-GCM, key from `tpe.notification.secret-key`).
+- `signingSecret` ≥ 32 bytes; stored encrypted (AES-GCM, active key of `tpe.notification.secret-keys`; `secret_key_id` names it).
 - `events` filter; default both.
 
 ### 3.2 Delivery admin API (role `BACKOFFICE_OPERATOR`)
@@ -147,7 +147,8 @@ Ordering of webhooks is not guaranteed; receivers use `occurredAt` / status.
 | `tpe.notification.retry-schedule` | `10s,30s,1m,5m,15m,30m,1h` (last repeats) |
 | `tpe.notification.retry-window` | `24h` |
 | `tpe.notification.timeouts.connect` / `.read` | `2s` / `5s` |
-| `tpe.notification.secret-key` | env var, required |
+| `tpe.notification.secret-keys` | key id → AES key, secret ([ADR-017](../architecture/decisions/ADR-017-secrets-keys-and-encryption-at-rest.md)), required |
+| `tpe.notification.active-key-id` | required; new subscriptions are encrypted with it, a worker re-encrypts older rows |
 | `tpe.notification.dispatch.concurrency` | `64` |
 
 ## 8. Non-functional requirements

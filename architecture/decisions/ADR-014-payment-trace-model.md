@@ -1,6 +1,6 @@
 # ADR-014 Payment trace model: one trace per payment lifecycle
 
-- **Status:** Proposed
+- **Status:** Accepted (2026-10-22, [Q-29](../../specs/40-open-questions.md#q-29-telemetry-stack-and-payment-trace-model))
 - **Date:** 2026-10-22
 - **Resolves:** the "per-payment tracing against the 10 s budget" part of the Observability gap in the
   [architecture README](../README.md#cross-cutting-concerns-not-yet-designed). Amends the tracing rule of

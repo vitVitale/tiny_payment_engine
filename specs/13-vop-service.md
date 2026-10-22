@@ -69,7 +69,9 @@ Response: { "requestId": "…", "result": "CLOSE_MATCH", "actualName": "Anna Sch
 ```
 
 Authentication: in the MVP the requesting PSP is identified by `requestingPspBic`, which must be in the bank
-directory (`401 UNKNOWN_PARTICIPANT` otherwise); mTLS in production (UC-03 precondition).
+directory (`401 UNKNOWN_PARTICIPANT` otherwise); mTLS in production (UC-03 precondition), where the PSP is taken from
+the client certificate and a differing `requestingPspBic` is refused with `401 UNKNOWN_PARTICIPANT`. Requests above
+the per-PSP limit get `429 RATE_LIMITED` ([ADR-018](../architecture/decisions/ADR-018-rate-limiting.md)).
 
 ## 4. Messaging
 
@@ -107,6 +109,7 @@ CREATE INDEX vop_results_expiry ON vop_results (expires_at);
 CREATE TABLE responder_audit (
   id BIGSERIAL PRIMARY KEY, request_id VARCHAR(64) NOT NULL, requesting_psp_bic VARCHAR(11) NOT NULL,
   iban_hash CHAR(64) NOT NULL, name_hash CHAR(64) NOT NULL,    -- SHA-256 with a secret pepper
+  pepper_version SMALLINT NOT NULL,                             -- which pepper hashed this row (ADR-017)
   result VARCHAR(12) NOT NULL, at TIMESTAMPTZ NOT NULL
 );
 ```
@@ -157,7 +160,9 @@ and `actual_name` to `NULL`; delete rows older than 30 days. `responder_audit` k
 | `tpe.vop.result-retention` | `24h` |
 | `tpe.vop.match-threshold` / `close-match-threshold` | `0.95` / `0.85` |
 | `tpe.vop.legal-forms` | list above |
-| `tpe.vop.audit-pepper` | env var, required |
+| `tpe.vop.audit-peppers` | version → pepper, secret ([ADR-017](../architecture/decisions/ADR-017-secrets-keys-and-encryption-at-rest.md)), required |
+| `tpe.vop.active-pepper-version` | required; new `responder_audit` rows use it |
+| `tpe.vop.responder.rate-limit.per-psp` | `50/s` per instance ([ADR-018](../architecture/decisions/ADR-018-rate-limiting.md)) |
 
 ## 8. Non-functional requirements
 

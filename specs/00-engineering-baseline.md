@@ -168,7 +168,8 @@ inside an IBAN, used for routing).
   on `title` or `detail`. `errors` is present only for validation failures (400).
 - Status code usage: `400` malformed / schema invalid, `401` unauthenticated, `403` not allowed, `404` not found
   (also for "exists but not yours"), `409` conflict with current resource state, `422` well-formed but refused by a
-  business rule, `503` dependency unavailable (with `Retry-After`).
+  business rule, `429` over a rate limit (with `Retry-After`, §12.3 SEC-04), `503` dependency unavailable (with
+  `Retry-After`).
 - Every mutating internal call carries `Idempotency-Key` (see each API). The receiving service stores the result
   and replays it for the same key; same key with a different body → `409 IDEMPOTENCY_CONFLICT` (internal APIs) or
   `422 IDEMPOTENCY_KEY_REUSED` (customer API, UC-01 2b).
@@ -245,24 +246,53 @@ SELECT … FROM <timer table>
 - Telemetry never blocks a business operation: span export drops on overload, logs go to stdout, metrics are pulled.
   Pipeline, storage, dashboards and alert delivery: [26](26-observability.md).
 
-## 12. Security (MVP)
+## 12. Security
 
-Service-to-service security is a known gap ([architecture README](../architecture/README.md#cross-cutting-concerns-not-yet-designed)).
-For the MVP:
+Authentication and authorisation are decided in [ADR-012](../architecture/decisions/ADR-012-service-and-staff-authentication.md).
+§12.1 and §12.2 apply from M0; §12.3 lists what must also hold before production, with the decisions in
+[ADR-015 … ADR-018](../architecture/decisions/) and [40](40-open-questions.md) (Q-30 … Q-36).
+
+### 12.1 Authentication and authorisation
 
 - **Customer API (payment-api) and subscription API (notification-service):** OAuth2 resource server, JWT. Required
   claims: `sub`, `client_id` (API client), `scope`, `accounts` (array of IBANs the subject may debit / read).
-  Scopes: `payments:write`, `payments:read`, `vop:verify`, `notifications:manage`.
+  Scopes: `payments:write`, `payments:read`, `vop:verify`, `notifications:manage`. Who authenticates the customer and
+  issues `accounts`: SEC-05.
 - **Back-office and compliance APIs:** same issuer, claim `roles` contains `BACKOFFICE_OPERATOR` or
   `COMPLIANCE_OFFICER`. `sub` is recorded as the actor in audit records.
-- **Internal service APIs:** no authentication in the MVP. They MUST NOT be reachable from outside the internal
-  network (compose network / Kubernetes NetworkPolicy). Every internal controller is annotated `@InternalApi` so the
-  gap is easy to find. From milestone M5, internal calls carry OAuth2 client-credentials tokens with per-capability
-  scopes ([ADR-012](../architecture/decisions/ADR-012-service-and-staff-authentication.md)), switched on by
+- **Internal service APIs:** M0 – M4 rely on network isolation only: they MUST NOT be reachable from outside the
+  internal network (compose network / Kubernetes NetworkPolicy), and every internal controller is annotated
+  `@InternalApi`. From M5, internal calls carry OAuth2 client-credentials tokens with the per-capability scopes of
+  [ADR-012](../architecture/decisions/ADR-012-service-and-staff-authentication.md), switched on by
   `tpe.security.internal-auth.enabled` and mandatory in `prod`.
 - **Local:** `deploy/docker-compose.yml` runs `ghcr.io/navikt/mock-oauth2-server` as issuer; system tests mint tokens
   from it.
-- Secrets (DB passwords, webhook-secret encryption key) come from environment variables; never committed.
+
+### 12.2 Data handling
+
+- Personal data stays out of logs and telemetry (§11, [26 §4.4](26-observability.md#44-personal-data-guard-in-code)).
+- XML parsers reject DOCTYPE and external entities ([01 §2](01-shared-libraries.md#2-iso20022-model)).
+- Webhooks: `https` only, SSRF guard, HMAC-signed, secrets encrypted ([16 §3](16-notification-service.md#3-rest-api)).
+- Secrets (DB passwords, webhook-secret encryption key, VoP pepper, OAuth2 client secrets, keystores) are never
+  committed and never baked into images. Until SEC-03 is in place (from M5) they come from environment variables; in `prod` they never do
+  ([ADR-017](../architecture/decisions/ADR-017-secrets-keys-and-encryption-at-rest.md)).
+
+### 12.3 Production requirements
+
+Each requirement must hold in `prod` before production use. The requirement says what must be true; the linked ADR and
+question say how, and who still signs it off.
+
+| # | Requirement | Decision |
+|---|---|---|
+| SEC-01 | **Kafka.** Brokers accept only authenticated clients, one principal per service, over TLS. ACLs follow the producer / consumer columns of [02 §2](02-messaging-contracts.md#2-topics): only payment-orchestrator writes `csm.outbound.commands` and `payments.events`, only csm-gateway writes `csm.inbound.events`, only ledger-service writes `accounts.events`; each consumer reads only its topics with its own group and writes only the `.dlt` of the topics it consumes. The `systemtest` profile runs with ACLs on, so a missing ACL fails the tests. | [ADR-015](../architecture/decisions/ADR-015-kafka-authentication-and-acls.md), [Q-30](40-open-questions.md#q-30-kafka-authentication-and-authorisation) |
+| SEC-02 | **Encryption in transit inside the cluster.** REST between services, PostgreSQL connections (`sslmode=verify-full`), Kafka (SEC-01) and telemetry export use TLS. Identity stays with the JWT (ADR-012); TLS adds confidentiality and server authentication. | [ADR-016](../architecture/decisions/ADR-016-tls-inside-the-cluster.md), [Q-31](40-open-questions.md#q-31-tls-inside-the-cluster) |
+| SEC-03 | **Secrets.** Every secret comes from a secret store at runtime, has an owner and a rotation procedure that needs no downtime: the webhook encryption key (new writes use the newest `secret_key_id`, a job re-encrypts, the old key is retired), the VoP pepper (versioned, old versions kept until the `responder_audit` rows hashed with them expire), OAuth2 client secrets, mTLS keystores (alert 30 d before certificate expiry). | [ADR-017](../architecture/decisions/ADR-017-secrets-keys-and-encryption-at-rest.md), [Q-32](40-open-questions.md#q-32-secret-store-and-rotation) |
+| SEC-04 | **Abuse limits.** payment-api limits requests per `client_id` and per `sub`, with tighter limits on `POST /v1/payee-verifications`, so VoP cannot be used to harvest account holder names. The VoP scheme responder limits requests per requesting PSP, and in `prod` `requestingPspBic` must match the identity in the mTLS client certificate. Requests over a limit get `429 RATE_LIMITED` with `Retry-After`. | [ADR-018](../architecture/decisions/ADR-018-rate-limiting.md), [Q-33](40-open-questions.md#q-33-rate-limits) |
+| SEC-05 | **Customer authentication.** The engine does not authenticate customers. The channel and the identity provider perform strong customer authentication (PSD2), including dynamic linking of amount and payee for payments, before issuing a token with `payments:write`. The `accounts` claim comes from the bank's entitlement data; revoked access takes effect within one access-token lifetime. | [Q-34](40-open-questions.md#q-34-customer-authentication-and-the-accounts-claim) |
+| SEC-06 | **Audit integrity.** Audit records (`audit_log` in ledger-service, `payment_transitions` in payment-orchestrator, `responder_audit` in vop-service) are append-only: the service's runtime DB role has `INSERT` and `SELECT` only on them, granted by migration; deletion after the retention period runs under a separate retention role. Staff reads of personal data (account holder data, ledger entries, gateway journal XML, screening cases, webhook deliveries) are audited with actor, endpoint, subject id and time. Authentication and authorisation failures are logged as structured security events (ECS `event.category` = `authentication` / `authorization`) for the bank's security monitoring. | [Q-35](40-open-questions.md#q-35-audit-retention-and-security-events) |
+| SEC-07 | **Encryption at rest.** PostgreSQL storage, backups (PITR, [25 §8](25-service-levels.md#8-durability-and-recovery)), Kafka log directories and telemetry object storage are encrypted with keys managed outside the cluster. | [ADR-017](../architecture/decisions/ADR-017-secrets-keys-and-encryption-at-rest.md), [Q-36](40-open-questions.md#q-36-encryption-at-rest-and-key-management) |
+| SEC-08 | **Supply chain.** CI scans dependencies and container images for known vulnerabilities and fails on CVSS ≥ 7 unless a suppression with reason and expiry date is committed. Every release has a CycloneDX SBOM. Images use base images pinned by digest and run as a non-root user with a read-only root file system. | — (§14) |
+| SEC-09 | **Threat model.** A STRIDE pass over the [container view](../architecture/c4/02-containers.puml) and its trust boundaries (channels, staff, CSM, counterparty PSPs, sanctions provider, Kafka, databases), kept in `architecture/` and reviewed whenever a container or trust boundary changes. Findings become requirements here or questions in [40](40-open-questions.md). | — ([30 M5](30-delivery-plan.md#m5--hardening)) |
 
 ## 13. Local development
 
@@ -292,7 +322,8 @@ Profiles: `local` (compose hosts, debug logging off, funding endpoint enabled), 
 [20 §2.1](20-testing-strategy.md#21-systemtest-profile)), `prod` (funding endpoint disabled, simulator URLs
 forbidden by a startup check).
 
-Kafka topics are created by a `kafka-init` compose job (and by `NewTopic` beans in tests), not by auto-creation
+Kafka topics and ACLs are declared in `deploy/kafka/topics.yml` ([ADR-015](../architecture/decisions/ADR-015-kafka-authentication-and-acls.md))
+and created by a `kafka-init` compose job (and by `NewTopic` beans in tests), not by auto-creation
 (`auto.create.topics.enable=false`). Topic settings: [02 §2](02-messaging-contracts.md#2-topics).
 
 ## 14. Continuous integration
@@ -304,7 +335,8 @@ Pipeline on every pull request and on `main`:
 2. `./mvnw -B -Ppact-verify verify` — every provider verifies this commit's pacts and those of the last release in
    `pacts/released/` ([20 §10.3](20-testing-strategy.md#103-verifying-pacts)).
 3. `plantuml -checkonly architecture/**/*.puml`.
-4. Build container images (Jib or Spring Boot buildpacks), tag with commit SHA.
+4. Build container images (Jib or Spring Boot buildpacks), tag with commit SHA; scan the dependency tree and the images,
+   and on release write the SBOM (§12.3 SEC-08).
 5. `tests/system-tests`: start the compose stack, run the scenario catalogue tagged `@smoke` on PRs, everything on `main`.
 6. Nightly: full scenario catalogue, Gatling load profile, failure-injection scenarios ([20 §5](20-testing-strategy.md#5-failure-injection-scenarios)),
    forward pact check (the last release's providers against this commit's pacts).
