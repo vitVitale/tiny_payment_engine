@@ -51,6 +51,8 @@ to decide something the architecture leaves open, it says so and the decision is
 - Code merged to `main` through a reviewed pull request; CI green (build, unit, integration, ArchUnit, contract tests).
 - Acceptance criteria it implements have automated tests whose names carry the criterion id (e.g. `LED_AC_04_releaseOfUnknownHoldCreatesTombstone`).
 - New or changed REST endpoints are in the service's OpenAPI document; new or changed messages are in `contracts` with a golden sample.
+- Every new or changed call between our services (REST or Kafka) has a Pact interaction for each response the
+  consumer handles, verified by the provider ([20 §10](20-testing-strategy.md#10-consumer-driven-contract-testing-pact)).
 - Flyway migration is backward compatible with the previous release (see [00 §9](00-engineering-baseline.md#9-database-and-migrations)).
 - Metrics, logs and trace attributes listed in the spec are emitted.
 - Spec updated if the implementation had to deviate.

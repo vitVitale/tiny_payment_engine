@@ -12,14 +12,15 @@ invariant checks (§3).
 | Unit | each module, `src/test` | JUnit 5, AssertJ, `MutableClock` | domain rules: state machine transitions, posting engine, matchers, value objects, reason mapping |
 | Property-based | `payment-domain`, ledger domain, `iso20022-model` | jqwik | invariants: Σ DR = Σ CR; available ≥ 0; every builder output is XSD-valid; IBAN round trips; `Money.parse` ∘ `toDecimalString` is identity |
 | Stateful property-based | orchestrator `domain.payment`, gateway answer coordinator | jqwik stateful (action sequences) | for random interleavings of CSM events, timer fires and action results ([11 §6.6](11-payment-orchestrator.md#66-concurrency)): a final state is never left; exactly one final event; every rejection after a possible hold / pending credit has `RELEASE_HOLD` / `CANCEL_CREDIT` as next action; result equals the §6.4 / §6.5 tables in either order |
-| Component (service) | each service, `src/integrationTest` (Failsafe) | Spring Boot test, Testcontainers PostgreSQL + Kafka, WireMock for REST neighbours | the service's acceptance criteria (`<SVC>-AC-nn`) in isolation |
+| Component (service) | each service, `src/integrationTest` (Failsafe) | Spring Boot test, Testcontainers PostgreSQL + Kafka, WireMock for REST neighbours (business responses must match a pact, §10.4) | the service's acceptance criteria (`<SVC>-AC-nn`) in isolation |
 | Concurrency | ledger, gateway, payment-api, `messaging` | component setup + two app contexts / latches | LED-AC-09, -10, GW-AC-12, API-AC-10, MSG-AC-03: races resolved by the DB as specified |
-| Contract | `contracts` + each consumer | golden samples, round-trip tests | message compatibility across versions: every consumer reads the golden samples of the current **and previous** version; unknown fields are ignored |
-| REST contract | provider: OpenAPI drift check; consumer: WireMock stubs generated from the provider's checked-in OpenAPI | springdoc, openapi-diff | internal APIs do not break silently |
+| Serialisation contract | `contracts`, `iso20022-model` | golden samples, round-trip tests | shared records and ISO messages serialise stably: every consumer reads the golden samples of the current **and previous** version; unknown fields are ignored |
+| Consumer-driven contract (Pact) | consumer: client adapter / listener module; provider: `src/integrationTest` | Pact JVM, Pact specification V4 (HTTP + message) | every internal REST and Kafka integration gives each consumer the responses and messages it relies on — same commit, and across the previous release in both directions (§10) |
+| API description | every service | springdoc, openapi-diff | the checked-in OpenAPI matches the code (drift check); the customer-facing APIs (payment-api, notification subscriptions) have no breaking change against the last release |
 | Schema compatibility | each service, CI on `main` | Flyway + previous release image | the previous release's component suite passes against the new migrations (24/7 rule, [00 §9](00-engineering-baseline.md#9-database-and-migrations)) |
 | Security | each service (component) + system tests | Spring Security test, authorisation matrix generated from OpenAPI | every endpoint × (no token, wrong scope, wrong role, foreign account) → `401` / `403` / `404` per [00 §7, §12](00-engineering-baseline.md#12-security-mvp); DOCTYPE rejected; internal APIs unreachable from outside the compose network |
 | Architecture | each service | ArchUnit | layering, no `Instant.now()`, no `double` money |
-| Traceability | CI step | script over `specs/*.md` and test sources | every `<SVC>-AC-nn` and every `E2E-*` / `CH-*` id has at least one test carrying it in its name or `@Tag` |
+| Traceability | CI step | script over `specs/*.md` and test sources | every `<SVC>-AC-nn` and every `E2E-*` / `CH-*` id has at least one test carrying it in its name or `@Tag`; every integration `P-nn` / `M-nn` of §10.1 has a consumer pact test and a provider verification |
 | System (end-to-end) | `tests/system-tests` | JUnit 5 + Testcontainers Compose module, simulator control API, mock OAuth2 tokens, webhook receiver stub | scenario catalogue §4 |
 | Failure injection | `tests/system-tests` (`@Chaos`, nightly) | Toxiproxy between services / Kafka / DB, container pause / kill | §5 |
 | Performance | `tests/system-tests/perf` (nightly) | Gatling | §6 |
@@ -212,6 +213,9 @@ Line coverage is a weak signal for this system; traceability and mutation score 
 | Every scenario in §4 / §5 is assigned to a milestone exit in [30](30-delivery-plan.md) | review |
 | Branch coverage of `domain` packages and `libs/payment-domain` | ≥ 90 % (JaCoCo, build fails below) |
 | Mutation score (PIT) of `payment-domain`, ledger posting engine, orchestrator `domain.payment`, gateway answer coordinator / send-by guard | ≥ 85 %; surviving mutants reviewed weekly |
+| Every integration of §10.1 has a pact produced by the build and verified by its provider(s), in all three checks of §10.3 | CI traceability step and `-Ppact-verify` fail the build |
+| Every response branch a consumer handles has an interaction | review; for P-03 / P-04 checked row by row against the mapping tables of [11 §6.2](11-payment-orchestrator.md#62-pending-actions) |
+| Every business WireMock stub matches a pact interaction | `StubConformanceTest` (§10.4) |
 | Other packages | no numeric gate; covered by component tests |
 
 ## 8. Use-case traceability
@@ -296,7 +300,144 @@ this strategy:
 | [15](15-csm-gateway.md) | GW-AC-15, -16; command dedup key includes `debtorAgentBic` (aligned with [02 §3](02-messaging-contracts.md#3-csmoutboundcommands-orchestrator--gateway)) | E2E-I-12, I-06 |
 | [16](16-notification-service.md) | NTF-AC-09 (Q-19) | INV-13 |
 | [17](17-csm-simulator.md) | `LATE_STATUS:<ms>`, settlement log + `GET /sim/v1/settlements`, explicit `txId` / `debtorAgentBic` for incoming payments, outage modes `DOWN` / `RESET`; SIM-AC-05 … -08 | E2E-O-13, -O-20, -I-12, INV-10 |
-| [30](30-delivery-plan.md) | every scenario of §4 / §5 assigned to a milestone or track exit; rule for scenarios that span tracks | §7 |
+| [30](30-delivery-plan.md) | every scenario of §4 / §5 assigned to a milestone or track exit; rule for scenarios that span tracks; contract-testing epic in M0 and the pacts of §10.1 in each exit | §7, §10 |
+| [00](00-engineering-baseline.md) | Pact JVM in the stack; internal REST request bodies tolerate unknown fields; `pacts/released/`; CI steps for provider verification and the forward check | §10.3 |
+| [README](README.md#definition-of-done-every-story) | Definition of Done: a new or changed integration call has a pact interaction | §10 |
 
 Still open, at implementation time: the `application-systemtest.yml` of each service with the values of §2.1, and the
 unit test of the ordering rule.
+
+## 10. Consumer-driven contract testing (Pact)
+
+Internal REST DTOs and Kafka records are shared Java records in `contracts`, so field names cannot drift within one
+commit. Pact covers what shared records do not:
+
+- the status codes and error `code`s a consumer branches on — the orchestrator's saga table
+  ([11 §6.2](11-payment-orchestrator.md#62-pending-actions)) is built on ledger codes such as `HOLD_RELEASED` and
+  `INSUFFICIENT_FUNDS`;
+- behaviour behind a call: idempotent replay (`200` with the existing hold), tombstones, `409` conflicts;
+- headers: `Idempotency-Key`, `application/problem+json`, Kafka `tpe-message-type` / `tpe-schema-version`
+  ([01 §3.4](01-shared-libraries.md#34-headers));
+- mixed versions during a rolling deploy (no maintenance window, [00 §9](00-engineering-baseline.md#9-database-and-migrations)):
+  a consumer of release N+1 talking to a provider of release N, and the reverse.
+
+### 10.1 Integration inventory
+
+Pacticipant names are the Maven `artifactId`s, plus the logical provider `vop-responder` and the consumer
+`system-tests`. Ids are used in test names (`PACT_P04_createHoldInsufficientFunds`).
+
+| Id | Consumer → provider | Interface | Interactions (at least) |
+|---|---|---|---|
+| P-01 | payment-api → payment-orchestrator | `POST /v1/payments`, `GET /v1/payments/{id}` | new payment `201`; existing `commandId` `200`; `409 COMMAND_CONFLICT`; `422 CREDITOR_AGENT_NOT_REACHABLE`; status in each internal state; `404 PAYMENT_NOT_FOUND` |
+| P-02 | payment-api → vop-service | `POST /v1/verifications`, `POST /v1/verifications/{ref}/check` | `201` per result (`CLOSE_MATCH` with `actualName`); `422 PAYEE_BANK_UNKNOWN`; check `valid`, `EXPIRED`, `MISMATCH`, `UNKNOWN` |
+| P-03 | payment-orchestrator → risk-service | `POST /v1/risk/assessments` | `ALLOW`; `DENY FR01`; `DENY RR04`; `REVIEW`; replayed `assessmentId` → same decision; both directions |
+| P-04 | payment-orchestrator → ledger-service | holds and pending credits ([12 §3.1](12-ledger-service.md)) | every success and every refusal the orchestrator maps: create hold `201` / replay `200` / `INSUFFICIENT_FUNDS` / `ACCOUNT_NOT_FOUND` / `ACCOUNT_BLOCKED` / `ACCOUNT_CLOSED` / `CUSTOMER_ID_MISSING` / `HOLD_RELEASED`; settle `200` / replay / `HOLD_RELEASED`; settle-on-us `200` / payee refusals; release `200` / unknown id (tombstone) / `409 HOLD_SETTLED`; pending credit create / confirm / cancel with the same pattern; `409 IDEMPOTENCY_CONFLICT` |
+| P-05 | risk-service → ledger-service | `GET /v1/customers/{customerId}/accounts`, `POST /v1/accounts/{id}/block`, `/unblock` | list accounts; block `SANCTIONS_PROVISIONAL` and `SANCTIONS`; unblock; repeated block; unknown account |
+| P-06 | csm-gateway → csm-simulator | `POST /csm/v1/messages` (XML envelope) | `202` for `pacs.008`, `pacs.002`, `pacs.028`; `400` for an unparsable envelope |
+| P-07 | csm-simulator → csm-gateway | `POST /csm/v1/inbound` (XML envelope) | `202` for `pacs.008` and `pacs.002`; `202` for a schema-invalid `pacs.008` with readable `TxId` (answered later with `FF01`); `400` without a readable `TxId` |
+| P-08 | vop-service → `vop-responder` | `POST /vop/v1/verifications` | `MATCH`, `CLOSE_MATCH`, `NO_MATCH`, `NOT_POSSIBLE` — verified against **both** csm-simulator and vop-service's own responder, so we can answer every request we send (UC-02 ↔ UC-03) |
+| P-09 | risk-service → csm-simulator (sanctions provider) | `GET /sanctions/v1/lists/{listCode}/metadata`, `GET /sanctions/v1/lists/{listCode}` | current list; `503` outage |
+| P-10 | system-tests → back-office APIs, simulator control | exception cases ([11 §3.2](11-payment-orchestrator.md#32-exception-case-api-role-backoffice_operator)), journal ([15 §3.2](15-csm-gateway.md#32-admin-api-role-backoffice_operator-read-only)), ledger account API, `/sim/v1` | the calls the test harness makes, so harness drift fails a PR instead of the nightly run |
+| M-01 | payment-orchestrator → csm-gateway | Kafka `csm.outbound.commands` | `SendCreditTransfer`; `RequestPaymentStatus` (both directions); `AcceptCreditTransfer`; `RejectCreditTransfer` |
+| M-02 | csm-gateway → payment-orchestrator | Kafka `csm.inbound.events` | `CreditTransferReceived`; `AnswerSent` (`ACCP`, `RJCT` by verdict, `RJCT AB05` by deadline); `CreditTransferSettled` / `CreditTransferRejected` per direction and `source`; `CreditTransferNotSent` (`AB03`, `FF01`) |
+| M-03 | payment-orchestrator → notification-service | Kafka `payments.events` | `PaymentSettled` and `PaymentRejected` for outgoing, incoming and on-us |
+| M-04 | ledger-service → vop-service, risk-service | Kafka `accounts.events` | `AccountOpened`, `AccountBlocked`, `AccountUnblocked`, `AccountClosed` snapshots. Tombstones (`null` value) cannot be expressed as a Pact message: VOP-AC-07 and the risk projection tests cover them |
+
+Not covered by Pact:
+
+| Integration | Why | Covered by |
+|---|---|---|
+| customer channels → payment-api, notification subscription API | consumers outside this repository | OpenAPI drift + openapi-diff breaking-change gate, security matrix, system tests. If a channel team publishes pacts, payment-api verifies them like any other |
+| notification-service → customer webhook receivers | provider outside this repository | published webhook schema and signature rules ([16](16-notification-service.md)), validated by the system-test receiver stub (INV-13) |
+| real CSM (TIPS / RT1), EPC VoP scheme, sanctions list providers | external parties, no Pact | ISO 20022 XSDs (ISO-AC-01, -02); P-06 … P-09 keep the simulator faithful to our clients; scheme conformance testing before production |
+
+### 10.2 Writing consumer pacts
+
+- Consumer tests live in the consumer module next to the adapter (`infrastructure.<provider>`, `src/test`), named
+  `<Provider>PactTest`, and drive the **real client adapter** (its `RestClient` configuration and error mapping)
+  against the Pact mock server. They assert on the adapter's result (e.g. `HoldResult.refused(INSUFFICIENT_FUNDS)`),
+  so a pact cannot promise a response the code does not handle.
+- Message consumer tests pass the pact message (body and metadata) through the real listener mapping and
+  `ContractValidator` up to the application-service boundary, which is mocked.
+- One interaction per response branch the consumer handles, named after the branch (`create hold: insufficient funds`).
+- Consumers specify only the fields they read. Matchers: type for ids, timestamps and amounts; regex for IBAN, BIC,
+  `TxId` and reason codes; exact values for enums, `status` and `code`. Requests include the headers the provider
+  requires (`Idempotency-Key`); responses include `Content-Type`.
+- XML bodies (P-06, P-07): the pact covers the envelope and the transport answer; the document content is the XSDs' job.
+- Provider states use domain language with parameters: `"account is OPEN with available balance"` (`iban`,
+  `availableMinor`), `"hold is RELEASED"` (`holdId`).
+- Technical failures (timeouts, `5xx`, connection resets) are never in pacts; they stay in WireMock component tests.
+
+### 10.3 Verifying pacts
+
+- Provider tests live in `src/integrationTest` (`@Provider("<artifactId>")`): the real application on a random port
+  with Testcontainers PostgreSQL (and Kafka for message providers); `@State` handlers seed data through application
+  services. Message providers produce each message through the real outbox path and return the outbox row's payload
+  and headers, so the verified bytes are the bytes the relay publishes.
+- Consumer tests write pacts to `target/pacts` of their module; the build collects them in `<root>/target/pacts`.
+  Services do not depend on each other, so the Maven reactor gives no order between consumer and provider; provider
+  verification therefore runs as a separate CI step after the build (`-Ppact-verify`,
+  [00 §14](00-engineering-baseline.md#14-continuous-integration)).
+- Three checks:
+
+| Check | Pacts from | Provider from | When | Protects |
+|---|---|---|---|---|
+| Same commit | this commit | this commit | every PR | normal development |
+| Backward | last release, `pacts/released/<version>/` (committed by the release job) | this commit | every PR | consumers of the old release still running during a rolling deploy |
+| Forward | this commit | last release tag (its provider tests, checked out) | nightly and before every release | new consumers that start before their providers have finished rolling |
+
+- A breaking change follows expand / contract, as for migrations: the provider accepts old and new → release →
+  consumers switch → release → the old form is removed. The backward and forward checks enforce that order. Example:
+  a consumer adding an optional field to an internal request body is safe only because internal providers ignore
+  unknown fields ([00 §2](00-engineering-baseline.md#2-technology-stack)).
+- No Pact Broker in the MVP: all services are built and released together from one repository
+  ([ADR-001](../architecture/decisions/ADR-001-microservices-maven-monorepo.md)), so pact files in the build and the
+  released folder are enough. Revisit when services deploy independently: a self-hosted Pact Broker with
+  `record-deployment` and `can-i-deploy` then replaces the released folder and the forward job.
+
+### 10.4 Pacts and WireMock stubs
+
+Component tests keep WireMock for faults and deadline-derived timeouts. Every WireMock mapping that returns a
+business response must match an interaction of the consumer's own pact: `StubConformanceTest` (shared test fixture)
+matches each mapping's request and response against the pact with Pact's matchers. Mappings for faults (delay beyond
+the timeout, `5xx`, connection reset) carry `"metadata": { "pact": "fault" }` and are exempt. This keeps, for example,
+the `INSUFFICIENT_FUNDS` stub of ORC-AC-05 identical to what ledger-service actually returns.
+
+### 10.5 Example (consumer side, P-04)
+
+```java
+@ExtendWith(PactConsumerTestExt.class)
+@PactTestFor(providerName = "ledger-service", pactVersion = PactSpecVersion.V4)
+class LedgerServicePactTest {
+
+  @Pact(consumer = "payment-orchestrator")
+  V4Pact createHoldInsufficientFunds(PactDslWithProvider builder) {
+    return builder
+        .given("account is OPEN with available balance", Map.of("iban", IBAN, "availableMinor", 1000))
+        .uponReceiving("create hold: insufficient funds")
+          .method("POST").path("/v1/holds")
+          .matchHeader("Idempotency-Key", "hold-create:[0-9a-f-]{36}")
+          .body(newJsonBody(b -> {
+              b.uuid("holdId");
+              b.stringValue("debtorIban", IBAN);
+              b.integerType("amountMinor", 12345);
+              b.stringValue("currency", "EUR");
+          }).build())
+        .willRespondWith()
+          .status(422)
+          .matchHeader("Content-Type", "application/problem\\+json.*")
+          .body(newJsonBody(b -> b.stringValue("code", "INSUFFICIENT_FUNDS")).build())
+        .toPact(V4Pact.class);
+  }
+
+  @Test
+  @PactTestFor(pactMethod = "createHoldInsufficientFunds")
+  void PACT_P04_createHoldInsufficientFunds(MockServer server) {
+    var result = ledgerClient(server).createHold(holdRequest(IBAN, 12_345));
+    assertThat(result).isEqualTo(HoldResult.refused(LedgerRefusal.INSUFFICIENT_FUNDS));
+  }
+}
+```
+
+The provider side registers `@State("account is OPEN with available balance")`, which opens and funds the account
+through the ledger's application services, and verifies all interactions with `PactVerificationSpringProvider`.

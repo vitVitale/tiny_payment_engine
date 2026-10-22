@@ -31,6 +31,7 @@ notifications track exit, then apply to every scenario already green. Scenarios 
 | `contracts` | all records of [02](02-messaging-contracts.md) + golden samples; internal REST DTOs added per milestone | M | [01 §4](01-shared-libraries.md#4-contracts) |
 | `iso20022-model` | XSDs, JAXB generation, codec, envelope, XXE-safe validator; builders added in M3 / M4 | M | [01 §2](01-shared-libraries.md#2-iso20022-model) |
 | Observability baseline | structured logs, MDC, OTel, actuator endpoints in a shared Spring Boot starter config | S | [00 §11](00-engineering-baseline.md#11-logging-tracing-metrics) |
+| Contract testing | Pact JVM in the parent POM, pact collection into `<root>/target/pacts`, `-Ppact-verify` CI step, `StubConformanceTest` fixture, `pacts/released/` and the forward check in the release job | M | [20 §10](20-testing-strategy.md#10-consumer-driven-contract-testing-pact) |
 
 Exit: `./mvnw verify` green with the four libraries; compose stack starts; a sample service publishes and consumes
 through outbox / inbox in an integration test.
@@ -44,7 +45,7 @@ through outbox / inbox in an integration test.
 | Memos | holds (create / settle / settle-on-us / release, tombstones), pending credits (create / confirm / cancel) | M |
 | Idempotency guard | key store + replay / conflict | S |
 
-Exit: LED-AC-01…16 green; E2E-A-01 (projections stubbed by a test consumer).
+Exit: LED-AC-01 … -18 green; E2E-A-01 (projections stubbed by a test consumer).
 
 ## M2 — On-us payment (UC-01, UC-02 local, UC-03, UC-04 on-us path, UC-07)
 
@@ -57,7 +58,8 @@ Exit: LED-AC-01…16 green; E2E-A-01 (projections stubbed by a test consumer).
 | risk assessment | assessment API, rule engine with MVP rules (non-EU screening may return `ALLOW` until M4 track delivers lists) | M | risk |
 | vop local | projection, responder, matcher, reference store, check endpoint, retention | M | VoP |
 
-Exit: E2E-O-02, -03, -04, -05, -15, -16, -17, -18, -19 green.
+Exit: E2E-O-02, -03, -04, -05, -15, -16, -17, -18, -19 green; pacts P-01, P-02, P-03, P-04 (create / settle-on-us /
+release hold), P-10 (calls used so far) and M-04 (vop-service) verified ([20 §10.1](20-testing-strategy.md#101-integration-inventory)).
 
 ## M3 — Outgoing via CSM (UC-04, UC-05)
 
@@ -67,7 +69,8 @@ Exit: E2E-O-02, -03, -04, -05, -15, -16, -17, -18, -19 green.
 | gateway outgoing | send-by guard, journal, transmitter, `pacs.008` builder, correlation of `pacs.002`, `RequestPaymentStatus` / `pacs.028` | L | CSM |
 | orchestrator CSM path | `SEND`, CSM event listener (outgoing), `SETTLE_HOLD`, investigation timers, exception cases + API | L | payments core |
 
-Exit: E2E-O-01, -07 … -14, -20, -21 green; CH-02, CH-03 green.
+Exit: E2E-O-01, -07 … -14, -20, -21 green; CH-02, CH-03 green; pacts P-04 (settle hold), P-06, M-01 (send, status
+request) and M-02 (outgoing events) verified.
 
 ## M4 — Incoming via CSM (UC-06) — can run in parallel with M3 once the simulator transport exists
 
@@ -77,15 +80,16 @@ Exit: E2E-O-01, -07 … -14, -20, -21 green; CH-02, CH-03 green.
 | gateway incoming | `pacs.008` validation / dedup, answer coordinator, deadline worker, settlement correlation | L | CSM |
 | orchestrator incoming saga | `CreditTransferReceived`, incoming actions, `AnswerSent` handling, settlement-overdue timer | L | payments core |
 
-Exit: E2E-I-01 … -10, -12, -13 green; GW-AC-12 race test; CH-04 green.
+Exit: E2E-I-01 … -10, -12, -13 green; GW-AC-12 race test; CH-04 green; pacts P-04 (pending credits), P-07, M-01
+(verdicts) and M-02 (incoming events) verified.
 
 ## Parallel tracks (start after M1)
 
 | Track | Epics | Exit |
 |---|---|---|
-| VoP remote | counterparty client, routing, simulator VoP endpoints | E2E-V-01 … -03 |
-| Sanctions | list import (simulator provider), screening job, matcher, cases + API, ledger blocks, non-EU per-payment rule | E2E-O-06, E2E-I-11, E2E-S-01 … -03; RSK-AC-05 … -10 |
-| Notifications | subscriptions, listener, builder (JSON, `camt.054`), dispatcher, retries, admin API | E2E-N-01, -02; NTF-AC-01 … -09; INV-13 switched on for all green scenarios |
+| VoP remote | counterparty client, routing, simulator VoP endpoints | E2E-V-01 … -03; pact P-08 against simulator and own responder |
+| Sanctions | list import (simulator provider), screening job, matcher, cases + API, ledger blocks, non-EU per-payment rule | E2E-O-06, E2E-I-11, E2E-S-01 … -03; RSK-AC-05 … -10; pacts P-05, P-09, M-04 (risk-service) |
+| Notifications | subscriptions, listener, builder (JSON, `camt.054`), dispatcher, retries, admin API | E2E-N-01, -02; NTF-AC-01 … -09; pact M-03; INV-13 switched on for all green scenarios |
 
 ## M5 — Hardening
 

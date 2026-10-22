@@ -27,6 +27,8 @@ tiny_payment_engine/
 │   └── csm-simulator/
 ├── tests/
 │   └── system-tests/               # end-to-end scenarios against the full docker-compose stack
+├── pacts/
+│   └── released/<version>/         # pact files of each release, verified by every build (20 §10.3)
 ├── deploy/
 │   ├── docker-compose.yml          # PostgreSQL, Kafka, mock OAuth2 issuer, all services
 │   ├── postgres/init.sql           # one database + one role per service
@@ -59,11 +61,11 @@ Dependency rules (enforced by the Maven Enforcer plugin and ArchUnit):
 | Migrations | Flyway |
 | Database | PostgreSQL 17+, one database per service |
 | Messaging | Apache Kafka 4.x (KRaft), Spring Kafka |
-| JSON | Jackson; `FAIL_ON_UNKNOWN_PROPERTIES = false` for consumed messages, `true` for REST request bodies |
+| JSON | Jackson; `FAIL_ON_UNKNOWN_PROPERTIES = false` for consumed messages and internal REST request bodies (a newer caller may add optional fields during a rolling deploy, [20 §10.3](20-testing-strategy.md#103-verifying-pacts)), `true` for customer-facing REST request bodies (payment-api, notification subscriptions) |
 | XML | Jakarta XML Binding (JAXB) via `iso20022-model` |
 | Security | Spring Security OAuth2 resource server (JWT) |
 | Observability | Micrometer metrics, Micrometer Tracing with OpenTelemetry (OTLP export), JSON structured logs |
-| Testing | JUnit 5, AssertJ, Testcontainers (PostgreSQL, Kafka), WireMock, ArchUnit, Awaitility |
+| Testing | JUnit 5, AssertJ, Testcontainers (PostgreSQL, Kafka), WireMock, ArchUnit, Awaitility, Pact JVM (consumer `junit5`, provider `junit5spring`, Pact specification V4) |
 | Performance tests | Gatling (Java DSL) in `tests/system-tests` |
 
 Exact library versions come from the Spring Boot BOM; anything not in the BOM is pinned in the parent POM
@@ -282,11 +284,15 @@ Kafka topics are created by a `kafka-init` compose job (and by `NewTopic` beans 
 
 Pipeline on every pull request and on `main`:
 
-1. `./mvnw -B verify` — compile, unit tests, Testcontainers integration tests, ArchUnit, contract golden-sample tests,
-   OpenAPI drift check, Enforcer rules.
-2. `plantuml -checkonly architecture/**/*.puml`.
-3. Build container images (Jib or Spring Boot buildpacks), tag with commit SHA.
-4. `tests/system-tests`: start the compose stack, run the scenario catalogue tagged `@smoke` on PRs, everything on `main`.
-5. Nightly: full scenario catalogue, Gatling load profile, failure-injection scenarios ([20 §5](20-testing-strategy.md#5-failure-injection-scenarios)).
+1. `./mvnw -B verify` — compile, unit tests (including Pact consumer tests, which write the pact files), Testcontainers
+   integration tests, ArchUnit, contract golden-sample tests, OpenAPI drift check, Enforcer rules.
+2. `./mvnw -B -Ppact-verify verify` — every provider verifies this commit's pacts and those of the last release in
+   `pacts/released/` ([20 §10.3](20-testing-strategy.md#103-verifying-pacts)).
+3. `plantuml -checkonly architecture/**/*.puml`.
+4. Build container images (Jib or Spring Boot buildpacks), tag with commit SHA.
+5. `tests/system-tests`: start the compose stack, run the scenario catalogue tagged `@smoke` on PRs, everything on `main`.
+6. Nightly: full scenario catalogue, Gatling load profile, failure-injection scenarios ([20 §5](20-testing-strategy.md#5-failure-injection-scenarios)),
+   forward pact check (the last release's providers against this commit's pacts).
+7. Release: the forward pact check must be green; the release job copies the pact files to `pacts/released/<version>/`.
 
 Branching: trunk-based, short-lived feature branches, squash merge. Conventional Commits for messages.
