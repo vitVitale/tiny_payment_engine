@@ -1,0 +1,9 @@
+spring:
+  application:
+    name: risk-service
+
+management:
+  endpoint:
+    health:
+      probes:
+        enabled: true
