@@ -105,6 +105,40 @@
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-failsafe-plugin</artifactId>
             </plugin>
+            <!-- Both source sets compile into test-classes, so the class name alone decides Surefire vs Failsafe -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-antrun-plugin</artifactId>
+                <executions>
+                    <execution>
+                        <id>check-test-naming</id>
+                        <phase>validate</phase>
+                        <goals>
+                            <goal>run</goal>
+                        </goals>
+                        <configuration>
+                            <target>
+                                <fail message="Tests under src/integrationTest must be named *IT (Surefire would run them as unit tests).">
+                                    <condition>
+                                        <resourcecount when="greater" count="0">
+                                            <fileset dir="${project.basedir}/src/integrationTest/java" erroronmissingdir="false"
+                                                     includes="**/Test*.java **/*Test.java **/*Tests.java **/*TestCase.java"/>
+                                        </resourcecount>
+                                    </condition>
+                                </fail>
+                                <fail message="Tests under src/test must not be named *IT (Failsafe would run them as integration tests).">
+                                    <condition>
+                                        <resourcecount when="greater" count="0">
+                                            <fileset dir="${project.basedir}/src/test/java" erroronmissingdir="false"
+                                                     includes="**/IT*.java **/*IT.java **/*ITCase.java"/>
+                                        </resourcecount>
+                                    </condition>
+                                </fail>
+                            </target>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-enforcer-plugin</artifactId>
