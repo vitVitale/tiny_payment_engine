@@ -12,4 +12,40 @@
     </parent>
 
     <artifactId>messaging</artifactId>
+
+    <build>
+        <plugins>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-enforcer-plugin</artifactId>
+                <executions>
+                    <execution>
+                        <id>enforce-lib-dependencies</id>
+                        <goals>
+                            <goal>enforce</goal>
+                        </goals>
+                        <configuration>
+                            <rules>
+                                <!-- specs/00-engineering-baseline.md §1: allow-list of direct non-test dependencies -->
+                                <bannedDependencies>
+                                    <message>messaging depends only on contracts, observability, Spring Kafka and Spring JDBC (specs/00-engineering-baseline.md §1).</message>
+                                    <searchTransitive>false</searchTransitive>
+                                    <excludes>
+                                        <exclude>*</exclude>
+                                    </excludes>
+                                    <includes>
+                                        <include>com.tpe:contracts</include>
+                                        <include>com.tpe:observability</include>
+                                        <include>org.springframework.kafka:spring-kafka</include>
+                                        <include>org.springframework:spring-jdbc</include>
+                                        <include>*:*:*:*:test</include>
+                                    </includes>
+                                </bannedDependencies>
+                            </rules>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+        </plugins>
+    </build>
 </project>

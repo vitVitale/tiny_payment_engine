@@ -23,6 +23,7 @@
         <module>libs/messaging</module>
         <module>libs/observability</module>
         <module>libs/contracts</module>
+        <module>libs/test-support</module>
         <module>services/payment-api</module>
         <module>services/payment-orchestrator</module>
         <module>services/ledger-service</module>
@@ -42,7 +43,25 @@
         <!-- Versions not managed by the Spring Boot BOM. No ranges, no LATEST. -->
         <!-- bound by the default lifecycle but not managed by Boot; requirePluginVersions needs it pinned -->
         <maven-site-plugin.version>3.22.0</maven-site-plugin.version>
+        <archunit.version>1.5.1</archunit.version>
     </properties>
+
+    <dependencyManagement>
+        <dependencies>
+            <!-- shared test fixtures; test scope only (specs/00-engineering-baseline.md §1) -->
+            <dependency>
+                <groupId>com.tpe</groupId>
+                <artifactId>test-support</artifactId>
+                <version>${project.version}</version>
+                <scope>test</scope>
+            </dependency>
+            <dependency>
+                <groupId>com.tngtech.archunit</groupId>
+                <artifactId>archunit-junit5</artifactId>
+                <version>${archunit.version}</version>
+            </dependency>
+        </dependencies>
+    </dependencyManagement>
 
     <dependencies>
         <dependency>
@@ -161,6 +180,27 @@
                                     <!-- our own modules are 0.1.0-SNAPSHOT -->
                                     <allowSnapshots>true</allowSnapshots>
                                 </banDynamicVersions>
+                                <!-- specs/00-engineering-baseline.md §1; each lib narrows this further in its own POM -->
+                                <bannedDependencies>
+                                    <message>No module may depend on a service, the simulator or a tool, and libs/test-support is test scope only (specs/00-engineering-baseline.md §1).</message>
+                                    <excludes>
+                                        <exclude>com.tpe:payment-api</exclude>
+                                        <exclude>com.tpe:payment-orchestrator</exclude>
+                                        <exclude>com.tpe:ledger-service</exclude>
+                                        <exclude>com.tpe:vop-service</exclude>
+                                        <exclude>com.tpe:risk-service</exclude>
+                                        <exclude>com.tpe:csm-gateway</exclude>
+                                        <exclude>com.tpe:notification-service</exclude>
+                                        <exclude>com.tpe:csm-simulator</exclude>
+                                        <exclude>com.tpe:slo-rules</exclude>
+                                        <exclude>com.tpe:consumer-lag-exporter</exclude>
+                                        <exclude>com.tpe:invariant-checker</exclude>
+                                        <exclude>com.tpe:test-support:*:*:compile</exclude>
+                                        <exclude>com.tpe:test-support:*:*:runtime</exclude>
+                                        <exclude>com.tpe:test-support:*:*:provided</exclude>
+                                        <exclude>com.tpe:test-support:*:*:system</exclude>
+                                    </excludes>
+                                </bannedDependencies>
                             </rules>
                         </configuration>
                     </execution>
