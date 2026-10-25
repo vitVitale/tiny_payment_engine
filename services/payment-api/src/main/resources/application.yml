@@ -1,0 +1,9 @@
+spring:
+  application:
+    name: payment-api
+
+management:
+  endpoint:
+    health:
+      probes:
+        enabled: true

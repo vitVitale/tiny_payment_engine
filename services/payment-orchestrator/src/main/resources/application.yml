@@ -1,0 +1,9 @@
+spring:
+  application:
+    name: payment-orchestrator
+
+management:
+  endpoint:
+    health:
+      probes:
+        enabled: true

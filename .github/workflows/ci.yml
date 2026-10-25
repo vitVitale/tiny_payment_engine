@@ -1,0 +1,44 @@
+# Pipeline of specs/00-engineering-baseline.md §14; later steps are added by their own tickets.
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+env:
+  PLANTUML_VERSION: 1.2026.8
+  PLANTUML_SHA256: 0f77e5f769836b3dee340e207fe497c3e4c43e973d559e3c306915da9c32e34c
+
+jobs:
+  build:
+    name: Build and test (step 1)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '25'
+          cache: maven
+      - run: ./mvnw -B verify
+
+  diagrams:
+    name: PlantUML check (step 3)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '25'
+      - name: Download PlantUML
+        run: |
+          curl -sSfLo "$RUNNER_TEMP/plantuml.jar" \
+            "https://repo.maven.apache.org/maven2/net/sourceforge/plantuml/plantuml/$PLANTUML_VERSION/plantuml-$PLANTUML_VERSION.jar"
+          echo "$PLANTUML_SHA256  $RUNNER_TEMP/plantuml.jar" | sha256sum -c -
+      - name: Check diagrams
+        run: java -jar "$RUNNER_TEMP/plantuml.jar" -checkonly "architecture/**/*.puml"

@@ -45,7 +45,7 @@ tiny_payment_engine/
 ```
 
 Maven coordinates: `groupId` `com.tpe`, `artifactId` = directory name, version `0.1.0-SNAPSHOT` for all modules
-(released together). Java root package `com.tpe.<module>` with dashes dropped: `com.tpe.ledger`, `com.tpe.csmgateway`,
+(released together). Java root package `com.tpe.<module>` with dashes dropped: `com.tpe.ledgerservice`, `com.tpe.csmgateway`,
 `com.tpe.paymentapi`, …
 
 Dependency rules (enforced by the Maven Enforcer plugin and ArchUnit):

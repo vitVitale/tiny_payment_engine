@@ -1,0 +1,9 @@
+spring:
+  application:
+    name: csm-simulator
+
+management:
+  endpoint:
+    health:
+      probes:
+        enabled: true

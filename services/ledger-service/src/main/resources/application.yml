@@ -1,0 +1,9 @@
+spring:
+  application:
+    name: ledger-service
+
+management:
+  endpoint:
+    health:
+      probes:
+        enabled: true

@@ -82,7 +82,7 @@ Versions follow the EPC SCT Inst implementation guidelines. Later messages (`pac
 
 - `src/main/resources/xsd/` — the ISO 20022 XSDs (from iso20022.org) plus EPC SCT Inst restricted XSDs where available.
 - JAXB classes generated at build time (`org.jvnet.jaxb:jaxb-maven-plugin`), one Java package per message version,
-  e.g. `com.tpe.iso20022.pacs008v08`. Generated sources are not committed.
+  e.g. `com.tpe.iso20022model.pacs008v08`. Generated sources are not committed.
 - `IsoCodec` — `String marshal(Object document)`, `<T> T unmarshal(String xml, Class<T> type)`; JAXB contexts are
   created once and cached; marshallers are not thread-safe and are created per call or pooled.
 - `XsdValidator` — validates a raw XML string against the schema of its namespace before unmarshalling; returns a

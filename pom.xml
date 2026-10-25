@@ -1,0 +1,171 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <!-- Spring Boot BOM and plugin management; see specs/00-engineering-baseline.md §1, §2 -->
+    <parent>
+        <groupId>org.springframework.boot</groupId>
+        <artifactId>spring-boot-starter-parent</artifactId>
+        <version>4.0.8</version>
+        <relativePath/>
+    </parent>
+
+    <groupId>com.tpe</groupId>
+    <artifactId>tiny_payment_engine</artifactId>
+    <version>0.1.0-SNAPSHOT</version>
+    <packaging>pom</packaging>
+
+    <modules>
+        <module>libs/payment-domain</module>
+        <module>libs/iso20022-model</module>
+        <module>libs/messaging</module>
+        <module>libs/observability</module>
+        <module>libs/contracts</module>
+        <module>services/payment-api</module>
+        <module>services/payment-orchestrator</module>
+        <module>services/ledger-service</module>
+        <module>services/vop-service</module>
+        <module>services/risk-service</module>
+        <module>services/csm-gateway</module>
+        <module>services/notification-service</module>
+        <module>simulators/csm-simulator</module>
+        <module>tools/slo-rules</module>
+        <module>tools/consumer-lag-exporter</module>
+        <module>tools/invariant-checker</module>
+        <module>tests/system-tests</module>
+    </modules>
+
+    <properties>
+        <java.version>25</java.version>
+        <!-- Versions not managed by the Spring Boot BOM. No ranges, no LATEST. -->
+        <!-- bound by the default lifecycle but not managed by Boot; requirePluginVersions needs it pinned -->
+        <maven-site-plugin.version>3.22.0</maven-site-plugin.version>
+    </properties>
+
+    <dependencies>
+        <dependency>
+            <groupId>org.junit.jupiter</groupId>
+            <artifactId>junit-jupiter</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.assertj</groupId>
+            <artifactId>assertj-core</artifactId>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
+
+    <build>
+        <pluginManagement>
+            <plugins>
+                <plugin>
+                    <groupId>org.apache.maven.plugins</groupId>
+                    <artifactId>maven-site-plugin</artifactId>
+                    <version>${maven-site-plugin.version}</version>
+                </plugin>
+            </plugins>
+        </pluginManagement>
+        <plugins>
+            <!-- src/integrationTest holds component tests (*IT), run by Failsafe in verify; specs/20-testing-strategy.md §1 -->
+            <plugin>
+                <groupId>org.codehaus.mojo</groupId>
+                <artifactId>build-helper-maven-plugin</artifactId>
+                <executions>
+                    <execution>
+                        <id>add-integration-test-sources</id>
+                        <phase>generate-test-sources</phase>
+                        <goals>
+                            <goal>add-test-source</goal>
+                        </goals>
+                        <configuration>
+                            <sources>
+                                <source>src/integrationTest/java</source>
+                            </sources>
+                        </configuration>
+                    </execution>
+                    <execution>
+                        <id>add-integration-test-resources</id>
+                        <phase>generate-test-resources</phase>
+                        <goals>
+                            <goal>add-test-resource</goal>
+                        </goals>
+                        <configuration>
+                            <resources>
+                                <resource>
+                                    <directory>src/integrationTest/resources</directory>
+                                </resource>
+                            </resources>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-failsafe-plugin</artifactId>
+            </plugin>
+            <!-- Both source sets compile into test-classes, so the class name alone decides Surefire vs Failsafe -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-antrun-plugin</artifactId>
+                <executions>
+                    <execution>
+                        <id>check-test-naming</id>
+                        <phase>validate</phase>
+                        <goals>
+                            <goal>run</goal>
+                        </goals>
+                        <configuration>
+                            <target>
+                                <fail message="Tests under src/integrationTest must be named *IT (Surefire would run them as unit tests).">
+                                    <condition>
+                                        <resourcecount when="greater" count="0">
+                                            <fileset dir="${project.basedir}/src/integrationTest/java" erroronmissingdir="false"
+                                                     includes="**/Test*.java **/*Test.java **/*Tests.java **/*TestCase.java"/>
+                                        </resourcecount>
+                                    </condition>
+                                </fail>
+                                <fail message="Tests under src/test must not be named *IT (Failsafe would run them as integration tests).">
+                                    <condition>
+                                        <resourcecount when="greater" count="0">
+                                            <fileset dir="${project.basedir}/src/test/java" erroronmissingdir="false"
+                                                     includes="**/IT*.java **/*IT.java **/*ITCase.java"/>
+                                        </resourcecount>
+                                    </condition>
+                                </fail>
+                            </target>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-enforcer-plugin</artifactId>
+                <executions>
+                    <execution>
+                        <id>enforce-build-rules</id>
+                        <goals>
+                            <goal>enforce</goal>
+                        </goals>
+                        <configuration>
+                            <rules>
+                                <requireMavenVersion>
+                                    <version>3.9.16</version>
+                                </requireMavenVersion>
+                                <requireJavaVersion>
+                                    <version>25</version>
+                                </requireJavaVersion>
+                                <requirePluginVersions/>
+                                <banDynamicVersions>
+                                    <!-- our own modules are 0.1.0-SNAPSHOT -->
+                                    <allowSnapshots>true</allowSnapshots>
+                                </banDynamicVersions>
+                            </rules>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+        </plugins>
+    </build>
+</project>
