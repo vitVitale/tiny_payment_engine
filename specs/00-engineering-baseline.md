@@ -15,7 +15,8 @@ tiny_payment_engine/
 │   ├── iso20022-model/             # XSDs, JAXB-generated classes, codec + XSD validation
 │   ├── messaging/                  # outbox, relay, inbox, DLT handling, polling workers
 │   ├── observability/              # telemetry setup, payment span attributes, trace context codec (26 §4)
-│   └── contracts/                  # Kafka message records, internal REST DTOs, golden samples
+│   ├── contracts/                  # Kafka message records, internal REST DTOs, golden samples
+│   └── test-support/               # shared test fixtures (ArchUnit rules, ...); test scope only
 ├── services/
 │   ├── payment-api/
 │   ├── payment-orchestrator/
@@ -57,7 +58,10 @@ Dependency rules (enforced by the Maven Enforcer plugin and ArchUnit):
 - `libs/iso20022-model` depends only on `payment-domain` and Jakarta XML Binding.
 - `libs/observability` depends only on `payment-domain`, Micrometer, Micrometer Tracing, OpenTelemetry and Spring
   Boot autoconfigure. It contains no business logic. `messaging` depends on it.
-- `tools/*` MAY depend on `libs/*` and MUST NOT be called by any service.
+- `libs/test-support` holds shared test fixtures (the ArchUnit rules of §3, §5, §6). Any module MAY depend on it in
+  `test` scope only; it is never a compile or runtime dependency. It depends only on test libraries (ArchUnit, JUnit,
+  AssertJ).
+- `tools/*` MAY depend on `libs/*` and MUST NOT be called by any service. No module depends on a tool.
 - `csm-simulator` MUST NOT be packaged into any production image.
 
 ## 2. Technology stack
@@ -93,12 +97,14 @@ com.tpe.<svc>
 └── infrastructure/   # repositories, REST clients, outbox wiring, schedulers, configuration
 ```
 
-ArchUnit rules (shared test fixture in the parent):
+ArchUnit rules (shared test fixture `ArchitectureRules` in `libs/test-support`, run by every service and the simulator):
 
 - `domain` MUST NOT depend on `api`, `application`, `infrastructure`, Spring or Jackson.
 - `api` MUST NOT depend on `infrastructure` directly.
 - `@Transactional` only on `application` classes.
 - No class outside `infrastructure` imports `org.springframework.kafka` or `org.springframework.jdbc`.
+  Exception: Kafka listeners in `api` may use `org.springframework.kafka.annotation` and
+  `org.springframework.kafka.support` (`@KafkaListener`, `Acknowledgment`, `KafkaHeaders`).
 
 ## 4. Identifiers
 

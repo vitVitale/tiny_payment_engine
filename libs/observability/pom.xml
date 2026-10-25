@@ -12,4 +12,40 @@
     </parent>
 
     <artifactId>observability</artifactId>
+
+    <build>
+        <plugins>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-enforcer-plugin</artifactId>
+                <executions>
+                    <execution>
+                        <id>enforce-lib-dependencies</id>
+                        <goals>
+                            <goal>enforce</goal>
+                        </goals>
+                        <configuration>
+                            <rules>
+                                <!-- specs/00-engineering-baseline.md §1: allow-list of direct non-test dependencies -->
+                                <bannedDependencies>
+                                    <message>observability depends only on payment-domain, Micrometer, Micrometer Tracing, OpenTelemetry and Spring Boot autoconfigure (specs/00-engineering-baseline.md §1).</message>
+                                    <searchTransitive>false</searchTransitive>
+                                    <excludes>
+                                        <exclude>*</exclude>
+                                    </excludes>
+                                    <includes>
+                                        <include>com.tpe:payment-domain</include>
+                                        <include>io.micrometer:*</include>
+                                        <include>io.opentelemetry:*</include>
+                                        <include>org.springframework.boot:spring-boot-autoconfigure</include>
+                                        <include>*:*:*:*:test</include>
+                                    </includes>
+                                </bannedDependencies>
+                            </rules>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+        </plugins>
+    </build>
 </project>
