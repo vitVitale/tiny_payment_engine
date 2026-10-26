@@ -30,7 +30,8 @@ tiny_payment_engine/
 ├── tools/                          # operational tools, never on the payment path (26 §8, §10, §12)
 │   ├── slo-rules/                  # SLO files → Prometheus rules + SLO dashboards
 │   ├── consumer-lag-exporter/
-│   └── invariant-checker/
+│   ├── invariant-checker/
+│   └── traceability-check/         # CI check: every spec id has a test (20 §1); pending-ids baseline
 ├── tests/
 │   └── system-tests/               # end-to-end scenarios against the full docker-compose stack
 ├── pacts/
@@ -340,7 +341,8 @@ Pipeline on every pull request and on `main`:
    integration tests, ArchUnit, contract golden-sample tests, OpenAPI drift check, Enforcer rules.
 2. `./mvnw -B -Ppact-verify verify` — every provider verifies this commit's pacts and those of the last release in
    `pacts/released/` ([20 §10.3](20-testing-strategy.md#103-verifying-pacts)).
-3. `plantuml -checkonly architecture/**/*.puml`.
+3. `plantuml -checkonly architecture/**/*.puml`; the traceability check of
+   [20 §1](20-testing-strategy.md#1-test-levels) against `origin/main` (command in the [README](../README.md#traceability-check)).
 4. Build container images (Jib or Spring Boot buildpacks), tag with commit SHA; scan the dependency tree and the images,
    and on release write the SBOM (§12.3 SEC-08).
 5. `tests/system-tests`: start the compose stack, run the scenario catalogue tagged `@smoke` on PRs, everything on `main`.

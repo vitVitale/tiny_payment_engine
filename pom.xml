@@ -35,6 +35,7 @@
         <module>tools/slo-rules</module>
         <module>tools/consumer-lag-exporter</module>
         <module>tools/invariant-checker</module>
+        <module>tools/traceability-check</module>
         <module>tests/system-tests</module>
     </modules>
 
@@ -195,6 +196,7 @@
                                         <exclude>com.tpe:slo-rules</exclude>
                                         <exclude>com.tpe:consumer-lag-exporter</exclude>
                                         <exclude>com.tpe:invariant-checker</exclude>
+                                        <exclude>com.tpe:traceability-check</exclude>
                                         <exclude>com.tpe:test-support:*:*:compile</exclude>
                                         <exclude>com.tpe:test-support:*:*:runtime</exclude>
                                         <exclude>com.tpe:test-support:*:*:provided</exclude>
