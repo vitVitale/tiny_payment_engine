@@ -42,3 +42,18 @@ jobs:
           echo "$PLANTUML_SHA256  $RUNNER_TEMP/plantuml.jar" | sha256sum -c -
       - name: Check diagrams
         run: java -jar "$RUNNER_TEMP/plantuml.jar" -checkonly "architecture/**/*.puml"
+
+  traceability:
+    name: Traceability check (step 3)
+    runs-on: ubuntu-latest
+    steps:
+      # full history: the pending-ids baseline is compared with main at the merge base (specs/20-testing-strategy.md §1)
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '25'
+      - name: Check traceability
+        run: java tools/traceability-check/src/main/java/com/tpe/traceabilitycheck/TraceabilityCheck.java
