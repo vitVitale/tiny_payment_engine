@@ -45,6 +45,7 @@
         <!-- bound by the default lifecycle but not managed by Boot; requirePluginVersions needs it pinned -->
         <maven-site-plugin.version>3.22.0</maven-site-plugin.version>
         <archunit.version>1.5.1</archunit.version>
+        <jqwik.version>1.10.2</jqwik.version>
     </properties>
 
     <dependencyManagement>
@@ -60,6 +61,13 @@
                 <groupId>com.tngtech.archunit</groupId>
                 <artifactId>archunit-junit5</artifactId>
                 <version>${archunit.version}</version>
+            </dependency>
+            <!-- property-based tests; specs/20-testing-strategy.md §1 -->
+            <dependency>
+                <groupId>net.jqwik</groupId>
+                <artifactId>jqwik</artifactId>
+                <version>${jqwik.version}</version>
+                <scope>test</scope>
             </dependency>
         </dependencies>
     </dependencyManagement>

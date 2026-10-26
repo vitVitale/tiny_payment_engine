@@ -82,7 +82,7 @@ Dependency rules (enforced by the Maven Enforcer plugin and ArchUnit):
 | XML | Jakarta XML Binding (JAXB) via `iso20022-model` |
 | Security | Spring Security OAuth2 resource server (JWT) |
 | Observability | Micrometer metrics (Prometheus scrape), Micrometer Tracing with OpenTelemetry (OTLP export), JSON structured logs; pipeline Grafana Alloy → Mimir, Loki, Tempo, Grafana ([ADR-013](../architecture/decisions/ADR-013-telemetry-stack-otel-grafana.md), [26](26-observability.md)) |
-| Testing | JUnit 5, AssertJ, Testcontainers (PostgreSQL, Kafka), WireMock, ArchUnit, Awaitility, Pact JVM (consumer `junit5`, provider `junit5spring`, Pact specification V4) |
+| Testing | JUnit 5, AssertJ, jqwik, Testcontainers (PostgreSQL, Kafka), WireMock, ArchUnit, Awaitility, Pact JVM (consumer `junit5`, provider `junit5spring`, Pact specification V4) |
 | Performance tests | Gatling (Java DSL) in `tests/system-tests` |
 
 Exact library versions come from the Spring Boot BOM; anything not in the BOM is pinned in the parent POM
