@@ -1,0 +1,3 @@
+# Local compose stack (specs/00-engineering-baseline.md §13): docker compose -f deploy/docker-compose.yml up -d postgres kafka oauth2
+server:
+  port: 8090

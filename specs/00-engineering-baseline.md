@@ -39,6 +39,8 @@ tiny_payment_engine/
 ├── deploy/
 │   ├── docker-compose.yml          # PostgreSQL, Kafka, mock OAuth2 issuer, all services
 │   ├── postgres/init.sql           # one database + one role per service
+│   ├── kafka/                      # topics.yml (topics + ACLs, ADR-015), kafka-init.sh, start.sh (broker + init)
+│   ├── oauth2/config.json          # claims of the mock OAuth2 issuer's tokens
 │   ├── config/bank-directory.yml   # shared routing directory (see 01 §1.4)
 │   ├── slo/<service>.yml           # SLO definitions (25 §9.1)
 │   └── observability/              # Alloy, backend values, Grafana, rules, Alertmanager, runbooks, probes (26)
@@ -283,6 +285,9 @@ Authentication and authorisation are decided in [ADR-012](../architecture/decisi
 - Secrets (DB passwords, webhook-secret encryption key, VoP pepper, OAuth2 client secrets, keystores) are never
   committed and never baked into images. Until SEC-03 is in place (from M5) they come from environment variables; in `prod` they never do
   ([ADR-017](../architecture/decisions/ADR-017-secrets-keys-and-encryption-at-rest.md)).
+  Exception: the fixed credentials of the local compose stack (§13; database roles, PostgreSQL superuser, mock
+  OAuth2 client secret) are committed and documented. They are not secrets: they work only against that stack, and
+  no other profile may use them.
 
 ### 12.3 Production requirements
 
@@ -330,8 +335,13 @@ Profiles: `local` (compose hosts, debug logging off, funding endpoint enabled), 
 forbidden by a startup check).
 
 Kafka topics and ACLs are declared in `deploy/kafka/topics.yml` ([ADR-015](../architecture/decisions/ADR-015-kafka-authentication-and-acls.md))
-and created by a `kafka-init` compose job (and by `NewTopic` beans in tests), not by auto-creation
-(`auto.create.topics.enable=false`). Topic settings: [02 §2](02-messaging-contracts.md#2-topics).
+and created by the `kafka-init` step `deploy/kafka/kafka-init.sh` (and by `NewTopic` beans in tests), not by
+auto-creation (`auto.create.topics.enable=false`). Topic settings: [02 §2](02-messaging-contracts.md#2-topics). The
+`kafka` compose service runs `kafka-init` after starting the broker and reports healthy only once the topics exist,
+so `up -d kafka` alone yields them.
+
+Local credentials (database roles `<database>` / `<database>-local`), the token request for the mock issuer and the
+smoke check of this stack are in the [README](../README.md#local-stack).
 
 ## 14. Continuous integration
 
@@ -346,6 +356,7 @@ Pipeline on every pull request and on `main`:
 4. Build container images (Jib or Spring Boot buildpacks), tag with commit SHA; scan the dependency tree and the images,
    and on release write the SBOM (§12.3 SEC-08).
 5. `tests/system-tests`: start the compose stack, run the scenario catalogue tagged `@smoke` on PRs, everything on `main`.
+   Until the services have images, this step starts the infrastructure only and runs `LocalStackSmokeIT`.
 6. Nightly: full scenario catalogue, Gatling load profile, failure-injection scenarios ([20 §5](20-testing-strategy.md#5-failure-injection-scenarios)),
    forward pact check (the last release's providers against this commit's pacts).
 7. Release: the forward pact check must be green; the release job copies the pact files to `pacts/released/<version>/`.
