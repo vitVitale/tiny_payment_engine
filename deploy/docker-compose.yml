@@ -1,0 +1,77 @@
+# Local stack (specs/00-engineering-baseline.md §13). Infrastructure only for now:
+#   docker compose -f deploy/docker-compose.yml up -d --wait postgres kafka oauth2
+# Service images come with the first runnable services.
+name: tpe
+
+services:
+  postgres:
+    image: postgres:17.6-alpine
+    environment:
+      POSTGRES_PASSWORD: postgres-local    # superuser, local only
+    ports:
+      - "5432:5432"
+    volumes:
+      - ./postgres/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      # TCP, not the socket: during init the image runs a socket-only server
+      test: ["CMD", "pg_isready", "-h", "127.0.0.1", "-U", "postgres"]
+      interval: 2s
+      timeout: 5s
+      retries: 30
+
+  # single KRaft node; topics from kafka/topics.yml, never auto-created (02 §2, ADR-015)
+  kafka:
+    image: apache/kafka:4.1.0
+    entrypoint: ["bash", "/opt/tpe/start.sh"]
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@localhost:9093
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      # PLAINTEXT for clients on the host, INTERNAL for containers on the compose network
+      KAFKA_LISTENERS: PLAINTEXT://:9092,INTERNAL://:19092,CONTROLLER://:9093
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://localhost:9092,INTERNAL://kafka:19092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,INTERNAL:PLAINTEXT,CONTROLLER:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: INTERNAL
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "false"
+      KAFKA_DEFAULT_REPLICATION_FACTOR: 1
+      KAFKA_MIN_INSYNC_REPLICAS: 1
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+    ports:
+      - "9092:9092"
+    volumes:
+      - ./kafka/start.sh:/opt/tpe/start.sh:ro
+      - ./kafka/kafka-init.sh:/opt/tpe/kafka-init.sh:ro
+      - ./kafka/topics.yml:/opt/tpe/topics.yml:ro
+    healthcheck:
+      # ready once kafka-init.sh has created the topics
+      test: ["CMD", "test", "-f", "/tmp/kafka-init.done"]
+      # kafka-init runs a CLI JVM per step: about 40 s locally, more on a small CI runner
+      start_period: 180s
+      start_interval: 2s
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  # OAuth2 / OIDC issuer for local tokens (00 §12.1); token request: README "Local stack"
+  oauth2:
+    image: ghcr.io/navikt/mock-oauth2-server:3.0.0
+    environment:
+      SERVER_PORT: 8099
+      JSON_CONFIG_PATH: /config/config.json
+    ports:
+      - "8099:8099"
+    volumes:
+      - ./oauth2/config.json:/config/config.json:ro
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://localhost:8099/default/.well-known/openid-configuration"]
+      interval: 2s
+      timeout: 5s
+      retries: 30
+
+volumes:
+  postgres-data:

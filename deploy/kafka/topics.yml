@@ -1,0 +1,58 @@
+# Kafka topics and ACLs (specs/02-messaging-contracts.md §2, ADR-015). A new topic, producer or consumer changes the
+# 02 §2 table and this file in the same pull request.
+#
+# partitions are the local counts (production in the comment); retention-ms -1 is unlimited.
+# producers / consumers are the ACLs of ADR-015; declared here, enforced from M5 (the local profile has no ACLs).
+# deploy/kafka/kafka-init.sh reads this file line by line: keep one "key: value" per line and lists in [ ].
+# TopicsFileTest (tests/system-tests) checks this file against the 02 §2 table.
+topics:
+  - name: csm.outbound.commands
+    partitions: 3              # production 12
+    retention-ms: 604800000    # 7 d
+    cleanup-policy: delete
+    producers: [payment-orchestrator]
+    consumers: [csm-gateway]
+  - name: csm.inbound.events
+    partitions: 3              # production 12
+    retention-ms: 604800000    # 7 d
+    cleanup-policy: delete
+    producers: [csm-gateway]
+    consumers: [payment-orchestrator]
+  - name: payments.events
+    partitions: 3              # production 12
+    retention-ms: 604800000    # 7 d
+    cleanup-policy: delete
+    producers: [payment-orchestrator]
+    consumers: [notification-service]
+  - name: accounts.events
+    partitions: 3              # production 6
+    retention-ms: -1
+    cleanup-policy: compact
+    producers: [ledger-service]
+    consumers: [vop-service, risk-service]
+
+  # dead-letter topics: written by the messaging lib of the source topic's consumers, read by ops-dlt (ADR-015)
+  - name: csm.outbound.commands.dlt
+    partitions: 1
+    retention-ms: 2592000000   # 30 d
+    cleanup-policy: delete
+    producers: [csm-gateway]
+    consumers: [ops-dlt]
+  - name: csm.inbound.events.dlt
+    partitions: 1
+    retention-ms: 2592000000   # 30 d
+    cleanup-policy: delete
+    producers: [payment-orchestrator]
+    consumers: [ops-dlt]
+  - name: payments.events.dlt
+    partitions: 1
+    retention-ms: 2592000000   # 30 d
+    cleanup-policy: delete
+    producers: [notification-service]
+    consumers: [ops-dlt]
+  - name: accounts.events.dlt
+    partitions: 1
+    retention-ms: 2592000000   # 30 d
+    cleanup-policy: delete
+    producers: [vop-service, risk-service]
+    consumers: [ops-dlt]

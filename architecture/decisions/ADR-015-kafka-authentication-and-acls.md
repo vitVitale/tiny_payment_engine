@@ -41,7 +41,7 @@ Kafka; there is no service mesh.
   Result for the payment topics: only payment-orchestrator writes `csm.outbound.commands` and `payments.events`; only
   csm-gateway writes `csm.inbound.events`; only ledger-service writes `accounts.events`, and only
   vop-service and risk-service read it.
-- **Single source:** topics and ACLs are declared in `deploy/kafka/topics.yml` and applied by the `kafka-init` job;
+- **Single source:** topics and ACLs are declared in `deploy/kafka/topics.yml` and applied by the `kafka-init` step;
   a configuration-consistency test ([20 §1](../../specs/20-testing-strategy.md#1-test-levels)) checks the file against
   the topic table of 02 §2.
 - **Profiles:** `local` stays `PLAINTEXT` without ACLs. `systemtest` uses `SASL_PLAINTEXT` with SCRAM and the same

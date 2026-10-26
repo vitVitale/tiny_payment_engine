@@ -1,0 +1,16 @@
+# Local compose stack (specs/00-engineering-baseline.md §13): docker compose -f deploy/docker-compose.yml up -d postgres kafka oauth2
+server:
+  port: 8084
+spring:
+  datasource:
+    url: jdbc:postgresql://localhost:5432/risk
+    username: risk
+    # local only, see deploy/postgres/init.sql
+    password: risk-local
+  kafka:
+    bootstrap-servers: localhost:9092
+  security:
+    oauth2:
+      resourceserver:
+        jwt:
+          issuer-uri: http://localhost:8099/default
