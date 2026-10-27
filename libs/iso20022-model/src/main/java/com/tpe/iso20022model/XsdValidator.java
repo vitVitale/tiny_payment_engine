@@ -47,7 +47,7 @@ public final class XsdValidator {
             "head.001.001.02", "pain.001.001.09", "pain.002.001.10", "pacs.008.001.08",
             "pacs.002.001.10", "pacs.028.001.03", "camt.054.001.08");
 
-    private static final String NAMESPACE_PREFIX = "urn:iso:std:iso:20022:tech:xsd:";
+    static final String NAMESPACE_PREFIX ="urn:iso:std:iso:20022:tech:xsd:";
     /** Schema validation messages start with their XML Schema rule key, e.g. {@code cvc-pattern-valid: ...}. */
     private static final Pattern RULE_KEY = Pattern.compile("^(cvc-[a-zA-Z0-9.-]+):");
 
@@ -63,15 +63,17 @@ public final class XsdValidator {
     public XsdValidator() {
         SchemaFactory factory = SecureXml.newSchemaFactory();
         this.schemasByNamespace = VERSIONS.stream().collect(
-                Collectors.toUnmodifiableMap(version -> NAMESPACE_PREFIX + version, version -> compile(factory, version)));
+                Collectors.toUnmodifiableMap(version -> NAMESPACE_PREFIX + version,
+                        version -> compile(factory, "/xsd/" + version + ".xsd")));
     }
 
-    private static Schema compile(SchemaFactory factory, String version) {
-        URL xsd = Objects.requireNonNull(XsdValidator.class.getResource("/xsd/" + version + ".xsd"), version);
+    /** Compiles the self-contained XSD at classpath {@code resource}. */
+    static Schema compile(SchemaFactory factory, String resource) {
+        URL xsd = Objects.requireNonNull(XsdValidator.class.getResource(resource), resource);
         try {
             return factory.newSchema(new StreamSource(xsd.openStream(), xsd.toExternalForm()));
         } catch (SAXException e) {
-            throw new IllegalStateException("cannot compile the XSD of " + version, e);
+            throw new IllegalStateException("cannot compile " + resource, e);
         } catch (IOException e) {
             throw new UncheckedIOException(e);
         }
@@ -94,7 +96,8 @@ public final class XsdValidator {
         return validateAgainst(schema, xml);
     }
 
-    private static List<Violation> validateAgainst(Schema schema, String xml) {
+    /** All violations of {@code xml} against {@code schema}, whatever its root namespace. */
+    static List<Violation> validateAgainst(Schema schema, String xml) {
         List<Violation> violations = new ArrayList<>();
         Validator validator = SecureXml.newValidator(schema);
         validator.setErrorHandler(new Collector(violations));
