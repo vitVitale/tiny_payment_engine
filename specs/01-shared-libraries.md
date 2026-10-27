@@ -40,26 +40,36 @@ received.
 
 ### 1.4 Bank directory
 
-`BankDirectory` interface, YAML-backed implementation `YamlBankDirectory` loaded from `tpe.bank-directory.location`
-(default `classpath:bank-directory.yml`, overridden in compose with `deploy/config/bank-directory.yml`):
+`payment-domain` holds the `BankDirectory` interface, `BankEntry` (bank code, BIC, `sctInstReachable`, optional VoP
+endpoint) and `InMemoryBankDirectory`, built from the entries. Construction rejects (`INVALID_BANK_DIRECTORY`) a
+directory without an entry for `ownBankCode`, duplicate bank codes, and an `ownBic` that differs from the own bank's
+entry. `payment-domain` stays free of non-JDK dependencies (00 §1), so loading the file is Spring configuration in each
+consuming service: a `@ConfigurationProperties("tpe.bank-directory")` class bound from the YAML file at
+`tpe.bank-directory.location` (default `classpath:bank-directory.yml`, overridden in compose with
+`deploy/config/bank-directory.yml`), turned into an `InMemoryBankDirectory` bean. The file keeps this shape under the
+`tpe.bank-directory` key; `BankDirectoryFileTest` (system-tests) checks the compose file is a valid directory:
 
 ```yaml
-ownBankCode: "10010010"
-ownBic: "TPEBDEFFXXX"
-banks:
-  - bankCode: "10010010"
-    bic: "TPEBDEFFXXX"
-    sctInstReachable: true
-    vopEndpoint: null              # own bank: answered locally
-  - bankCode: "20020020"
-    bic: "PEERDEFFXXX"
-    sctInstReachable: true
-    vopEndpoint: "http://csm-simulator:8090/vop/v1/verifications"
+tpe:
+  bank-directory:
+    ownBankCode: "10010010"
+    ownBic: "TPEBDEFFXXX"
+    banks:
+      - bankCode: "10010010"
+        bic: "TPEBDEFFXXX"
+        sctInstReachable: true
+        vopEndpoint: null              # own bank: answered locally
+      - bankCode: "20020020"
+        bic: "PEERDEFFXXX"
+        sctInstReachable: true
+        vopEndpoint: "http://csm-simulator:8090/vop/v1/verifications"
 ```
 
-Operations: `lookup(Iban) → Optional<BankEntry>`, `isOwn(Iban)`, `ownBic()`. Used by payment-api (reachability
-validation), payment-orchestrator (on-us detection, creditor agent BIC) and vop-service (routing). It is static
-configuration, reloaded on restart only.
+Operations: `lookup(Iban) → Optional<BankEntry>`, `isOwn(Iban)`, `ownBic()`. A bank matches an IBAN by the bank code
+inside it and by country: bank codes are national (a `PL` IBAN can carry the 8 digits of a `DE` bank code), so the
+IBAN's country must equal the country of the bank's BIC (characters 5–6). Used by
+payment-api (reachability validation), payment-orchestrator (on-us detection, creditor agent BIC) and vop-service
+(routing). It is static configuration, reloaded on restart only.
 
 ## 2. `iso20022-model`
 

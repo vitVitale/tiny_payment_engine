@@ -2,7 +2,7 @@ package com.tpe.paymentdomain;
 
 /**
  * Machine-readable reason a value was rejected: the field error codes of specs/10-payment-api.md §3.5, plus
- * {@link #INVALID_UETR} and {@link #INVALID_REASON_CODE}.
+ * {@link #INVALID_UETR}, {@link #INVALID_REASON_CODE} and {@link #INVALID_BANK_DIRECTORY}.
  */
 public enum ValidationCode {
     INVALID_AMOUNT,
@@ -14,5 +14,7 @@ public enum ValidationCode {
     REQUIRED,
     INVALID_UETR,
     /** A {@link ReasonCode.Other} built from a code that has a {@link ReasonCode} constant. */
-    INVALID_REASON_CODE
+    INVALID_REASON_CODE,
+    /** Bank directory configuration that breaks a rule of specs/01-shared-libraries.md §1.4. */
+    INVALID_BANK_DIRECTORY
 }
