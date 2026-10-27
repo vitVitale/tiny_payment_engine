@@ -1,0 +1,54 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Document xmlns="urn:iso:std:iso:20022:tech:xsd:camt.054.001.08">
+    <BkToCstmrDbtCdtNtfctn>
+        <GrpHdr>
+            <MsgId>TPEM01JAQ5V9A1B2C3D4E5F6G7H8JK</MsgId>
+            <CreDtTm>2026-10-21T09:15:33.000Z</CreDtTm>
+        </GrpHdr>
+        <Ntfctn>
+            <Id>NTF-01JAQ5V9A1B2C3D4E5F6G7H8JK</Id>
+            <CreDtTm>2026-10-21T09:15:33.000Z</CreDtTm>
+            <Acct>
+                <Id>
+                    <IBAN>DE07200200200123456789</IBAN>
+                </Id>
+            </Acct>
+            <Ntry>
+                <Amt Ccy="EUR">123.45</Amt>
+                <CdtDbtInd>CRDT</CdtDbtInd>
+                <Sts>
+                    <Cd>BOOK</Cd>
+                </Sts>
+                <BookgDt>
+                    <Dt>2026-10-21</Dt>
+                </BookgDt>
+                <ValDt>
+                    <Dt>2026-10-21</Dt>
+                </ValDt>
+                <BkTxCd>
+                    <Domn>
+                        <Cd>PMNT</Cd>
+                        <Fmly>
+                            <Cd>RCDT</Cd>
+                            <SubFmlyCd>ESCT</SubFmlyCd>
+                        </Fmly>
+                    </Domn>
+                </BkTxCd>
+                <NtryDtls>
+                    <TxDtls>
+                        <Refs>
+                            <EndToEndId>INV-2026-0001</EndToEndId>
+                            <UETR>eb6305c9-1f7f-49de-aed0-16487c27b42d</UETR>
+                            <TxId>TPE01JAQ5V6K1W8Y3Z4X9R2T7M5NA</TxId>
+                        </Refs>
+                        <Amt Ccy="EUR">123.45</Amt>
+                        <CdtDbtInd>CRDT</CdtDbtInd>
+                        <RmtInf>
+                            <Ustrd>Invoice 2026-0001</Ustrd>
+                        </RmtInf>
+                    </TxDtls>
+                </NtryDtls>
+            </Ntry>
+        </Ntfctn>
+    </BkToCstmrDbtCdtNtfctn>
+</Document>

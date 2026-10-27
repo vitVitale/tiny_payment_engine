@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- One Java package per ISO 20022 message version (specs/01-shared-libraries.md §2.2). -->
+<jaxb:bindings version="3.0"
+               xmlns:jaxb="https://jakarta.ee/xml/ns/jaxb"
+               xmlns:xs="http://www.w3.org/2001/XMLSchema">
+
+    <jaxb:bindings schemaLocation="../resources/xsd/head.001.001.02.xsd" node="/xs:schema">
+        <jaxb:schemaBindings><jaxb:package name="com.tpe.iso20022model.head001v02"/></jaxb:schemaBindings>
+    </jaxb:bindings>
+    <jaxb:bindings schemaLocation="../resources/xsd/pain.001.001.09.xsd" node="/xs:schema">
+        <jaxb:schemaBindings><jaxb:package name="com.tpe.iso20022model.pain001v09"/></jaxb:schemaBindings>
+    </jaxb:bindings>
+    <jaxb:bindings schemaLocation="../resources/xsd/pain.002.001.10.xsd" node="/xs:schema">
+        <jaxb:schemaBindings><jaxb:package name="com.tpe.iso20022model.pain002v10"/></jaxb:schemaBindings>
+    </jaxb:bindings>
+    <jaxb:bindings schemaLocation="../resources/xsd/pacs.008.001.08.xsd" node="/xs:schema">
+        <jaxb:schemaBindings><jaxb:package name="com.tpe.iso20022model.pacs008v08"/></jaxb:schemaBindings>
+    </jaxb:bindings>
+    <jaxb:bindings schemaLocation="../resources/xsd/pacs.002.001.10.xsd" node="/xs:schema">
+        <jaxb:schemaBindings><jaxb:package name="com.tpe.iso20022model.pacs002v10"/></jaxb:schemaBindings>
+    </jaxb:bindings>
+    <jaxb:bindings schemaLocation="../resources/xsd/pacs.028.001.03.xsd" node="/xs:schema">
+        <jaxb:schemaBindings><jaxb:package name="com.tpe.iso20022model.pacs028v03"/></jaxb:schemaBindings>
+    </jaxb:bindings>
+    <jaxb:bindings schemaLocation="../resources/xsd/camt.054.001.08.xsd" node="/xs:schema">
+        <jaxb:schemaBindings><jaxb:package name="com.tpe.iso20022model.camt054v08"/></jaxb:schemaBindings>
+    </jaxb:bindings>
+</jaxb:bindings>

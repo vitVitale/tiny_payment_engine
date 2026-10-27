@@ -46,6 +46,7 @@
         <maven-site-plugin.version>3.22.0</maven-site-plugin.version>
         <archunit.version>1.5.1</archunit.version>
         <jqwik.version>1.10.2</jqwik.version>
+        <jaxb-maven-plugin.version>4.0.16</jaxb-maven-plugin.version>
     </properties>
 
     <dependencyManagement>

@@ -13,8 +13,51 @@
 
     <artifactId>iso20022-model</artifactId>
 
+    <dependencies>
+        <dependency>
+            <groupId>jakarta.xml.bind</groupId>
+            <artifactId>jakarta.xml.bind-api</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.glassfish.jaxb</groupId>
+            <artifactId>jaxb-runtime</artifactId>
+        </dependency>
+    </dependencies>
+
     <build>
         <plugins>
+            <!-- JAXB classes from the ISO 20022 XSDs, one package per message version (specs/01-shared-libraries.md §2.2).
+                 simpleEquals / simpleHashCode generate plain code: no runtime dependency on the plugins. -->
+            <plugin>
+                <groupId>org.jvnet.jaxb</groupId>
+                <artifactId>jaxb-maven-plugin</artifactId>
+                <version>${jaxb-maven-plugin.version}</version>
+                <executions>
+                    <execution>
+                        <id>generate-iso20022</id>
+                        <goals>
+                            <goal>generate</goal>
+                        </goals>
+                    </execution>
+                </executions>
+                <configuration>
+                    <schemaDirectory>src/main/resources/xsd</schemaDirectory>
+                    <bindingDirectory>src/main/xjb</bindingDirectory>
+                    <extension>true</extension>
+                    <noFileHeader>true</noFileHeader>
+                    <args>
+                        <arg>-XsimpleEquals</arg>
+                        <arg>-XsimpleHashCode</arg>
+                    </args>
+                    <plugins>
+                        <plugin>
+                            <groupId>org.jvnet.jaxb</groupId>
+                            <artifactId>jaxb-plugins</artifactId>
+                            <version>${jaxb-maven-plugin.version}</version>
+                        </plugin>
+                    </plugins>
+                </configuration>
+            </plugin>
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-enforcer-plugin</artifactId>

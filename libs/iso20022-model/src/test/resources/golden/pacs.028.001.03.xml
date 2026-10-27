@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Document xmlns="urn:iso:std:iso:20022:tech:xsd:pacs.028.001.03">
+    <FIToFIPmtStsReq>
+        <GrpHdr>
+            <MsgId>TPEM01JAQ5W0P1Q2R3S4T5V6W7X8YZ</MsgId>
+            <CreDtTm>2026-10-21T09:15:52.000Z</CreDtTm>
+        </GrpHdr>
+        <TxInf>
+            <StsReqId>TPEM01JAQ5W0P1Q2R3S4T5V6W7X8YZ</StsReqId>
+            <OrgnlGrpInf>
+                <OrgnlMsgId>TPEM01JAQ5V6K1W8Y3Z4X9R2T7M5NB</OrgnlMsgId>
+                <OrgnlMsgNmId>pacs.008.001.08</OrgnlMsgNmId>
+            </OrgnlGrpInf>
+            <OrgnlEndToEndId>INV-2026-0001</OrgnlEndToEndId>
+            <OrgnlTxId>TPE01JAQ5V6K1W8Y3Z4X9R2T7M5NA</OrgnlTxId>
+            <OrgnlUETR>eb6305c9-1f7f-49de-aed0-16487c27b42d</OrgnlUETR>
+            <InstgAgt>
+                <FinInstnId>
+                    <BICFI>TPEBDEFFXXX</BICFI>
+                </FinInstnId>
+            </InstgAgt>
+            <InstdAgt>
+                <FinInstnId>
+                    <BICFI>PEERDEFFXXX</BICFI>
+                </FinInstnId>
+            </InstdAgt>
+        </TxInf>
+    </FIToFIPmtStsReq>
+</Document>

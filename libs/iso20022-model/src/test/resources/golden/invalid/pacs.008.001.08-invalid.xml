@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Document xmlns="urn:iso:std:iso:20022:tech:xsd:pacs.008.001.08">
+    <FIToFICstmrCdtTrf>
+        <GrpHdr>
+            <MsgId>TPEM01JAQ5V6K1W8Y3Z4X9R2T7M5NB</MsgId>
+            <CreDtTm>2026-10-21T09:15:30.123Z</CreDtTm>
+            <NbOfTxs>one</NbOfTxs>
+            <SttlmInf>
+                <SttlmMtd>CLRG</SttlmMtd>
+            </SttlmInf>
+        </GrpHdr>
+    </FIToFICstmrCdtTrf>
+</Document>

@@ -1,0 +1,62 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Document xmlns="urn:iso:std:iso:20022:tech:xsd:pacs.008.001.08">
+    <FIToFICstmrCdtTrf>
+        <GrpHdr>
+            <MsgId>TPEM01JAQ5V6K1W8Y3Z4X9R2T7M5NB</MsgId>
+            <CreDtTm>2026-10-21T09:15:30.123Z</CreDtTm>
+            <NbOfTxs>1</NbOfTxs>
+            <TtlIntrBkSttlmAmt Ccy="EUR">123.45</TtlIntrBkSttlmAmt>
+            <IntrBkSttlmDt>2026-10-21</IntrBkSttlmDt>
+            <SttlmInf>
+                <SttlmMtd>CLRG</SttlmMtd>
+            </SttlmInf>
+            <PmtTpInf>
+                <SvcLvl>
+                    <Cd>SEPA</Cd>
+                </SvcLvl>
+                <LclInstrm>
+                    <Cd>INST</Cd>
+                </LclInstrm>
+            </PmtTpInf>
+        </GrpHdr>
+        <CdtTrfTxInf>
+            <PmtId>
+                <EndToEndId>INV-2026-0001</EndToEndId>
+                <TxId>TPE01JAQ5V6K1W8Y3Z4X9R2T7M5NA</TxId>
+                <UETR>eb6305c9-1f7f-49de-aed0-16487c27b42d</UETR>
+            </PmtId>
+            <IntrBkSttlmAmt Ccy="EUR">123.45</IntrBkSttlmAmt>
+            <AccptncDtTm>2026-10-21T09:15:30.100Z</AccptncDtTm>
+            <ChrgBr>SLEV</ChrgBr>
+            <Dbtr>
+                <Nm>Hans Mueller</Nm>
+            </Dbtr>
+            <DbtrAcct>
+                <Id>
+                    <IBAN>DE36100100100000000001</IBAN>
+                </Id>
+            </DbtrAcct>
+            <DbtrAgt>
+                <FinInstnId>
+                    <BICFI>TPEBDEFFXXX</BICFI>
+                </FinInstnId>
+            </DbtrAgt>
+            <CdtrAgt>
+                <FinInstnId>
+                    <BICFI>PEERDEFFXXX</BICFI>
+                </FinInstnId>
+            </CdtrAgt>
+            <Cdtr>
+                <Nm>Erika Musterfrau</Nm>
+            </Cdtr>
+            <CdtrAcct>
+                <Id>
+                    <IBAN>DE07200200200123456789</IBAN>
+                </Id>
+            </CdtrAcct>
+            <RmtInf>
+                <Ustrd>Invoice 2026-0001</Ustrd>
+            </RmtInf>
+        </CdtTrfTxInf>
+    </FIToFICstmrCdtTrf>
+</Document>
