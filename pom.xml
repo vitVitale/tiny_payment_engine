@@ -57,6 +57,14 @@
                 <version>${project.version}</version>
                 <scope>test</scope>
             </dependency>
+            <!-- MutableClock fixture jar; test scope only (specs/01-shared-libraries.md §1.3) -->
+            <dependency>
+                <groupId>com.tpe</groupId>
+                <artifactId>payment-domain</artifactId>
+                <version>${project.version}</version>
+                <type>test-jar</type>
+                <scope>test</scope>
+            </dependency>
             <dependency>
                 <groupId>com.tngtech.archunit</groupId>
                 <artifactId>archunit-junit5</artifactId>

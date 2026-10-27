@@ -1,6 +1,8 @@
 package com.tpe.paymentdomain;
 
 import static com.tpe.paymentdomain.ValidationCode.INVALID_CHARACTERS;
+import static com.tpe.paymentdomain.ValidationCode.REQUIRED;
+import static com.tpe.paymentdomain.ValidationCode.TOO_LONG;
 
 import java.util.Objects;
 import java.util.regex.Pattern;
@@ -22,5 +24,17 @@ public final class SepaCharacterSet {
             throw new DomainValidationException(INVALID_CHARACTERS, "text contains characters outside the SEPA set");
         }
         return text;
+    }
+
+    /** A non-blank text of at most {@code maxLength} characters in the set, as the ISO {@code MaxNText} types. */
+    static String requireText(String text, int maxLength) {
+        Objects.requireNonNull(text, "text");
+        if (text.isBlank()) {
+            throw new DomainValidationException(REQUIRED, "text is empty");
+        }
+        if (text.length() > maxLength) {
+            throw new DomainValidationException(TOO_LONG, "text is longer than " + maxLength + " characters");
+        }
+        return validate(text);
     }
 }
