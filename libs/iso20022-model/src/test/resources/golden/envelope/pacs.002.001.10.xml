@@ -1,0 +1,55 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Envelope xmlns="urn:tpe:csm:envelope:1">
+    <AppHdr xmlns="urn:iso:std:iso:20022:tech:xsd:head.001.001.02">
+        <Fr>
+            <FIId>
+                <FinInstnId>
+                    <BICFI>PEERDEFFXXX</BICFI>
+                </FinInstnId>
+            </FIId>
+        </Fr>
+        <To>
+            <FIId>
+                <FinInstnId>
+                    <BICFI>TPEBDEFFXXX</BICFI>
+                </FinInstnId>
+            </FIId>
+        </To>
+        <BizMsgIdr>TPEM01JAQ5V7B2C3D4E5F6G7H8J9KM</BizMsgIdr>
+        <MsgDefIdr>pacs.002.001.10</MsgDefIdr>
+        <CreDt>2026-10-21T09:15:31.456Z</CreDt>
+    </AppHdr>
+    <Document xmlns="urn:iso:std:iso:20022:tech:xsd:pacs.002.001.10">
+        <FIToFIPmtStsRpt>
+            <GrpHdr>
+                <MsgId>TPEM01JAQ5V7B2C3D4E5F6G7H8J9KM</MsgId>
+                <CreDtTm>2026-10-21T09:15:31.456Z</CreDtTm>
+            </GrpHdr>
+            <OrgnlGrpInfAndSts>
+                <OrgnlMsgId>TPEM01JAQ5V6K1W8Y3Z4X9R2T7M5NB</OrgnlMsgId>
+                <OrgnlMsgNmId>pacs.008.001.08</OrgnlMsgNmId>
+            </OrgnlGrpInfAndSts>
+            <TxInfAndSts>
+                <OrgnlEndToEndId>INV-2026-0001</OrgnlEndToEndId>
+                <OrgnlTxId>TPE01JAQ5V6K1W8Y3Z4X9R2T7M5NA</OrgnlTxId>
+                <OrgnlUETR>eb6305c9-1f7f-49de-aed0-16487c27b42d</OrgnlUETR>
+                <TxSts>RJCT</TxSts>
+                <StsRsnInf>
+                    <Rsn>
+                        <Cd>AM04</Cd>
+                    </Rsn>
+                </StsRsnInf>
+                <InstgAgt>
+                    <FinInstnId>
+                        <BICFI>PEERDEFFXXX</BICFI>
+                    </FinInstnId>
+                </InstgAgt>
+                <InstdAgt>
+                    <FinInstnId>
+                        <BICFI>TPEBDEFFXXX</BICFI>
+                    </FinInstnId>
+                </InstdAgt>
+            </TxInfAndSts>
+        </FIToFIPmtStsRpt>
+    </Document>
+</Envelope>

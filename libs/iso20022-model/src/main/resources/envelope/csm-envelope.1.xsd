@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- The simulated CSM transport envelope urn:tpe:csm:envelope:1 (specs/01-shared-libraries.md §2.2): one head.001.001.02
+     AppHdr, then one ISO 20022 Document. The parts are skipped here: EnvelopeCodec checks their element names and
+     validates each against the XSD of its own namespace. Kept outside xsd/ so no JAXB classes are generated for it. -->
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema"
+           xmlns="urn:tpe:csm:envelope:1"
+           targetNamespace="urn:tpe:csm:envelope:1"
+           elementFormDefault="qualified">
+    <xs:element name="Envelope">
+        <xs:complexType>
+            <xs:sequence>
+                <xs:any namespace="urn:iso:std:iso:20022:tech:xsd:head.001.001.02" processContents="skip"/>
+                <!-- any namespace: EnvelopeCodec reports one it does not carry as UNSUPPORTED_NAMESPACE -->
+                <xs:any namespace="##any" processContents="skip"/>
+            </xs:sequence>
+        </xs:complexType>
+    </xs:element>
+</xs:schema>

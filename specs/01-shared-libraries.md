@@ -113,7 +113,12 @@ Versions follow the EPC SCT Inst implementation guidelines. Later messages (`pac
   </Envelope>
   ```
 
-  `EnvelopeCodec` splits / joins header and document and validates both.
+  `EnvelopeCodec` splits / joins header and document and validates both. The envelope XSD
+  (`src/main/resources/envelope/csm-envelope.1.xsd`) fixes the structure only and skips the parts; each part is
+  validated against the XSD of its namespace. The document's namespace selects its `CsmMessageType` (`pacs.008`,
+  `pacs.002`, `pacs.028`); any other namespace is rejected as `UNSUPPORTED_NAMESPACE`. `split` returns the parts or
+  the first invalid part (envelope, header, document) with its violations — a missing header or document is
+  reported as that part; `join` throws on an invalid part.
 - Small **builders** for the documents we produce (`Pacs008Builder`, `Pacs002Builder`, `Pacs028Builder`,
   `Pain002Builder`, `Camt054Builder`) that take `payment-domain` types, so services never fill JAXB trees by hand.
   Builders set only fields required by the EPC guidelines; defaults: `ChrgBr = SLEV`, `SvcLvl/Cd = SEPA`,

@@ -3,6 +3,10 @@ package com.tpe.iso20022model;
 import javax.xml.XMLConstants;
 import javax.xml.parsers.ParserConfigurationException;
 import javax.xml.parsers.SAXParserFactory;
+import javax.xml.transform.TransformerConfigurationException;
+import javax.xml.transform.TransformerFactory;
+import javax.xml.transform.sax.SAXTransformerFactory;
+import javax.xml.transform.sax.TransformerHandler;
 import javax.xml.validation.Schema;
 import javax.xml.validation.SchemaFactory;
 import javax.xml.validation.Validator;
@@ -20,6 +24,7 @@ final class SecureXml {
     static final String DISALLOW_DOCTYPE = "http://apache.org/xml/features/disallow-doctype-decl";
 
     private static final SAXParserFactory FACTORY = newFactory();
+    private static final SAXTransformerFactory TRANSFORMER_FACTORY = newTransformerFactory();
 
     private SecureXml() {}
 
@@ -57,6 +62,29 @@ final class SecureXml {
             throw new IllegalStateException("the JDK validator does not support secure processing", e);
         }
         return validator;
+    }
+
+    /** A handler that writes the SAX events it receives as XML; it never parses or fetches anything. One per output. */
+    static TransformerHandler newSerializer() {
+        try {
+            synchronized (TRANSFORMER_FACTORY) {
+                return TRANSFORMER_FACTORY.newTransformerHandler();
+            }
+        } catch (TransformerConfigurationException e) {
+            throw new IllegalStateException("cannot create an XML serializer", e);
+        }
+    }
+
+    private static SAXTransformerFactory newTransformerFactory() {
+        try {
+            var factory = (SAXTransformerFactory) TransformerFactory.newInstance();
+            factory.setFeature(XMLConstants.FEATURE_SECURE_PROCESSING, true);
+            factory.setAttribute(XMLConstants.ACCESS_EXTERNAL_DTD, "");
+            factory.setAttribute(XMLConstants.ACCESS_EXTERNAL_STYLESHEET, "");
+            return factory;
+        } catch (TransformerConfigurationException | IllegalArgumentException e) {
+            throw new IllegalStateException("the JDK transformer does not support secure processing", e);
+        }
     }
 
     private static SAXParserFactory newFactory() {
