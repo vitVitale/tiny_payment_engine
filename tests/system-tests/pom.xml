@@ -14,6 +14,13 @@
     <artifactId>system-tests</artifactId>
 
     <dependencies>
+        <!-- bank directory file check (BankDirectoryFileTest) -->
+        <dependency>
+            <groupId>com.tpe</groupId>
+            <artifactId>payment-domain</artifactId>
+            <version>${project.version}</version>
+            <scope>test</scope>
+        </dependency>
         <!-- local profiles check (LocalProfilesTest) -->
         <dependency>
             <groupId>org.yaml</groupId>

@@ -36,6 +36,12 @@ class BicTest {
     }
 
     @Test
+    void countryCodeIsCharactersFiveAndSix() {
+        assertThat(new Bic("DEUTDEFFXXX").countryCode()).isEqualTo("DE");
+        assertThat(new Bic("NWBKGB2L").countryCode()).isEqualTo("GB");
+    }
+
+    @Test
     void equalByValue() {
         assertThat(new Bic("DEUTDEFFXXX")).isEqualTo(new Bic("DEUTDEFFXXX")).isNotEqualTo(new Bic("DEUTDEFF"));
     }

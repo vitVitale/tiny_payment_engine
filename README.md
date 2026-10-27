@@ -49,7 +49,7 @@ Smoke check of the running stack (databases and roles, topics against
 [02 §2](specs/02-messaging-contracts.md#2-topics), token claims); CI runs it as well:
 
 ```bash
-./mvnw -pl tests/system-tests verify -Dtpe.local-stack=true
+./mvnw -pl tests/system-tests -am verify -Dtpe.local-stack=true
 ```
 
 ## Traceability check

@@ -17,6 +17,11 @@ public record Bic(String value) {
         }
     }
 
+    /** ISO 3166 country of the institution, characters 5–6. */
+    public String countryCode() {
+        return value.substring(4, 6);
+    }
+
     /** The BIC without its branch code; compare institutions with this, {@code DEUTDEFF} equals {@code DEUTDEFFXXX}. */
     public Bic bic8() {
         return value.length() == 8 ? this : new Bic(value.substring(0, 8));
