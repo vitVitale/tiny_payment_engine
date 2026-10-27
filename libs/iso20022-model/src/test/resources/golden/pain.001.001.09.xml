@@ -1,0 +1,61 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Document xmlns="urn:iso:std:iso:20022:tech:xsd:pain.001.001.09">
+    <CstmrCdtTrfInitn>
+        <GrpHdr>
+            <MsgId>CLIENT-MSG-0001</MsgId>
+            <CreDtTm>2026-10-21T09:15:29.000Z</CreDtTm>
+            <NbOfTxs>1</NbOfTxs>
+            <CtrlSum>123.45</CtrlSum>
+            <InitgPty>
+                <Nm>Hans Mueller</Nm>
+            </InitgPty>
+        </GrpHdr>
+        <PmtInf>
+            <PmtInfId>CLIENT-PMT-0001</PmtInfId>
+            <PmtMtd>TRF</PmtMtd>
+            <NbOfTxs>1</NbOfTxs>
+            <CtrlSum>123.45</CtrlSum>
+            <ReqdExctnDt>
+                <Dt>2026-10-21</Dt>
+            </ReqdExctnDt>
+            <Dbtr>
+                <Nm>Hans Mueller</Nm>
+            </Dbtr>
+            <DbtrAcct>
+                <Id>
+                    <IBAN>DE36100100100000000001</IBAN>
+                </Id>
+            </DbtrAcct>
+            <DbtrAgt>
+                <FinInstnId>
+                    <BICFI>TPEBDEFFXXX</BICFI>
+                </FinInstnId>
+            </DbtrAgt>
+            <ChrgBr>SLEV</ChrgBr>
+            <CdtTrfTxInf>
+                <PmtId>
+                    <EndToEndId>INV-2026-0001</EndToEndId>
+                </PmtId>
+                <Amt>
+                    <InstdAmt Ccy="EUR">123.45</InstdAmt>
+                </Amt>
+                <CdtrAgt>
+                    <FinInstnId>
+                        <BICFI>PEERDEFFXXX</BICFI>
+                    </FinInstnId>
+                </CdtrAgt>
+                <Cdtr>
+                    <Nm>Erika Musterfrau</Nm>
+                </Cdtr>
+                <CdtrAcct>
+                    <Id>
+                        <IBAN>DE07200200200123456789</IBAN>
+                    </Id>
+                </CdtrAcct>
+                <RmtInf>
+                    <Ustrd>Invoice 2026-0001</Ustrd>
+                </RmtInf>
+            </CdtTrfTxInf>
+        </PmtInf>
+    </CstmrCdtTrfInitn>
+</Document>
