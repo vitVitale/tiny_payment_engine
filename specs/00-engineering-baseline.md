@@ -56,7 +56,8 @@ Dependency rules (enforced by the Maven Enforcer plugin and ArchUnit):
 
 - `services/*` and `simulators/*` MAY depend on any `libs/*`. They MUST NOT depend on each other.
 - `libs/payment-domain` depends on nothing but the JDK.
-- `libs/contracts` depends only on `payment-domain` and Jackson annotations.
+- `libs/contracts` depends only on `payment-domain`, Jackson annotations and Jackson databind (for the value-object
+  serialisers of `ContractsModule`, 01 §4).
 - `libs/messaging` depends on `contracts`, Spring Kafka, Spring JDBC. It contains no business logic.
 - `libs/iso20022-model` depends only on `payment-domain` and Jakarta XML Binding.
 - `libs/observability` depends only on `payment-domain`, Micrometer, Micrometer Tracing, OpenTelemetry and Spring

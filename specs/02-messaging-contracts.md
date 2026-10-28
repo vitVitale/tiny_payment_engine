@@ -52,7 +52,7 @@ reused ([11 §6.4](11-payment-orchestrator.md#64-timers)).
 ```json
 {
   "paymentId": "0192f0e4-6b1d-7c3a-9a55-4c1f3b2e9d10",
-  "txId": "TPE01JAB3C4D5E6F7G8H9J0K1M2N",
+  "txId": "TPE01JAB3C4D5E6F7G8H9J0K1M2NP",
   "uetr": "8a562c67-ca16-48ba-b074-65581be6f001",
   "endToEndId": "INV-2026-0042",
   "acceptedAt": "2026-10-21T09:15:30.000Z",

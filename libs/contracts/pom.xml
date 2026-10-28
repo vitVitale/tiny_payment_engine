@@ -13,6 +13,23 @@
 
     <artifactId>contracts</artifactId>
 
+    <dependencies>
+        <dependency>
+            <groupId>com.tpe</groupId>
+            <artifactId>payment-domain</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>com.fasterxml.jackson.core</groupId>
+            <artifactId>jackson-annotations</artifactId>
+        </dependency>
+        <!-- ContractsModule: serialisers for the payment-domain value objects (specs/01-shared-libraries.md §4) -->
+        <dependency>
+            <groupId>tools.jackson.core</groupId>
+            <artifactId>jackson-databind</artifactId>
+        </dependency>
+    </dependencies>
+
     <build>
         <plugins>
             <plugin>
@@ -28,7 +45,7 @@
                             <rules>
                                 <!-- specs/00-engineering-baseline.md §1: allow-list of direct non-test dependencies -->
                                 <bannedDependencies>
-                                    <message>contracts depends only on payment-domain and Jackson annotations (specs/00-engineering-baseline.md §1).</message>
+                                    <message>contracts depends only on payment-domain, Jackson annotations and Jackson databind (specs/00-engineering-baseline.md §1).</message>
                                     <searchTransitive>false</searchTransitive>
                                     <excludes>
                                         <exclude>*</exclude>
@@ -36,6 +53,7 @@
                                     <includes>
                                         <include>com.tpe:payment-domain</include>
                                         <include>com.fasterxml.jackson.core:jackson-annotations</include>
+                                        <include>tools.jackson.core:jackson-databind</include>
                                         <include>*:*:*:*:test</include>
                                     </includes>
                                 </bannedDependencies>
