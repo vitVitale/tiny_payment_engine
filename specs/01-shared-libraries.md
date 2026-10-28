@@ -278,6 +278,14 @@ retries, notification retries, ledger snapshot job.
   (`Money` → `amountMinor` + `currency`, `Iban` → string, …).
 - `ContractValidator.validate(Message)` checks required fields and value-object validity; consumers call it before
   handling (throws `ContractViolationException` → DLT).
+  - `Message` is a sealed interface of records. Each record declares its type and schema version with
+    `@Contract(type, version)`.
+  - Every component is required unless it is marked `@OptionalField`; an optional field is not written when null.
+  - Value objects are valid by construction, so an invalid one on the wire (bad IBAN, non-EUR currency) is reported
+    when the message is read. `ContractJson.read(json, type)` turns that failure, a missing field or malformed JSON
+    into a `ContractViolationException` carrying field paths and codes, never values. It then runs
+    `ContractValidator`.
+  - `ContractJson.write` validates before writing.
 - **Golden samples:** `src/test/resources/golden/<Type>.v<n>.json` for every message type and version. Tests assert
   (a) the current record serialises to the sample, (b) every older sample still deserialises (backward
   compatibility), (c) a sample with an extra unknown field deserialises.

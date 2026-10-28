@@ -1,0 +1,7 @@
+{
+  "paymentId": "0192f0e4-7c2e-7d4b-8a66-5d2a4c3f0e21",
+  "txId": "PEER20261021000017",
+  "debtorAgentBic": "PEERDEFFXXX",
+  "decidedAt": "2026-10-21T09:16:01.125Z",
+  "reasonCode": "AC06"
+}
