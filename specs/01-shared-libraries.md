@@ -207,7 +207,8 @@ row, and issues `NOTIFY tpe_outbox` (delivered at commit by PostgreSQL).
   from the oldest unpublished row with back-off 50 ms → 1 s. Re-publishing an already-sent row is allowed (consumers
   deduplicate); skipping one is not.
 - Producer settings: `acks=all`, `enable.idempotence=true`, `max.in.flight.requests.per.connection=5`,
-  `linger.ms=0`, `delivery.timeout.ms=10000`, `compression.type=lz4`.
+  `linger.ms=0`, `delivery.timeout.ms=10000`, `request.timeout.ms=5000` (Kafka requires `delivery.timeout.ms` ≥
+  `linger.ms` + `request.timeout.ms`; the default 30 s would not start), `compression.type=lz4`.
 - Target: insert → Kafka ack p99 < 50 ms (metric `tpe.outbox.publish.latency`).
 
 ### 3.4 Headers

@@ -13,6 +13,91 @@
 
     <artifactId>messaging</artifactId>
 
+    <dependencies>
+        <dependency>
+            <groupId>com.tpe</groupId>
+            <artifactId>contracts</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>com.tpe</groupId>
+            <artifactId>observability</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.kafka</groupId>
+            <artifactId>spring-kafka</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework</groupId>
+            <artifactId>spring-jdbc</artifactId>
+        </dependency>
+        <!-- specs/01-shared-libraries.md §3: a Spring Boot auto-configuration -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-autoconfigure</artifactId>
+        </dependency>
+        <!-- provided: LISTEN tpe_outbox needs PGConnection; services bring the driver (00 §1) -->
+        <dependency>
+            <groupId>org.postgresql</groupId>
+            <artifactId>postgresql</artifactId>
+            <scope>provided</scope>
+        </dependency>
+
+        <!-- the sample app of the integration tests -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-jdbc</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-kafka</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-flyway</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <!-- a MeterRegistry for tpe.inbox.duplicates -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-actuator</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.flywaydb</groupId>
+            <artifactId>flyway-database-postgresql</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-test</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-testcontainers</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.testcontainers</groupId>
+            <artifactId>testcontainers-postgresql</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.testcontainers</groupId>
+            <artifactId>testcontainers-kafka</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.testcontainers</groupId>
+            <artifactId>testcontainers-junit-jupiter</artifactId>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
+
     <build>
         <plugins>
             <plugin>
@@ -28,7 +113,7 @@
                             <rules>
                                 <!-- specs/00-engineering-baseline.md §1: allow-list of direct non-test dependencies -->
                                 <bannedDependencies>
-                                    <message>messaging depends only on contracts, observability, Spring Kafka and Spring JDBC (specs/00-engineering-baseline.md §1).</message>
+                                    <message>messaging depends only on contracts, observability, Spring Kafka, Spring JDBC and Spring Boot autoconfigure; the PostgreSQL driver only as provided (specs/00-engineering-baseline.md §1).</message>
                                     <searchTransitive>false</searchTransitive>
                                     <excludes>
                                         <exclude>*</exclude>
@@ -38,6 +123,8 @@
                                         <include>com.tpe:observability</include>
                                         <include>org.springframework.kafka:spring-kafka</include>
                                         <include>org.springframework:spring-jdbc</include>
+                                        <include>org.springframework.boot:spring-boot-autoconfigure</include>
+                                        <include>org.postgresql:postgresql:*:*:provided</include>
                                         <include>*:*:*:*:test</include>
                                     </includes>
                                 </bannedDependencies>
