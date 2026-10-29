@@ -58,7 +58,8 @@ Dependency rules (enforced by the Maven Enforcer plugin and ArchUnit):
 - `libs/payment-domain` depends on nothing but the JDK.
 - `libs/contracts` depends only on `payment-domain`, Jackson annotations and Jackson databind (for the value-object
   serialisers of `ContractsModule`, 01 §4).
-- `libs/messaging` depends on `contracts`, Spring Kafka, Spring JDBC. It contains no business logic.
+- `libs/messaging` depends on `contracts`, `observability`, Spring Kafka, Spring JDBC and Spring Boot autoconfigure,
+  and on the PostgreSQL driver as `provided` (for `LISTEN`). It contains no business logic.
 - `libs/iso20022-model` depends only on `payment-domain` and Jakarta XML Binding.
 - `libs/observability` depends only on `payment-domain`, Micrometer, Micrometer Tracing, OpenTelemetry and Spring
   Boot autoconfigure. It compiles against Spring Web, the servlet API and Boot's OpenTelemetry tracing and RestClient
