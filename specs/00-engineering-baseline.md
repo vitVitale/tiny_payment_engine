@@ -61,7 +61,9 @@ Dependency rules (enforced by the Maven Enforcer plugin and ArchUnit):
 - `libs/messaging` depends on `contracts`, Spring Kafka, Spring JDBC. It contains no business logic.
 - `libs/iso20022-model` depends only on `payment-domain` and Jakarta XML Binding.
 - `libs/observability` depends only on `payment-domain`, Micrometer, Micrometer Tracing, OpenTelemetry and Spring
-  Boot autoconfigure. It contains no business logic. `messaging` depends on it.
+  Boot autoconfigure. It compiles against Spring Web, the servlet API and Boot's OpenTelemetry tracing and RestClient
+  modules as `provided`, never passing them on: services bring them with their starters. It contains no business
+  logic. `messaging` depends on it.
 - `libs/test-support` holds shared test fixtures (the ArchUnit rules of §3, §5, §6). Any module MAY depend on it in
   `test` scope only; it is never a compile or runtime dependency. It depends only on test libraries (ArchUnit, JUnit,
   AssertJ).

@@ -2,6 +2,7 @@ package com.tpe.observability.config;
 
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.Optional;
 import org.springframework.boot.EnvironmentPostProcessor;
 import org.springframework.boot.SpringApplication;
 import org.springframework.core.Ordered;
@@ -43,7 +44,48 @@ public final class ObservabilityEnvironmentPostProcessor implements EnvironmentP
         // 26 §4.4: no request / response bodies or headers in logs
         defaults.put("spring.mvc.log-request-details", "false");
         defaults.put("management.httpexchanges.recording.enabled", "false");
+        addTracingDefaults(environment, identity, defaults);
         environment.getPropertySources().addLast(new MapPropertySource(PROPERTY_SOURCE, defaults));
+    }
+
+    /**
+     * 26 §4.2, §4.5, §5.5: every trace sampled, OTLP/gRPC to the node-local agent, a bounded batch processor that
+     * drops instead of blocking, the resource attributes of §3, and JDBC spans for connections and queries only,
+     * without parameter values.
+     */
+    private static void addTracingDefaults(ConfigurableEnvironment environment, ResourceIdentity identity,
+            Map<String, Object> defaults) {
+        defaults.put("management.tracing.sampling.probability", "1.0");
+        String export = "management.opentelemetry.tracing.export.";
+        defaults.put(export + "max-queue-size", "${tpe.observability.trace.queue-size:8192}");
+        defaults.put(export + "max-batch-size", "512");
+        defaults.put(export + "schedule-delay", "1s");
+        defaults.put(export + "timeout", "${tpe.observability.trace.export-timeout:2s}");
+        defaults.put(export + "otlp.transport", "grpc");
+        defaults.put(export + "otlp.timeout", "${tpe.observability.trace.export-timeout:2s}");
+        otlpEndpoint(environment).ifPresent(endpoint -> defaults.put(export + "otlp.endpoint", endpoint));
+        String resource = "management.opentelemetry.resource-attributes";
+        defaults.put(resource + "[service.name]", identity.serviceName());
+        defaults.put(resource + "[service.namespace]", identity.serviceNamespace());
+        defaults.put(resource + "[service.version]", identity.serviceVersion());
+        defaults.put(resource + "[service.instance.id]", identity.serviceInstanceId());
+        defaults.put(resource + "[deployment.environment.name]", identity.environment());
+        // datasource-micrometer: no FETCH spans, no parameter values
+        defaults.put("jdbc.includes", "CONNECTION,QUERY");
+        defaults.put("jdbc.datasource-proxy.include-parameter-values", "false");
+    }
+
+    /**
+     * {@code OTEL_EXPORTER_OTLP_ENDPOINT}, else {@code http://$HOST_IP:4317}. Without either (a test, a laptop without
+     * the compose stack) there is no OTLP exporter and spans are only kept in process.
+     */
+    private static Optional<String> otlpEndpoint(ConfigurableEnvironment environment) {
+        String endpoint = environment.getProperty("OTEL_EXPORTER_OTLP_ENDPOINT");
+        if (endpoint != null && !endpoint.isBlank()) {
+            return Optional.of(endpoint);
+        }
+        String hostIp = environment.getProperty("HOST_IP");
+        return hostIp == null || hostIp.isBlank() ? Optional.empty() : Optional.of("http://" + hostIp + ":4317");
     }
 
     /** After {@code ConfigDataEnvironmentPostProcessor}, so {@code spring.application.name} is known. */
