@@ -1,1 +1,2 @@
 com.tpe.observability.config.ObservabilityAutoConfiguration
+com.tpe.observability.config.TracingAutoConfiguration

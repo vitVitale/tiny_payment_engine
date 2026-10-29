@@ -47,6 +47,8 @@
         <archunit.version>1.5.1</archunit.version>
         <jqwik.version>1.10.2</jqwik.version>
         <jaxb-maven-plugin.version>4.0.16</jaxb-maven-plugin.version>
+        <!-- JDBC observations for tracing (specs/26-observability.md §4.2) -->
+        <datasource-micrometer.version>2.3.0</datasource-micrometer.version>
     </properties>
 
     <dependencyManagement>
@@ -73,6 +75,11 @@
                 <version>${project.version}</version>
                 <type>test-jar</type>
                 <scope>test</scope>
+            </dependency>
+            <dependency>
+                <groupId>net.ttddyy.observation</groupId>
+                <artifactId>datasource-micrometer-spring-boot</artifactId>
+                <version>${datasource-micrometer.version}</version>
             </dependency>
             <dependency>
                 <groupId>com.tngtech.archunit</groupId>

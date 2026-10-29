@@ -16,10 +16,12 @@ import com.tngtech.archunit.lang.ArchRule;
 import com.tngtech.archunit.lang.CompositeArchRule;
 import java.util.Date;
 import java.util.List;
+import java.util.Locale;
 
 /**
- * Layering, money and time rules shared by every service and the simulator (specs/00-engineering-baseline.md §3,
- * §5, §6). Run them from a service with {@code @ArchTest static final ArchTests RULES = ArchTests.in(ArchitectureRules.class);}.
+ * Layering, money, time and telemetry rules shared by every service and the simulator
+ * (specs/00-engineering-baseline.md §3, §5, §6, specs/26-observability.md §4.2). Run them from a service with
+ * {@code @ArchTest static final ArchTests RULES = ArchTests.in(ArchitectureRules.class);}.
  *
  * <p>Packages follow the service layout {@code com.tpe.<svc>.{api,application,domain,infrastructure}}. Rules allow
  * an empty selection, so a service that has no {@code domain} package yet still passes.
@@ -34,6 +36,10 @@ public final class ArchitectureRules {
     // by name, so this module needs no Spring on its classpath
     private static final String SPRING_TRANSACTIONAL = "org.springframework.transaction.annotation.Transactional";
     private static final String JAKARTA_TRANSACTIONAL = "jakarta.transaction.Transactional";
+
+    /** libs/observability, where {@code PaymentTelemetry} sets business attributes from typed values. */
+    private static final String OBSERVABILITY = "com.tpe.observability..";
+    private static final String OPENTELEMETRY_API = "io.opentelemetry.api..";
 
     private static final String SPRING_KAFKA = "org.springframework.kafka..";
     private static final String SPRING_JDBC = "org.springframework.jdbc..";
@@ -104,7 +110,33 @@ public final class ArchitectureRules {
             .orShould().haveRawType(Float.class)
             .allowEmptyShould(true);
 
+    /**
+     * Business attributes reach spans only through {@code PaymentTelemetry}, so no personal data can (26 §4.2, §4.4):
+     * outside {@code libs/observability} and {@code infrastructure}, no {@code Span.tag(String, String)}, no
+     * high-cardinality observation key values and no OpenTelemetry API.
+     */
+    @ArchTest
+    public static final ArchRule TELEMETRY_ATTRIBUTES_ONLY_THROUGH_OBSERVABILITY = noClasses()
+            .that().resideOutsideOfPackages(OBSERVABILITY, INFRASTRUCTURE)
+            .should().callMethodWhere(setsAFreeFormTelemetryAttribute())
+            .orShould().dependOnClassesThat().resideInAPackage(OPENTELEMETRY_API)
+            .allowEmptyShould(true);
+
     private ArchitectureRules() {}
+
+    private static DescribedPredicate<JavaMethodCall> setsAFreeFormTelemetryAttribute() {
+        return DescribedPredicate.describe("a free-form telemetry attribute", call -> {
+            MethodCallTarget target = call.getTarget();
+            String owner = target.getOwner().getName();
+            String name = target.getName();
+            List<String> parameters = target.getRawParameterTypes().stream().map(JavaClass::getName).toList();
+            boolean stringSpanTag = owner.startsWith("io.micrometer.tracing.") && name.equals("tag")
+                    && parameters.equals(List.of("java.lang.String", "java.lang.String"));
+            boolean highCardinality = owner.startsWith("io.micrometer.observation.")
+                    && name.toLowerCase(Locale.ROOT).contains("highcardinalitykeyvalue");
+            return stringSpanTag || highCardinality;
+        });
+    }
 
     private static DescribedPredicate<JavaMethodCall> readsTimeWithoutAClock() {
         return DescribedPredicate.describe("a clock-less time read", call -> {

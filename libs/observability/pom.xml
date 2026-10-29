@@ -33,6 +33,43 @@
             <groupId>io.micrometer</groupId>
             <artifactId>micrometer-registry-prometheus</artifactId>
         </dependency>
+        <!-- tracing (specs/26-observability.md §4.2): Micrometer Observation with the OpenTelemetry bridge, OTLP -->
+        <dependency>
+            <groupId>io.micrometer</groupId>
+            <artifactId>micrometer-tracing-bridge-otel</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>io.opentelemetry</groupId>
+            <artifactId>opentelemetry-sdk</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>io.opentelemetry</groupId>
+            <artifactId>opentelemetry-exporter-otlp</artifactId>
+        </dependency>
+        <!--
+          provided: compiled against, never passed on (specs/00-engineering-baseline.md §1). Services bring them with
+          spring-boot-starter-webmvc, -restclient and -opentelemetry; each bean that needs one is @ConditionalOnClass.
+        -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-micrometer-tracing-opentelemetry</artifactId>
+            <scope>provided</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-restclient</artifactId>
+            <scope>provided</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework</groupId>
+            <artifactId>spring-web</artifactId>
+            <scope>provided</scope>
+        </dependency>
+        <dependency>
+            <groupId>jakarta.servlet</groupId>
+            <artifactId>jakarta.servlet-api</artifactId>
+            <scope>provided</scope>
+        </dependency>
         <!-- the sample app of the tests -->
         <dependency>
             <groupId>org.springframework.boot</groupId>
@@ -42,6 +79,43 @@
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-actuator</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-opentelemetry</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-restclient</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-jdbc</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>com.h2database</groupId>
+            <artifactId>h2</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>net.ttddyy.observation</groupId>
+            <artifactId>datasource-micrometer-spring-boot</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <!-- SimpleTracer for unit tests -->
+        <dependency>
+            <groupId>io.micrometer</groupId>
+            <artifactId>micrometer-tracing-test</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <!-- InMemorySpanExporter of the trace fixture -->
+        <dependency>
+            <groupId>io.opentelemetry</groupId>
+            <artifactId>opentelemetry-sdk-testing</artifactId>
             <scope>test</scope>
         </dependency>
         <dependency>
@@ -87,7 +161,7 @@
                             <rules>
                                 <!-- specs/00-engineering-baseline.md §1: allow-list of direct non-test dependencies -->
                                 <bannedDependencies>
-                                    <message>observability depends only on payment-domain, Micrometer, Micrometer Tracing, OpenTelemetry and Spring Boot autoconfigure (specs/00-engineering-baseline.md §1).</message>
+                                    <message>observability depends only on payment-domain, Micrometer, Micrometer Tracing, OpenTelemetry and Spring Boot autoconfigure; Spring Web, the servlet API and Boot's tracing and RestClient modules only as provided (specs/00-engineering-baseline.md §1).</message>
                                     <searchTransitive>false</searchTransitive>
                                     <excludes>
                                         <exclude>*</exclude>
@@ -97,6 +171,10 @@
                                         <include>io.micrometer:*</include>
                                         <include>io.opentelemetry:*</include>
                                         <include>org.springframework.boot:spring-boot-autoconfigure</include>
+                                        <include>org.springframework.boot:spring-boot-micrometer-tracing-opentelemetry:*:*:provided</include>
+                                        <include>org.springframework.boot:spring-boot-restclient:*:*:provided</include>
+                                        <include>org.springframework:spring-web:*:*:provided</include>
+                                        <include>jakarta.servlet:jakarta.servlet-api:*:*:provided</include>
                                         <include>*:*:*:*:test</include>
                                     </includes>
                                 </bannedDependencies>

@@ -84,15 +84,18 @@ them, the service name is `spring.application.name`, the environment `local` and
 ## 4. Instrumentation (`libs/observability`)
 
 New library module (Spring Boot auto-configuration, enabled by default). Dependencies: `payment-domain`, Micrometer,
-Micrometer Tracing, OpenTelemetry API / SDK / OTLP exporter, Spring Boot autoconfigure. It contains no business
-logic. `messaging` depends on it; services get it through `messaging` or directly.
+Micrometer Tracing, OpenTelemetry API / SDK / OTLP exporter, Spring Boot autoconfigure; Spring Web, the servlet API
+and Boot's OpenTelemetry tracing and RestClient modules as `provided` ([00 §1](00-engineering-baseline.md#1-repository-layout)).
+It contains no business logic. `messaging` depends on it; services get it through `messaging` or directly, and add
+`spring-boot-starter-opentelemetry` (tracing), `spring-boot-starter-actuator` and, for JDBC spans,
+`datasource-micrometer-spring-boot`. Each part is active only when the library it builds on is present.
 
 | Package | Contents |
 |---|---|
 | `config` | common tags, resource attributes, SLO histogram boundaries ([25 §11](25-service-levels.md#11-metrics-to-add)) as defaults, OTLP exporter settings, observation predicates (§4.2) |
-| `payment` | `PaymentTelemetry`: sets MDC, span attributes and the budget attributes of §5.4 from typed values (`PaymentId`, `TxId`, `Uetr`, `Bic`, `Direction`, `Instant acceptedAt`, …) |
+| `payment` | `PaymentTelemetry`: sets MDC, span attributes and the budget attributes of §5.4 from typed values (`PaymentTags`: `PaymentId`, `TxId`, `Uetr`, `Bic`, `PaymentDirection`, `Instant acceptedAt`, …) |
 | `context` | `TraceContextCodec` (span context ↔ `traceparent` string), `Spans.childOf(traceparent)`, `Spans.linkedTo(traceparent)` |
-| `http` | `ExternalBoundary` `RestClient` customizer that removes trace headers (§5.3); inbound filter that turns a foreign `traceparent` into a link |
+| `http` | `ExternalBoundary` `RestClient` customizer that removes trace headers (§5.3); `InboundBoundaryPropagator`, which turns a foreign `traceparent` on the configured inbound paths into a link or ignores it |
 | `export` | wrapped span exporter with a drop counter (`tpe.telemetry.spans.dropped`) |
 | `test` | telemetry contract fixtures: Prometheus scrape assertions (exists, [20 §1](20-testing-strategy.md#1-test-levels)), in-memory span exporter with trace assertions, log capture with PII canaries |
 
@@ -158,9 +161,10 @@ Micrometer, Prometheus registry, `/actuator/prometheus`. Additions:
 |---|---|---|
 | `tpe.observability.enabled` | `true` | `false` only in unit tests of other libraries |
 | `management.tracing.sampling.probability` | `1.0` | §5.5 |
-| `management.otlp.tracing.endpoint` | `http://${HOST_IP}:4317` | compose: `http://alloy:4317` |
-| `tpe.observability.trace.queue-size` / `.export-timeout` | `8192` / `2s` | drop, never block |
+| `management.opentelemetry.tracing.export.otlp.endpoint` | `OTEL_EXPORTER_OTLP_ENDPOINT`, else `http://${HOST_IP}:4317`; none without either (spans stay in process) | OTLP/gRPC; compose: `http://alloy:4317` |
+| `tpe.observability.trace.queue-size` / `.export-timeout` | `8192` / `2s` | drop, never block; a failed export (after the exporter's retries) counts as dropped |
 | `tpe.observability.external-hosts` | from each client's base URL property | clients that strip trace headers (§5.3) |
+| `tpe.observability.inbound.link-paths` / `.ignore-paths` | none | server paths whose caller `traceparent` becomes a link (customer channels) or is ignored (CSM, counterparties), §5.3 |
 | `management.metrics.distribution.slo.*` | per [25 §11](25-service-levels.md#11-metrics-to-add) | |
 
 ## 5. Payment trace model

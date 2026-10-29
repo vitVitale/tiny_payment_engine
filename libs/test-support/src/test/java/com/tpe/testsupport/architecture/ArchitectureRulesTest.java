@@ -9,9 +9,13 @@ import com.tpe.fixturesvc.api.ApiUsingInfrastructure;
 import com.tpe.fixturesvc.api.ApiUsingKafkaTemplate;
 import com.tpe.fixturesvc.api.ControllerWithTransactionalMethod;
 import com.tpe.fixturesvc.api.ListenerUsingKafka;
+import com.tpe.fixturesvc.api.UsesOpenTelemetryApi;
 import com.tpe.fixturesvc.application.ReadsInstantNow;
 import com.tpe.fixturesvc.application.ReadsZonedNow;
+import com.tpe.fixturesvc.application.ObservationWithHighCardinality;
 import com.tpe.fixturesvc.application.ServiceUsingJdbc;
+import com.tpe.fixturesvc.application.TagsSpanWithNumber;
+import com.tpe.fixturesvc.application.TagsSpanWithString;
 import com.tpe.fixturesvc.application.TransactionalPaymentService;
 import com.tpe.fixturesvc.domain.AccountBalanceSnapshot;
 import com.tpe.fixturesvc.domain.CompliantMoney;
@@ -28,8 +32,10 @@ import com.tpe.fixturesvc.domain.ReadsSystemTime;
 import com.tpe.fixturesvc.domain.RiskScore;
 import com.tpe.fixturesvc.infrastructure.JakartaTransactionalRepository;
 import com.tpe.fixturesvc.infrastructure.KafkaAndJdbcAdapter;
+import com.tpe.fixturesvc.infrastructure.OpenTelemetryAdapter;
 import com.tpe.fixturesvc.infrastructure.ReadsLocalDateTimeNow;
 import com.tpe.fixturesvc.infrastructure.TransactionalRepository;
+import com.tpe.observability.fixture.TagsInObservability;
 import org.junit.jupiter.api.Test;
 
 /** Each rule passes on a compliant class and fails on a class that violates it on purpose. */
@@ -97,6 +103,17 @@ class ArchitectureRulesTest {
         assertViolates(ArchitectureRules.NO_FLOATING_POINT_MONEY, AccountBalanceSnapshot.class);
         assertHolds(ArchitectureRules.NO_FLOATING_POINT_MONEY, CompliantMoney.class);
         assertHolds(ArchitectureRules.NO_FLOATING_POINT_MONEY, RiskScore.class);
+    }
+
+    @Test
+    void telemetryAttributesOnlyThroughObservability() {
+        ArchRule rule = ArchitectureRules.TELEMETRY_ATTRIBUTES_ONLY_THROUGH_OBSERVABILITY;
+        assertViolates(rule, TagsSpanWithString.class);
+        assertViolates(rule, ObservationWithHighCardinality.class);
+        assertViolates(rule, UsesOpenTelemetryApi.class);
+        assertHolds(rule, TagsSpanWithNumber.class);
+        assertHolds(rule, OpenTelemetryAdapter.class);
+        assertHolds(rule, TagsInObservability.class);
     }
 
     private static void assertViolates(ArchRule rule, Class<?> violator) {
