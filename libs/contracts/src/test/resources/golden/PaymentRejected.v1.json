@@ -1,0 +1,17 @@
+{
+  "paymentId": "0192f0e4-7c2e-7d4b-8a66-5d2a4c3f0e21",
+  "direction": "INCOMING",
+  "onUs": false,
+  "txId": "PEER20261021000017",
+  "debtorAgentBic": "PEERDEFFXXX",
+  "uetr": "3f2c1b0a-9d8e-4c7b-a6f5-e4d3c2b1a090",
+  "endToEndId": "RENT-2026-10",
+  "amountMinor": 5000,
+  "currency": "EUR",
+  "debtor": { "name": "Max Mustermann", "iban": "DE07200200200123456789" },
+  "creditor": { "name": "Anna Schmidt", "iban": "DE89370400440532013000", "accountId": "0192f0e4-1111-7aaa-8bbb-000000000001" },
+  "remittanceInformation": "Rent October",
+  "acceptedAt": "2026-10-21T09:15:59.000Z",
+  "rejectedAt": "2026-10-21T09:16:01.300Z",
+  "reasonCode": "AC06"
+}

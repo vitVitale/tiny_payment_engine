@@ -6,6 +6,7 @@ import com.tpe.paymentdomain.Bic;
 import com.tpe.paymentdomain.EndToEndId;
 import com.tpe.paymentdomain.Iban;
 import com.tpe.paymentdomain.Money;
+import com.tpe.paymentdomain.MsgId;
 import com.tpe.paymentdomain.PartyName;
 import com.tpe.paymentdomain.PaymentId;
 import com.tpe.paymentdomain.ReasonCode;
@@ -14,6 +15,7 @@ import com.tpe.paymentdomain.StatusReason;
 import com.tpe.paymentdomain.TxId;
 import com.tpe.paymentdomain.Uetr;
 import java.time.Instant;
+import java.time.LocalDate;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
@@ -56,7 +58,9 @@ public final class ContractsModule extends SimpleModule {
         // a field declared as StatusReason holds one of these; serialisers are looked up by the runtime class
         addSerializer(ReasonCode.class, serializer(ReasonCode.class, ReasonCode::code));
         addSerializer(ReasonCode.Other.class, serializer(ReasonCode.Other.class, ReasonCode.Other::code));
+        registerAsString(MsgId.class, MsgId::new, MsgId::value);
         registerAsString(Instant.class, text -> OffsetDateTime.parse(text).toInstant(), INSTANT_FORMAT::format);
+        registerAsString(LocalDate.class, LocalDate::parse, LocalDate::toString);
     }
 
     private <T> void registerAsString(Class<T> type, Function<String, T> parse, Function<T, String> format) {

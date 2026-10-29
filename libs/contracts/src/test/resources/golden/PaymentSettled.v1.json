@@ -1,0 +1,17 @@
+{
+  "paymentId": "0192f0e4-6b1d-7c3a-9a55-4c1f3b2e9d10",
+  "direction": "OUTGOING",
+  "onUs": false,
+  "txId": "TPE01JAB3C4D5E6F7G8H9J0K1M2NP",
+  "debtorAgentBic": "TPEBDEFFXXX",
+  "uetr": "8a562c67-ca16-48ba-b074-65581be6f001",
+  "endToEndId": "INV-2026-0042",
+  "amountMinor": 12345,
+  "currency": "EUR",
+  "debtor": { "name": "Anna Schmidt", "iban": "DE89370400440532013000", "accountId": "0192f0e4-1111-7aaa-8bbb-000000000001" },
+  "creditor": { "name": "Max Mustermann", "iban": "DE07200200200123456789" },
+  "remittanceInformation": "Invoice 42",
+  "acceptedAt": "2026-10-21T09:15:30.000Z",
+  "settledAt": "2026-10-21T09:15:45.500Z",
+  "bookingEntryId": "0192f0e4-9e4f-7f6d-8c88-7f4c6e5b2a43"
+}

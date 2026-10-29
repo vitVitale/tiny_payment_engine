@@ -11,7 +11,9 @@ import java.util.Objects;
  */
 @JsonIgnoreProperties(ignoreUnknown = true)
 public sealed interface Message
-        permits SendCreditTransfer, RequestPaymentStatus, AcceptCreditTransfer, RejectCreditTransfer {
+        permits SendCreditTransfer, RequestPaymentStatus, AcceptCreditTransfer, RejectCreditTransfer,
+                CreditTransferReceived, AnswerSent, CreditTransferSettled, CreditTransferRejected,
+                CreditTransferNotSent, AccountEvent, PaymentSettled, PaymentRejected {
 
     /** The message type, e.g. {@code SendCreditTransfer}. */
     @JsonIgnore

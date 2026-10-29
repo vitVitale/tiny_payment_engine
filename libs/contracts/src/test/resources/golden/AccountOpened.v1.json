@@ -1,0 +1,19 @@
+{
+  "accountId": "0192f0e4-1111-7aaa-8bbb-000000000001",
+  "revision": 1,
+  "occurredAt": "2026-01-05T08:00:00.000Z",
+  "account": {
+    "iban": "DE89370400440532013000",
+    "customerId": "CUST-000123",
+    "status": "OPEN",
+    "activeBlockReasons": [],
+    "kind": "CUSTOMER",
+    "holder": {
+      "type": "PERSON",
+      "name": "Anna Schmidt",
+      "dateOfBirth": "1985-04-12",
+      "countryOfResidence": "DE"
+    },
+    "openedAt": "2026-01-05T08:00:00.000Z"
+  }
+}

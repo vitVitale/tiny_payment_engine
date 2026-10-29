@@ -39,10 +39,12 @@ public final class ContractJson {
     /** The JSON body of {@code message}; type and version go into headers (02 §1). */
     public String write(Message message) {
         ContractValidator.validate(message);
-        if (message instanceof RequestPaymentStatus request && request.direction() == Direction.UNKNOWN) {
-            // UNKNOWN is the reader's fallback for constants it does not know (01 §4); producers never write it
-            throw new ContractViolationException(Message.contractOf(message.getClass()),
-                    List.of(new Violation("direction", ContractViolationException.UNKNOWN_CONSTANT)), null);
+        // UNKNOWN is the reader's fallback for constants it does not know (01 §4); producers never write it
+        List<Violation> unknown = ContractValidator.unknownConstants(message).stream()
+                .map(path -> new Violation(path, ContractViolationException.UNKNOWN_CONSTANT))
+                .toList();
+        if (!unknown.isEmpty()) {
+            throw new ContractViolationException(Message.contractOf(message.getClass()), unknown, null);
         }
         return mapper.writeValueAsString(message);
     }
