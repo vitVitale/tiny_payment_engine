@@ -67,7 +67,9 @@ Out of scope: business intelligence and reporting, audit trails (database tables
 ## 3. Resource identity and common labels
 
 Every signal of a service instance carries the same identity, set once in `libs/observability` from environment
-variables the deployment provides:
+variables the deployment provides: the OpenTelemetry standard `OTEL_SERVICE_NAME` and `OTEL_RESOURCE_ATTRIBUTES`
+(`service.namespace=tpe,service.version=…,service.instance.id=…,deployment.environment.name=…`). Locally, without
+them, the service name is `spring.application.name`, the environment `local` and the version `unknown`.
 
 | OTel resource attribute | Prometheus label | Loki label | Value |
 |---|---|---|---|
@@ -108,7 +110,8 @@ Micrometer, Prometheus registry, `/actuator/prometheus`. Additions:
   fails on any other key. `paymentId`, `txId`, `uetr`, IBANs, `clientId`, raw URIs and exception messages are never
   tags. `uri` uses the route template.
 - **Self metrics:** `tpe.telemetry.spans.dropped` (counter), JVM, process, HikariCP, Kafka client and executor
-  metrics from Spring Boot as is.
+  metrics from Spring Boot as is, except that `jvm_info` carries the JDK version as `jvm_version`: its own `version`
+  tag would hide the common tag `version`.
 
 ### 4.2 Traces
 

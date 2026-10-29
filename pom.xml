@@ -66,6 +66,14 @@
                 <type>test-jar</type>
                 <scope>test</scope>
             </dependency>
+            <!-- telemetry contract fixture jar; test scope only (specs/26-observability.md §4) -->
+            <dependency>
+                <groupId>com.tpe</groupId>
+                <artifactId>observability</artifactId>
+                <version>${project.version}</version>
+                <type>test-jar</type>
+                <scope>test</scope>
+            </dependency>
             <dependency>
                 <groupId>com.tngtech.archunit</groupId>
                 <artifactId>archunit-junit5</artifactId>

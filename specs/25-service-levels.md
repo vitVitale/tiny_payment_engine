@@ -410,7 +410,7 @@ so every threshold in §5 is an exact histogram bucket:
 | `tpe.payment.rejected` (counter) | `direction`, `reason`, `cause` = `BUSINESS` \| `TECHNICAL` \| `EXTERNAL` (derived from the transition `cause`) | orchestrator |
 | `tpe.payment.duration` — boundaries `1s,3s,10s,20s` | existing | orchestrator |
 | `tpe.csm.stage.duration` | `stage` = `COMMAND_TO_TRANSMITTED`, `PACS008_TO_EVENT`, `PACS002_TO_EVENT` | csm-gateway |
-| `tpe.csm.answer.margin` — boundaries `0s,1s,3s` | existing | csm-gateway |
+| `tpe.csm.answer.margin` — boundaries `1s,3s` (Micrometer takes no `0s` boundary, and a timer records no negative margin) | existing | csm-gateway |
 | `tpe.vop.requests` | `role` = `REQUESTER` \| `RESPONDER`, `route` = `OWN` \| `REMOTE`, `result`, `cause` = `LOCAL` \| `EXTERNAL` \| `NONE` | vop-service |
 | `tpe.vop.retention.overdue` (gauge) | — | vop-service |
 | `tpe.risk.assessment.duration` | `direction`, `decision` | risk-service |
