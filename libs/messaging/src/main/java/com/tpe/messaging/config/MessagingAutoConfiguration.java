@@ -1,6 +1,9 @@
 package com.tpe.messaging.config;
 
 import com.tpe.contracts.ContractJson;
+import com.tpe.messaging.consumer.DltHook;
+import com.tpe.messaging.consumer.DltPublisher;
+import com.tpe.messaging.consumer.TpeErrorHandler;
 import com.tpe.messaging.inbox.InboxGuard;
 import com.tpe.messaging.outbox.JdbcOutboxRepository;
 import com.tpe.messaging.outbox.JdbcOutboxWriter;
@@ -24,10 +27,10 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.datasource.DriverManagerDataSource;
 
 /**
- * The outbox, relay and inbox of specs/01-shared-libraries.md §3, enabled by {@code tpe.messaging.enabled=true}. The
- * service provides PostgreSQL ({@code spring.datasource.*}) and Kafka ({@code spring.kafka.bootstrap-servers}, read by
- * the relay's own producer); the Kafka listener and Flyway defaults come from
- * {@link MessagingEnvironmentPostProcessor}.
+ * The outbox, relay, inbox and listener error handling of specs/01-shared-libraries.md §3, enabled by
+ * {@code tpe.messaging.enabled=true}. The service provides PostgreSQL ({@code spring.datasource.*}) and Kafka
+ * ({@code spring.kafka.bootstrap-servers}, read by the relay's and the DLT's own producers); the Kafka listener and
+ * Flyway defaults come from {@link MessagingEnvironmentPostProcessor}.
  */
 @AutoConfiguration(afterName = {
     "org.springframework.boot.jdbc.autoconfigure.DataSourceAutoConfiguration",
@@ -53,6 +56,23 @@ public class MessagingAutoConfiguration {
     @Bean
     InboxGuard inboxGuard(JdbcTemplate jdbc, ObjectProvider<MeterRegistry> registry) {
         return new InboxGuard(jdbc, registry.getIfAvailable(SimpleMeterRegistry::new));
+    }
+
+    /** Its own producer, not a {@code KafkaTemplate} bean, so it leaves the service's Kafka beans alone. */
+    @Bean
+    DltPublisher dltPublisher(ObjectProvider<MeterRegistry> registry, ObjectProvider<DltHook> hooks,
+            Environment environment) {
+        return DltPublisher.create(environment.getRequiredProperty("spring.kafka.bootstrap-servers"),
+                registry.getIfAvailable(SimpleMeterRegistry::new), hooks.orderedStream().toList());
+    }
+
+    /**
+     * Spring Boot sets the {@code CommonErrorHandler} bean on its listener container factory. A service must not
+     * declare another one: with two, Boot sets neither, and poison messages would no longer reach the DLT.
+     */
+    @Bean
+    TpeErrorHandler tpeErrorHandler(DltPublisher dltPublisher) {
+        return new TpeErrorHandler(dltPublisher);
     }
 
     @Bean

@@ -13,5 +13,14 @@ public final class MessageHeaders {
     /** The producing service's {@code spring.application.name}. */
     public static final String PRODUCER = "tpe-producer";
 
+    /** On a DLT record (01 §3.6): the failure's message; contract violations name fields and codes, never values. */
+    public static final String DLT_REASON = "tpe-dlt-reason";
+    /** On a DLT record: the failure's class name. */
+    public static final String DLT_EXCEPTION = "tpe-dlt-exception";
+    /** On a DLT record: the offset of the source record. */
+    public static final String DLT_ORIGINAL_OFFSET = "tpe-dlt-original-offset";
+    /** On a DLT record: the partition of the source record. */
+    public static final String DLT_ORIGINAL_PARTITION = "tpe-dlt-original-partition";
+
     private MessageHeaders() {}
 }

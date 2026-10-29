@@ -245,7 +245,8 @@ retries, notification retries, ledger snapshot job.
   the handler returns without side effects (metric `tpe.inbox.duplicates`).
 - Error classification by `TpeErrorHandler` (a configured `DefaultErrorHandler`):
   - **Non-retryable** — `DeserializationException`, `ContractViolationException` (thrown by `contracts` validation),
-    `UnknownMessageTypeException`: retried 3 times with 100 ms back-off, then published to `<topic>.dlt` with headers
+    `UnknownMessageTypeException` (a `tpe-message-type` the listener does not accept, or none; thrown by
+    `ConsumedMessages.readOneOf`): retried 3 times with 100 ms back-off, then published to `<topic>.dlt` with headers
     `tpe-dlt-reason`, `tpe-dlt-exception`, `tpe-dlt-original-offset`, `tpe-dlt-original-partition`, and committed.
   - **Retryable** — everything else (DB unavailable, optimistic-lock conflict): retried in place with exponential
     back-off 100 ms → 5 s, indefinitely. The partition is blocked, which is intended: a consumer that cannot write its
