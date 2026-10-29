@@ -13,8 +13,7 @@ import org.springframework.core.env.MapPropertySource;
  * precedence: Flyway also runs the library migrations ({@code classpath:db/migration/messaging}, 00 §9), and the
  * Kafka listener container uses the consumer settings of §3.6 (record acks, no auto commit, read committed, 50
  * records per poll). Also: the service name as consumer group (02 §2), and a new group starts at the earliest offset,
- * so it skips nothing already on the topic. Listener concurrency per assigned partitions comes with per-key ordering
- * (issue #16).
+ * so it skips nothing already on the topic. Listener concurrency per assigned partitions (§3.6) is not set yet.
  */
 public final class MessagingEnvironmentPostProcessor implements EnvironmentPostProcessor, Ordered {
 
