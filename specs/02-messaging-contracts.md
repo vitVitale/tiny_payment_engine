@@ -94,7 +94,7 @@ Dedup key at the orchestrator: `<debtorAgentBic>:<txId>:<type>:<outcome>` where 
 
 | Type | Direction | Payload (besides `txId`, `debtorAgentBic`, `direction`) | Dedup outcome |
 |---|---|---|---|
-| `CreditTransferReceived` v1 | INCOMING | `msgId`, `uetr`, `endToEndId`, `receivedAt`, `answerDeadline`, `acceptanceDateTime`, `interbankSettlementDate`, `amountMinor`, `currency`, `debtor`, `debtorAgentBic`, `creditor`, `creditorAgentBic`, `remittanceInformation` | `RECEIVED` |
+| `CreditTransferReceived` v1 | INCOMING | `msgId`, `uetr`, `endToEndId`, `receivedAt`, `answerDeadline`, `acceptanceDateTime`, `interbankSettlementDate`, `amountMinor`, `currency`, `debtor`, `creditor`, `creditorAgentBic`, `remittanceInformation` | `RECEIVED` |
 | `AnswerSent` v1 | INCOMING | `status` (`ACCP`\|`RJCT`), `reasonCode` (RJCT only), `decidedBy` (`VERDICT`\|`DEADLINE`), `sentAt` | `<status>` |
 | `CreditTransferSettled` v1 | both | `paymentId` (outgoing only), `settledAt`, `source` (`STATUS_REPORT`\|`INVESTIGATION`) | `SETTLED` |
 | `CreditTransferRejected` v1 | both | `paymentId` (outgoing only), `reasonCode`, `rejectedAt`, `source` | `REJECTED-<reason>` |
@@ -127,11 +127,9 @@ All four types share the payload shape:
       "type": "PERSON",
       "name": "Anna Schmidt",
       "dateOfBirth": "1985-04-12",
-      "countryOfResidence": "DE",
-      "organisationId": null
+      "countryOfResidence": "DE"
     },
-    "openedAt": "…",
-    "closedAt": null
+    "openedAt": "…"
   }
 }
 ```
@@ -143,6 +141,8 @@ All four types share the payload shape:
 | `AccountUnblocked` v1 | a block is lifted (status may still be `BLOCKED` if other blocks remain) | `liftedReason` |
 | `AccountClosed` v1 | account closed | — |
 
+Optional fields are absent when not set: `closedAt` (closed accounts), `holder.organisationId` (organisations, which
+have no `dateOfBirth`), `holder.dateOfBirth` and `holder.countryOfResidence`.
 `customerId` is required for every published account (technical accounts are not published); an event without it
 fails `ContractValidator` and goes to the DLT, because risk-service cannot screen an account it cannot group by customer.
 `revision` increases by one with every lifecycle change of the account (not with postings). Consumers ignore an
@@ -163,6 +163,7 @@ Emitted once per payment, when it reaches a final state **and** its ledger effec
   "direction": "OUTGOING",
   "onUs": false,
   "txId": "…",
+  "debtorAgentBic": "TPEBDEFFXXX",
   "uetr": "…",
   "endToEndId": "INV-2026-0042",
   "amountMinor": 12345,

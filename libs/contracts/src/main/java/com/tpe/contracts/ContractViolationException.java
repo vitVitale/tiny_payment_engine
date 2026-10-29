@@ -17,6 +17,11 @@ public final class ContractViolationException extends RuntimeException {
     public static final String OUT_OF_ORDER = "OUT_OF_ORDER";
     /** A number outside its allowed range, e.g. a status request {@code attempt} below 1. */
     public static final String OUT_OF_RANGE = "OUT_OF_RANGE";
+    /**
+     * A field or value this message type does not allow, e.g. a {@code reasonCode} on an accepted answer or a
+     * {@code TECHNICAL} account.
+     */
+    public static final String NOT_ALLOWED = "NOT_ALLOWED";
     /** A producer tried to write the {@code UNKNOWN} fallback constant of an enum. */
     public static final String UNKNOWN_CONSTANT = "UNKNOWN_CONSTANT";
     /** The JSON is not well-formed, or a field has the wrong JSON type or format. */

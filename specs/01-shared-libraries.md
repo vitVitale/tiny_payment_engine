@@ -285,7 +285,9 @@ retries, notification retries, ledger snapshot job.
     when the message is read. `ContractJson.read(json, type)` turns that failure, a missing field or malformed JSON
     into a `ContractViolationException` carrying field paths and codes, never values. It then runs
     `ContractValidator`.
-  - `ContractJson.write` validates before writing.
+  - `ContractJson.write` validates before writing and rejects an `UNKNOWN` enum constant anywhere in the message:
+    `UNKNOWN` is only the reader's fallback (evolution rules below). The per-type rules leave `UNKNOWN` to the
+    consumer.
 - **Golden samples:** `src/test/resources/golden/<Type>.v<n>.json` for every message type and version. Tests assert
   (a) the current record serialises to the sample, (b) every older sample still deserialises (backward
   compatibility), (c) a sample with an extra unknown field deserialises.

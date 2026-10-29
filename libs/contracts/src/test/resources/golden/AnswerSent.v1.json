@@ -1,0 +1,9 @@
+{
+  "txId": "PEER20261021000017",
+  "debtorAgentBic": "PEERDEFFXXX",
+  "direction": "INCOMING",
+  "status": "RJCT",
+  "reasonCode": "AC06",
+  "decidedBy": "VERDICT",
+  "sentAt": "2026-10-21T09:16:01.300Z"
+}

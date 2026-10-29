@@ -36,7 +36,18 @@ class GoldenSampleTest {
                 Samples.sendCreditTransfer(),
                 Samples.requestPaymentStatus(),
                 Samples.acceptCreditTransfer(),
-                Samples.rejectCreditTransfer());
+                Samples.rejectCreditTransfer(),
+                Samples.creditTransferReceived(),
+                Samples.answerSent(),
+                Samples.creditTransferSettled(),
+                Samples.creditTransferRejected(),
+                Samples.creditTransferNotSent(),
+                Samples.accountOpened(),
+                Samples.accountBlocked(),
+                Samples.accountUnblocked(),
+                Samples.accountClosed(),
+                Samples.paymentSettled(),
+                Samples.paymentRejected());
     }
 
     @ParameterizedTest(name = "{0}")
@@ -76,7 +87,19 @@ class GoldenSampleTest {
     void everyMessageTypeIsCoveredByTheHarness() {
         List<Class<?>> covered = messages().<Class<?>>map(Message::getClass).toList();
 
-        assertThat(covered).containsExactlyInAnyOrderElementsOf(Arrays.asList(Message.class.getPermittedSubclasses()));
+        assertThat(covered).containsExactlyInAnyOrderElementsOf(messageRecords(Message.class).toList());
+    }
+
+    @ParameterizedTest(name = "{0}")
+    @MethodSource("messages")
+    void everyPaymentMessageCarriesTheTransactionIdentity(Message message) {
+        // 02 §1: txId + debtorAgentBic identify the transaction (ADR-010); account events are not about a payment
+        if (message instanceof AccountEvent) {
+            return;
+        }
+        assertThat(message.getClass().getRecordComponents())
+                .extracting(component -> component.getName() + ":" + component.getType().getSimpleName())
+                .contains("txId:TxId", "debtorAgentBic:Bic");
     }
 
     @ParameterizedTest(name = "{0}")
@@ -92,6 +115,12 @@ class GoldenSampleTest {
     void typeIsTheRecordName(Message message) {
         assertThat(message.type()).isEqualTo(message.getClass().getSimpleName());
         assertThat(message.schemaVersion()).isPositive();
+    }
+
+    /** The records permitted by {@code type}, through sealed sub-interfaces such as {@link AccountEvent}. */
+    private static Stream<Class<?>> messageRecords(Class<?> type) {
+        return type.isRecord() ? Stream.of(type)
+                : Arrays.stream(type.getPermittedSubclasses()).flatMap(GoldenSampleTest::messageRecords);
     }
 
     private static String golden(String type, int version) {

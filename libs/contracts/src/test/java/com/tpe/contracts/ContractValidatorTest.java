@@ -6,10 +6,13 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.tpe.contracts.ContractViolationException.Violation;
 import com.tpe.paymentdomain.PartyName;
+import com.tpe.paymentdomain.ReasonCode;
 import java.time.Instant;
+import java.util.stream.Stream;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
+import org.junit.jupiter.params.provider.MethodSource;
 
 class ContractValidatorTest {
 
@@ -91,6 +94,178 @@ class ContractValidatorTest {
 
         assertThatThrownBy(() -> ContractValidator.validate(message))
                 .hasMessage("RejectCreditTransfer v1 violates its contract: [reasonCode REQUIRED]");
+    }
+
+    static Stream<AccountEvent> accountEvents() {
+        return Stream.of(Samples.accountOpened(), Samples.accountBlocked(), Samples.accountUnblocked(),
+                Samples.accountClosed());
+    }
+
+    @ParameterizedTest(name = "{0}")
+    @MethodSource("accountEvents")
+    void accountEventRequiresCustomerId(AccountEvent event) {
+        AccountSnapshot a = event.account();
+        var account = new AccountSnapshot(a.iban(), null, a.status(), a.activeBlockReasons(), a.kind(), a.holder(),
+                a.openedAt(), a.closedAt());
+
+        assertViolations(Samples.withAccount(event, account),
+                new Violation("account.customerId", ContractViolationException.REQUIRED));
+    }
+
+    @ParameterizedTest(name = "\"{0}\" -> {1}")
+    @CsvSource({
+        "'   ', REQUIRED",
+        "CUST 000123, INVALID_CUSTOMER_ID",
+        "CUST-0001234567890123456789012345678901234567890123, INVALID_CUSTOMER_ID" // 51 characters
+    })
+    void customerIdIsTheBanksCustomerNumber(String customerId, String code) {
+        AccountOpened o = Samples.accountOpened();
+        AccountSnapshot a = o.account();
+        var account = new AccountSnapshot(a.iban(), customerId, a.status(), a.activeBlockReasons(), a.kind(),
+                a.holder(), a.openedAt(), a.closedAt());
+
+        assertViolations(Samples.withAccount(o, account), new Violation("account.customerId", code));
+    }
+
+    @ParameterizedTest(name = "{0}")
+    @MethodSource("accountEvents")
+    void technicalAccountsAreNotPublished(AccountEvent event) {
+        AccountSnapshot a = event.account();
+        var account = new AccountSnapshot(a.iban(), a.customerId(), a.status(), a.activeBlockReasons(),
+                AccountKind.TECHNICAL, a.holder(), a.openedAt(), a.closedAt());
+
+        assertViolations(Samples.withAccount(event, account),
+                new Violation("account.kind", ContractViolationException.NOT_ALLOWED));
+    }
+
+    @Test
+    void accountRevisionStartsAtOne() {
+        AccountOpened o = Samples.accountOpened();
+
+        assertViolations(new AccountOpened(o.accountId(), 0L, o.occurredAt(), o.account()),
+                new Violation("revision", ContractViolationException.OUT_OF_RANGE));
+    }
+
+    @Test
+    void organisationHolderRequiresOrganisationIdAndNoDateOfBirth() {
+        AccountOpened o = Samples.accountOpened();
+        Holder person = o.account().holder();
+        var organisation = new Holder(HolderType.ORGANISATION, person.name(), person.dateOfBirth(), "DE", null);
+
+        assertViolations(Samples.withAccount(o, withHolder(o.account(), organisation)),
+                new Violation("account.holder.organisationId", ContractViolationException.REQUIRED),
+                new Violation("account.holder.dateOfBirth", ContractViolationException.NOT_ALLOWED));
+        var valid = new Holder(HolderType.ORGANISATION, person.name(), null, "DE", "529900T8BM49AURSDO55");
+        assertThatCode(() -> ContractValidator.validate(Samples.withAccount(o, withHolder(o.account(), valid))))
+                .doesNotThrowAnyException();
+    }
+
+    @Test
+    void rejectedAnswerRequiresReasonCode() {
+        AnswerSent a = Samples.answerSent();
+
+        assertViolations(new AnswerSent(a.txId(), a.debtorAgentBic(), a.direction(), AnswerStatus.RJCT, null,
+                a.decidedBy(), a.sentAt()), new Violation("reasonCode", ContractViolationException.REQUIRED));
+    }
+
+    @Test
+    void acceptedAnswerHasNoReasonCode() {
+        AnswerSent a = Samples.answerSent();
+
+        assertViolations(new AnswerSent(a.txId(), a.debtorAgentBic(), a.direction(), AnswerStatus.ACCP,
+                a.reasonCode(), a.decidedBy(), a.sentAt()),
+                new Violation("reasonCode", ContractViolationException.NOT_ALLOWED));
+        assertThatCode(() -> ContractValidator.validate(new AnswerSent(a.txId(), a.debtorAgentBic(), a.direction(),
+                AnswerStatus.ACCP, null, DecidedBy.DEADLINE, a.sentAt()))).doesNotThrowAnyException();
+    }
+
+    @Test
+    void settledAndRejectedCarryPaymentIdOnlyWhenOutgoing() {
+        CreditTransferSettled s = Samples.creditTransferSettled();
+        CreditTransferRejected r = Samples.creditTransferRejected();
+
+        assertViolations(new CreditTransferSettled(s.txId(), s.debtorAgentBic(), Direction.OUTGOING, null,
+                s.settledAt(), s.source()), new Violation("paymentId", ContractViolationException.REQUIRED));
+        assertViolations(new CreditTransferRejected(r.txId(), r.debtorAgentBic(), Direction.OUTGOING, null,
+                r.reasonCode(), r.rejectedAt(), r.source()),
+                new Violation("paymentId", ContractViolationException.REQUIRED));
+        assertViolations(new CreditTransferSettled(s.txId(), s.debtorAgentBic(), Direction.INCOMING, s.paymentId(),
+                s.settledAt(), s.source()), new Violation("paymentId", ContractViolationException.NOT_ALLOWED));
+        assertThatCode(() -> ContractValidator.validate(new CreditTransferRejected(r.txId(), r.debtorAgentBic(),
+                Direction.INCOMING, null, r.reasonCode(), r.rejectedAt(), SettlementSource.INVESTIGATION)))
+                .doesNotThrowAnyException();
+    }
+
+    @Test
+    void notSentReasonIsAlwaysAb03() {
+        CreditTransferNotSent n = Samples.creditTransferNotSent();
+
+        assertViolations(new CreditTransferNotSent(n.txId(), n.debtorAgentBic(), n.direction(), n.paymentId(),
+                ReasonCode.AC04, n.sendBy(), n.decidedAt()),
+                new Violation("reasonCode", ContractViolationException.NOT_ALLOWED));
+    }
+
+    @Test
+    void oneWayInboundEventsHaveTheirDirection() {
+        CreditTransferReceived c = Samples.creditTransferReceived();
+        AnswerSent a = Samples.answerSent();
+        CreditTransferNotSent n = Samples.creditTransferNotSent();
+        Violation wrongDirection = new Violation("direction", ContractViolationException.NOT_ALLOWED);
+
+        assertViolations(new CreditTransferReceived(c.txId(), c.debtorAgentBic(), Direction.OUTGOING, c.msgId(),
+                c.uetr(), c.endToEndId(), c.receivedAt(), c.answerDeadline(), c.acceptanceDateTime(),
+                c.interbankSettlementDate(), c.amount(), c.debtor(), c.creditor(), c.creditorAgentBic(),
+                c.remittanceInformation()), wrongDirection);
+        assertViolations(new AnswerSent(a.txId(), a.debtorAgentBic(), Direction.OUTGOING, a.status(),
+                a.reasonCode(), a.decidedBy(), a.sentAt()), wrongDirection);
+        assertViolations(new CreditTransferNotSent(n.txId(), n.debtorAgentBic(), Direction.INCOMING, n.paymentId(),
+                n.reasonCode(), n.sendBy(), n.decidedAt()), wrongDirection);
+    }
+
+    @Test
+    void receivedAnswerDeadlineIsAfterReceivedAt() {
+        CreditTransferReceived c = Samples.creditTransferReceived();
+
+        assertViolations(new CreditTransferReceived(c.txId(), c.debtorAgentBic(), c.direction(), c.msgId(),
+                c.uetr(), c.endToEndId(), c.receivedAt(), c.receivedAt(), c.acceptanceDateTime(),
+                c.interbankSettlementDate(), c.amount(), c.debtor(), c.creditor(), c.creditorAgentBic(),
+                c.remittanceInformation()), new Violation("answerDeadline", ContractViolationException.OUT_OF_ORDER));
+    }
+
+    @ParameterizedTest(name = "direction {0}, onUs {1}")
+    @CsvSource({"INCOMING, false", "OUTGOING, true"})
+    void settledPaymentToOurCustomerNamesTheCreditorAccount(Direction direction, boolean onUs) {
+        PaymentSettled p = Samples.paymentSettled();
+        var creditor = new Party(p.creditor().name(), p.creditor().iban(), null);
+
+        assertViolations(new PaymentSettled(p.paymentId(), direction, onUs, p.txId(), p.debtorAgentBic(), p.uetr(),
+                p.endToEndId(), p.amount(), p.debtor(), creditor, p.remittanceInformation(), p.acceptedAt(),
+                p.settledAt(), p.bookingEntryId()),
+                new Violation("creditor.accountId", ContractViolationException.REQUIRED));
+    }
+
+    @Test
+    void unknownConstantsReadFromNewerProducersPassTheRules() {
+        // a consumer decides whether it can proceed with UNKNOWN (01 §4); the per-type rules do not reject it
+        AnswerSent a = Samples.answerSent();
+        CreditTransferSettled s = Samples.creditTransferSettled();
+
+        assertThatCode(() -> ContractValidator.validate(new AnswerSent(a.txId(), a.debtorAgentBic(),
+                Direction.UNKNOWN, AnswerStatus.UNKNOWN, a.reasonCode(), a.decidedBy(), a.sentAt())))
+                .doesNotThrowAnyException();
+        assertThatCode(() -> ContractValidator.validate(new CreditTransferSettled(s.txId(), s.debtorAgentBic(),
+                Direction.UNKNOWN, null, s.settledAt(), SettlementSource.UNKNOWN))).doesNotThrowAnyException();
+    }
+
+    private static void assertViolations(Message message, Violation... expected) {
+        assertThatThrownBy(() -> ContractValidator.validate(message))
+                .isInstanceOfSatisfying(ContractViolationException.class, e -> assertThat(e.violations())
+                        .containsExactlyInAnyOrder(expected));
+    }
+
+    private static AccountSnapshot withHolder(AccountSnapshot a, Holder holder) {
+        return new AccountSnapshot(a.iban(), a.customerId(), a.status(), a.activeBlockReasons(), a.kind(), holder,
+                a.openedAt(), a.closedAt());
     }
 
     private static SendCreditTransfer withTimes(Instant acceptedAt, Instant sendBy, Instant deadlineAt) {

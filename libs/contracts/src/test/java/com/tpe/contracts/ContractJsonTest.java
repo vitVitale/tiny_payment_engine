@@ -6,10 +6,19 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import com.tpe.contracts.ContractViolationException.Violation;
 import com.tpe.paymentdomain.ReasonCode;
 import java.time.Instant;
+import java.util.List;
+import java.util.function.Function;
+import java.util.stream.Stream;
+import org.junit.jupiter.api.Named;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.MethodSource;
 import org.junit.jupiter.params.provider.ValueSource;
+import tools.jackson.core.JsonPointer;
+import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.json.JsonMapper;
+import tools.jackson.databind.node.ArrayNode;
 import tools.jackson.databind.node.ObjectNode;
 
 class ContractJsonTest {
@@ -146,6 +155,66 @@ class ContractJsonTest {
         assertThatThrownBy(() -> json.read(plain.writeValueAsString(sample), RequestPaymentStatus.class))
                 .isInstanceOfSatisfying(ContractViolationException.class, e -> assertThat(e.violations())
                         .containsExactly(new Violation("attempt", ContractViolationException.REQUIRED)));
+    }
+
+    static Stream<Arguments> enumFields() {
+        return Stream.of(
+                unknownConstant(Samples.answerSent(), "/status", m -> ((AnswerSent) m).status()),
+                unknownConstant(Samples.answerSent(), "/decidedBy", m -> ((AnswerSent) m).decidedBy()),
+                unknownConstant(Samples.creditTransferSettled(), "/source",
+                        m -> ((CreditTransferSettled) m).source()),
+                unknownConstant(Samples.paymentSettled(), "/direction", m -> ((PaymentSettled) m).direction()),
+                unknownConstant(Samples.accountBlocked(), "/blockReason", m -> ((AccountBlocked) m).blockReason()),
+                unknownConstant(Samples.accountBlocked(), "/account/activeBlockReasons/0",
+                        m -> ((AccountBlocked) m).account().activeBlockReasons().getFirst()),
+                unknownConstant(Samples.accountBlocked(), "/account/status",
+                        m -> ((AccountBlocked) m).account().status()),
+                unknownConstant(Samples.accountBlocked(), "/account/kind",
+                        m -> ((AccountBlocked) m).account().kind()),
+                unknownConstant(Samples.accountBlocked(), "/account/holder/type",
+                        m -> ((AccountBlocked) m).account().holder().type()));
+    }
+
+    private static Arguments unknownConstant(Message sample, String pointer, Function<Message, Enum<?>> field) {
+        return Arguments.of(Named.of(sample.type() + pointer, sample), pointer, field);
+    }
+
+    @ParameterizedTest(name = "{0}")
+    @MethodSource("enumFields")
+    void unknownEnumConstantIsReadAsUnknown(Message sample, String pointer, Function<Message, Enum<?>> field) {
+        JsonNode tree = plain.readTree(json.write(sample));
+        JsonPointer at = JsonPointer.compile(pointer);
+        JsonNode parent = tree.at(at.head());
+        if (parent instanceof ArrayNode array) {
+            array.set(Integer.parseInt(at.last().getMatchingProperty()), "ADDED_LATER");
+        } else {
+            ((ObjectNode) parent).put(at.last().getMatchingProperty(), "ADDED_LATER");
+        }
+
+        Message read = json.read(plain.writeValueAsString(tree), sample.getClass());
+
+        assertThat(field.apply(read).name()).isEqualTo("UNKNOWN");
+    }
+
+    @Test
+    void producerNeverWritesUnknownInNestedFields() {
+        AccountBlocked b = Samples.accountBlocked();
+        AccountSnapshot a = b.account();
+        var account = new AccountSnapshot(a.iban(), a.customerId(), AccountStatus.UNKNOWN,
+                List.of(BlockReason.UNKNOWN), a.kind(), a.holder(), a.openedAt(), a.closedAt());
+
+        assertThatThrownBy(() -> json.write(Samples.withAccount(b, account)))
+                .isInstanceOfSatisfying(ContractViolationException.class, e -> assertThat(e.violations())
+                        .containsExactlyInAnyOrder(
+                                new Violation("account.status", ContractViolationException.UNKNOWN_CONSTANT),
+                                new Violation("account.activeBlockReasons",
+                                        ContractViolationException.UNKNOWN_CONSTANT)));
+    }
+
+    @Test
+    void datesAreWrittenAsIsoLocalDates() {
+        assertThat(plain.readTree(json.write(Samples.accountOpened())).at("/account/holder/dateOfBirth").asString())
+                .isEqualTo("1985-04-12");
     }
 
     @Test

@@ -1,0 +1,18 @@
+{
+  "txId": "PEER20261021000017",
+  "debtorAgentBic": "PEERDEFFXXX",
+  "direction": "INCOMING",
+  "msgId": "PEERM20261021000017",
+  "uetr": "3f2c1b0a-9d8e-4c7b-a6f5-e4d3c2b1a090",
+  "endToEndId": "RENT-2026-10",
+  "receivedAt": "2026-10-21T09:16:00.040Z",
+  "answerDeadline": "2026-10-21T09:16:20.040Z",
+  "acceptanceDateTime": "2026-10-21T09:15:59.000Z",
+  "interbankSettlementDate": "2026-10-21",
+  "amountMinor": 5000,
+  "currency": "EUR",
+  "debtor": { "name": "Max Mustermann", "iban": "DE07200200200123456789" },
+  "creditor": { "name": "Anna Schmidt", "iban": "DE89370400440532013000" },
+  "creditorAgentBic": "TPEBDEFFXXX",
+  "remittanceInformation": "Rent October"
+}
