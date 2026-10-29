@@ -189,9 +189,11 @@ row, and issues `NOTIFY tpe_outbox` (delivered at commit by PostgreSQL).
   which ADR-004 relies on.
 - **Bounded failover** ([ADR-006 amendment](../architecture/decisions/ADR-006-ordered-outbox-relay.md#amendment-2026-10-22-bounded-failover)):
   the lock connection runs `SET idle_session_timeout = '3s'`; the leader sends `SELECT 1` on it every 1 s, but only
-  while its publish loop has completed an iteration (a failed send with back-off counts) within the last 2 s. A stalled
+  while its publish loop has completed an iteration (a failed send with back-off counts, and so does waiting for Kafka
+  acks: a Kafka outage must not make leadership flap) within the last 2 s. A stalled
   loop stops heartbeating, closes the lock connection and reports not live. Before each batch the leader checks that
-  its last heartbeat succeeded; if not, it stops publishing and rejoins as a follower on a new connection. Gauge
+  its last heartbeat succeeded and is younger than the session timeout (after a JVM freeze the server has ended the
+  session); if not, it stops publishing and rejoins as a follower on a new connection. Gauge
   `tpe.relay.active` is 1 on the leader. Config: `tpe.messaging.outbox.lock-session-timeout` (`3s`),
   `.heartbeat-interval` (`1s`), `.takeover-retry` (`1s`), `.stall-after` (`2s`).
 - **No skipping:** the relay MUST read from the oldest unpublished row in `id` order — no `SKIP LOCKED`, no
@@ -208,7 +210,8 @@ row, and issues `NOTIFY tpe_outbox` (delivered at commit by PostgreSQL).
   deduplicate); skipping one is not.
 - Producer settings: `acks=all`, `enable.idempotence=true`, `max.in.flight.requests.per.connection=5`,
   `linger.ms=0`, `delivery.timeout.ms=10000`, `request.timeout.ms=5000` (Kafka requires `delivery.timeout.ms` ≥
-  `linger.ms` + `request.timeout.ms`; the default 30 s would not start), `compression.type=lz4`.
+  `linger.ms` + `request.timeout.ms`; the default 30 s would not start), `max.block.ms=1000` (below `stall-after`: a
+  send blocked on missing metadata fails and backs off instead of stalling the loop), `compression.type=lz4`.
 - Target: insert → Kafka ack p99 < 50 ms (metric `tpe.outbox.publish.latency`).
 
 ### 3.4 Headers

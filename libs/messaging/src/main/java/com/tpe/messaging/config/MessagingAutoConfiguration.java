@@ -18,9 +18,12 @@ import java.time.Clock;
 import java.time.Duration;
 import javax.sql.DataSource;
 import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.boot.availability.AvailabilityChangeEvent;
+import org.springframework.boot.availability.LivenessState;
 import org.springframework.boot.autoconfigure.AutoConfiguration;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.context.annotation.Bean;
 import org.springframework.core.env.Environment;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -76,16 +79,20 @@ public class MessagingAutoConfiguration {
     }
 
     @Bean
+    @ConditionalOnMissingBean
     OutboxRepository outboxRepository(JdbcTemplate jdbc) {
         return new JdbcOutboxRepository(jdbc);
     }
 
     /**
      * Started and stopped with the application context. The lock connection is unpooled when
-     * {@code spring.datasource.url} is set (01 §3.3); otherwise it falls back to the service's {@code DataSource}.
+     * {@code spring.datasource.url} is set (01 §3.3); otherwise it falls back to the service's {@code DataSource}. A
+     * stalled publish loop turns the application's liveness state {@code BROKEN}, which
+     * {@code /actuator/health/liveness} reports, and {@code CORRECT} again once the loop moves.
      */
     @Bean
-    OutboxRelay outboxRelay(DataSource dataSource, OutboxRepository repository, Environment environment) {
+    OutboxRelay outboxRelay(DataSource dataSource, OutboxRepository repository, ObjectProvider<MeterRegistry> registry,
+            ApplicationEventPublisher events, Environment environment) {
         OutboxRelay.Settings defaults = OutboxRelay.Settings.defaults(
                 environment.getRequiredProperty("spring.application.name"));
         OutboxRelay.Settings settings = new OutboxRelay.Settings(
@@ -96,6 +103,11 @@ public class MessagingAutoConfiguration {
                 defaults.pollTimeout(),
                 environment.getProperty("tpe.messaging.outbox.takeover-retry", Duration.class,
                         defaults.takeoverRetry()),
+                environment.getProperty("tpe.messaging.outbox.lock-session-timeout", Duration.class,
+                        defaults.lockSessionTimeout()),
+                environment.getProperty("tpe.messaging.outbox.heartbeat-interval", Duration.class,
+                        defaults.heartbeatInterval()),
+                environment.getProperty("tpe.messaging.outbox.stall-after", Duration.class, defaults.stallAfter()),
                 defaults.minBackoff(),
                 defaults.maxBackoff(),
                 defaults.ackTimeout());
@@ -105,6 +117,8 @@ public class MessagingAutoConfiguration {
                 environment.getProperty("spring.datasource.password"));
         return new OutboxRelay(lockConnections, repository,
                 OutboxRelay.producerConfig(environment.getRequiredProperty("spring.kafka.bootstrap-servers")),
-                settings);
+                settings, registry.getIfAvailable(SimpleMeterRegistry::new),
+                live -> AvailabilityChangeEvent.publish(events, OutboxRelay.class,
+                        live ? LivenessState.CORRECT : LivenessState.BROKEN));
     }
 }

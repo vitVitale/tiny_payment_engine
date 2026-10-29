@@ -36,7 +36,8 @@ public final class Topics {
         return eventId.toString().equals(header(record, "tpe-event-id"));
     }
 
-    private static List<ConsumerRecord<String, String>> read(String topic,
+    /** Every record on {@code topic}, polling until {@code enough} holds or 15 s passed. */
+    public static List<ConsumerRecord<String, String>> read(String topic,
             Predicate<List<ConsumerRecord<String, String>>> enough) {
         Map<String, Object> config = Map.of(
                 ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG, MessagingContainers.KAFKA.getBootstrapServers(),
