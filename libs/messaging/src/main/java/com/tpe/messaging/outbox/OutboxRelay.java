@@ -1,13 +1,18 @@
 package com.tpe.messaging.outbox;
 
+import com.tpe.messaging.MessageHeaders;
+import com.tpe.messaging.MessageSpans;
+import com.tpe.observability.context.Spans;
 import io.micrometer.core.instrument.Gauge;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.Timer;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
+import io.micrometer.tracing.Span;
 import java.nio.charset.StandardCharsets;
 import java.sql.SQLException;
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ExecutionException;
@@ -52,6 +57,10 @@ import org.springframework.context.SmartLifecycle;
  * {@code tpe.outbox.publish.latency} records, for every row this instance marks, insert → marked published after the
  * Kafka ack (target p99 < 50 ms), both on the database's clock: no skew between hosts, and a row published twice is
  * measured once.
+ *
+ * <p>Tracing (ADR-014, specs/26-observability.md §5.2): one {@code send <topic>} producer span per sent row, a child of
+ * the row's stored {@code traceparent}, ended at the Kafka ack; the record's {@code traceparent} header is that span.
+ * An iteration that finds no rows and the heartbeat create no spans.
  */
 public final class OutboxRelay implements SmartLifecycle {
 
@@ -93,6 +102,7 @@ public final class OutboxRelay implements SmartLifecycle {
     private final Consumer<Boolean> liveness;
     private final LeaderLease lease;
     private final Timer publishLatency;
+    private final Spans spans;
     private final AtomicLong published = new AtomicLong();
 
     private volatile boolean running;
@@ -117,11 +127,18 @@ public final class OutboxRelay implements SmartLifecycle {
      */
     public OutboxRelay(DataSource lockConnections, OutboxRepository repository, Map<String, Object> producerConfig,
             Settings settings, MeterRegistry registry, Consumer<Boolean> liveness) {
+        this(lockConnections, repository, producerConfig, settings, registry, liveness, Spans.noop());
+    }
+
+    /** @param spans for the {@code send} spans */
+    public OutboxRelay(DataSource lockConnections, OutboxRepository repository, Map<String, Object> producerConfig,
+            Settings settings, MeterRegistry registry, Consumer<Boolean> liveness, Spans spans) {
         this.lockConnections = lockConnections;
         this.repository = repository;
         this.producerConfig = Map.copyOf(producerConfig);
         this.settings = settings;
         this.liveness = liveness;
+        this.spans = spans;
         this.lease = new LeaderLease(settings.stallAfter(), settings.lockSessionTimeout(), System::nanoTime);
         Gauge.builder("tpe.relay.active", this, relay -> relay.isLeader() ? 1 : 0)
                 .description("1 while this instance holds the outbox relay lock and publishes")
@@ -265,9 +282,11 @@ public final class OutboxRelay implements SmartLifecycle {
         List<Future<RecordMetadata>> sends = new ArrayList<>();
         RuntimeException sendFailure = null;
         for (OutboxRow row : rows) {
+            Span span = sendSpan(row);
             try {
-                sends.add(producer.send(record(row)));
+                sends.add(producer.send(record(row, span), (metadata, e) -> end(span, e)));
             } catch (RuntimeException e) {
+                end(span, e);
                 sendFailure = e; // later rows are not sent: they would be marked out of order
                 break;
             }
@@ -356,10 +375,29 @@ public final class OutboxRelay implements SmartLifecycle {
         }
     }
 
-    private static ProducerRecord<String, String> record(OutboxRow row) {
+    private Span sendSpan(OutboxRow row) {
+        Span.Builder span = spans.childOf("send " + row.topic(), row.headers().get(MessageHeaders.TRACEPARENT))
+                .kind(Span.Kind.PRODUCER)
+                .tag("tpe.outbox.age_ms", row.age().toMillis());
+        return MessageSpans.withMessage(span, row.topic(), row.key(), row.headers().get(MessageHeaders.EVENT_ID),
+                row.headers().get(MessageHeaders.MESSAGE_TYPE)).start();
+    }
+
+    /** The row's headers, with {@code traceparent} replaced by the {@code send} span when tracing is on. */
+    private ProducerRecord<String, String> record(OutboxRow row, Span span) {
+        Map<String, String> headers = new LinkedHashMap<>(row.headers());
+        spans.traceparent(span).ifPresent(traceparent -> headers.put(MessageHeaders.TRACEPARENT, traceparent));
         ProducerRecord<String, String> record = new ProducerRecord<>(row.topic(), row.key(), row.payload());
-        row.headers().forEach((name, value) -> record.headers().add(name, value.getBytes(StandardCharsets.UTF_8)));
+        headers.forEach((name, value) -> record.headers().add(name, value.getBytes(StandardCharsets.UTF_8)));
         return record;
+    }
+
+    /** Ends a {@code send} span at the ack, or with the send's failure. */
+    private static void end(Span span, Exception failure) {
+        if (failure != null) {
+            span.error(failure);
+        }
+        span.end();
     }
 
     private void sleep(Duration duration) {

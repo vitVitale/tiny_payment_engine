@@ -1,5 +1,6 @@
 package com.tpe.messaging.inbox;
 
+import com.tpe.observability.context.Spans;
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.MeterRegistry;
 import java.util.UUID;
@@ -9,14 +10,21 @@ import org.springframework.transaction.support.TransactionSynchronizationManager
 /**
  * Exactly-once handling on top of at-least-once delivery (specs/01-shared-libraries.md §3.6): records a message in
  * the {@code inbox} in the business transaction, so the business change and the record commit or roll back together.
+ * Sets {@code tpe.inbox.duplicate} on the current span, the listener's {@code process} span (26 §5.2).
  */
 public final class InboxGuard {
 
     private final JdbcTemplate jdbc;
     private final Counter duplicates;
+    private final Spans spans;
 
     public InboxGuard(JdbcTemplate jdbc, MeterRegistry registry) {
+        this(jdbc, registry, Spans.noop());
+    }
+
+    public InboxGuard(JdbcTemplate jdbc, MeterRegistry registry, Spans spans) {
         this.jdbc = jdbc;
+        this.spans = spans;
         this.duplicates = Counter.builder("tpe.inbox.duplicates")
                 .description("Consumed messages that were already handled")
                 .register(registry);
@@ -37,10 +45,11 @@ public final class InboxGuard {
         int inserted = jdbc.update("""
                 INSERT INTO inbox (dedup_key, topic, event_id) VALUES (?, ?, ?)
                 ON CONFLICT (dedup_key) DO NOTHING""", dedupKey, topic, eventId);
-        if (inserted == 0) {
+        boolean duplicate = inserted == 0;
+        spans.current().ifPresent(span -> span.tag("tpe.inbox.duplicate", duplicate));
+        if (duplicate) {
             duplicates.increment();
-            return false;
         }
-        return true;
+        return !duplicate;
     }
 }

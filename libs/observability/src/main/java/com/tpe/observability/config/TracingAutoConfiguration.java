@@ -46,6 +46,8 @@ import org.springframework.http.server.observation.ServerRequestObservationConte
 public class TracingAutoConfiguration {
 
     static final String EXPORT = "management.opentelemetry.tracing.export.";
+    /** The observation names of datasource-micrometer: {@code jdbc.connection}, {@code jdbc.query}, … */
+    private static final String JDBC_OBSERVATIONS = "jdbc.";
 
     @Bean
     PaymentTelemetry paymentTelemetry(ObjectProvider<Tracer> tracer, ObjectProvider<Clock> clock) {
@@ -60,6 +62,15 @@ public class TracingAutoConfiguration {
     @Bean
     Spans spans(ObjectProvider<Tracer> tracer, TraceContextCodec codec) {
         return new Spans(tracerOrNoop(tracer), codec);
+    }
+
+    /**
+     * §4.2: JDBC spans only inside another span. A query of a background loop that found nothing to do (an idle relay
+     * or polling worker, the relay heartbeat, a gauge refresh) would otherwise be a trace of its own.
+     */
+    @Bean
+    ObservationPredicate noJdbcObservationsOutsideASpan(ObjectProvider<Tracer> tracer) {
+        return (name, context) -> !name.startsWith(JDBC_OBSERVATIONS) || tracerOrNoop(tracer).currentSpan() != null;
     }
 
     /** Replaces Boot's span exporters and processors so the batch processor is bounded and drops are counted. */

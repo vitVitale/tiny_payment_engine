@@ -4,6 +4,7 @@ import com.tpe.contracts.ContractJson;
 import com.tpe.messaging.consumer.DltHook;
 import com.tpe.messaging.consumer.DltPublisher;
 import com.tpe.messaging.consumer.TpeErrorHandler;
+import com.tpe.messaging.consumer.TracingRecordInterceptor;
 import com.tpe.messaging.housekeeping.MessagingHousekeeping;
 import com.tpe.messaging.housekeeping.MessagingRetention;
 import com.tpe.messaging.inbox.InboxGuard;
@@ -12,6 +13,7 @@ import com.tpe.messaging.outbox.JdbcOutboxWriter;
 import com.tpe.messaging.outbox.OutboxRelay;
 import com.tpe.messaging.outbox.OutboxRepository;
 import com.tpe.messaging.outbox.OutboxWriter;
+import com.tpe.observability.context.Spans;
 import com.tpe.paymentdomain.UuidV7Generator;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
@@ -35,7 +37,8 @@ import org.springframework.jdbc.datasource.DriverManagerDataSource;
  * The outbox, relay, inbox and listener error handling of specs/01-shared-libraries.md §3, enabled by
  * {@code tpe.messaging.enabled=true}. The service provides PostgreSQL ({@code spring.datasource.*}) and Kafka
  * ({@code spring.kafka.bootstrap-servers}, read by the relay's and the DLT's own producers); the Kafka listener and
- * Flyway defaults come from {@link MessagingEnvironmentPostProcessor}.
+ * Flyway defaults come from {@link MessagingEnvironmentPostProcessor}. Tracing (ADR-014) uses the {@link Spans} of
+ * {@code observability}; without a tracing implementation nothing is traced.
  */
 @AutoConfiguration(afterName = {
     "org.springframework.boot.jdbc.autoconfigure.DataSourceAutoConfiguration",
@@ -52,15 +55,22 @@ public class MessagingAutoConfiguration {
 
     @Bean
     OutboxWriter outboxWriter(JdbcTemplate jdbc, ContractJson json, ObjectProvider<Clock> clock,
-            Environment environment) {
+            ObjectProvider<Spans> spans, Environment environment) {
         Clock time = clock.getIfAvailable(Clock::systemUTC);
         return new JdbcOutboxWriter(jdbc, json, new UuidV7Generator(time, new SecureRandom()), time,
-                environment.getRequiredProperty("spring.application.name"));
+                environment.getRequiredProperty("spring.application.name"), spans.getIfAvailable(Spans::noop));
     }
 
     @Bean
-    InboxGuard inboxGuard(JdbcTemplate jdbc, ObjectProvider<MeterRegistry> registry) {
-        return new InboxGuard(jdbc, registry.getIfAvailable(SimpleMeterRegistry::new));
+    InboxGuard inboxGuard(JdbcTemplate jdbc, ObjectProvider<MeterRegistry> registry, ObjectProvider<Spans> spans) {
+        return new InboxGuard(jdbc, registry.getIfAvailable(SimpleMeterRegistry::new),
+                spans.getIfAvailable(Spans::noop));
+    }
+
+    /** The {@code process} span of each consumed record; Boot sets it on its listener container factory. */
+    @Bean
+    TracingRecordInterceptor tracingRecordInterceptor(ObjectProvider<Spans> spans, ObjectProvider<Clock> clock) {
+        return new TracingRecordInterceptor(spans.getIfAvailable(Spans::noop), clock.getIfAvailable(Clock::systemUTC));
     }
 
     /** Its own producer, not a {@code KafkaTemplate} bean, so it leaves the service's Kafka beans alone. */
@@ -113,7 +123,7 @@ public class MessagingAutoConfiguration {
      */
     @Bean
     OutboxRelay outboxRelay(DataSource dataSource, OutboxRepository repository, ObjectProvider<MeterRegistry> registry,
-            ApplicationEventPublisher events, Environment environment) {
+            ObjectProvider<Spans> spans, ApplicationEventPublisher events, Environment environment) {
         OutboxRelay.Settings defaults = OutboxRelay.Settings.defaults(
                 environment.getRequiredProperty("spring.application.name"));
         OutboxRelay.Settings settings = new OutboxRelay.Settings(
@@ -140,6 +150,7 @@ public class MessagingAutoConfiguration {
                 OutboxRelay.producerConfig(environment.getRequiredProperty("spring.kafka.bootstrap-servers")),
                 settings, registry.getIfAvailable(SimpleMeterRegistry::new),
                 live -> AvailabilityChangeEvent.publish(events, OutboxRelay.class,
-                        live ? LivenessState.CORRECT : LivenessState.BROKEN));
+                        live ? LivenessState.CORRECT : LivenessState.BROKEN),
+                spans.getIfAvailable(Spans::noop));
     }
 }

@@ -1,6 +1,7 @@
 package com.tpe.messaging.outbox;
 
 import java.time.Duration;
+import java.time.temporal.ChronoUnit;
 import java.util.List;
 import org.springframework.jdbc.core.JdbcTemplate;
 
@@ -16,13 +17,15 @@ public class JdbcOutboxRepository implements OutboxRepository {
     @Override
     public List<OutboxRow> oldestUnpublished(Duration visibilityWindow, int limit) {
         return jdbc.query("""
-                SELECT id, topic, message_key, payload::text AS payload, headers::text AS headers
+                SELECT id, topic, message_key, payload::text AS payload, headers::text AS headers,
+                       (extract(epoch FROM now() - created_at) * 1000000)::bigint AS age_micros
                 FROM outbox
                 WHERE published_at IS NULL AND created_at < now() - ? * interval '1 millisecond'
                 ORDER BY id
                 LIMIT ?""",
                 (rs, row) -> new OutboxRow(rs.getLong("id"), rs.getString("topic"), rs.getString("message_key"),
-                        rs.getString("payload"), OutboxHeaders.fromJson(rs.getString("headers"))),
+                        rs.getString("payload"), OutboxHeaders.fromJson(rs.getString("headers")),
+                        Duration.of(rs.getLong("age_micros"), ChronoUnit.MICROS)),
                 visibilityWindow.toMillis(), limit);
     }
 

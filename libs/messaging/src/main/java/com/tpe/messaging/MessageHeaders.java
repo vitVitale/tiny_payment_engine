@@ -12,6 +12,11 @@ public final class MessageHeaders {
     public static final String OCCURRED_AT = "tpe-occurred-at";
     /** The producing service's {@code spring.application.name}. */
     public static final String PRODUCER = "tpe-producer";
+    /**
+     * W3C trace context: in the outbox, of the transaction that wrote the row; on Kafka, the relay's {@code send}
+     * span (ADR-014).
+     */
+    public static final String TRACEPARENT = "traceparent";
 
     /** On a DLT record (01 §3.6): the failure's message; contract violations name fields and codes, never values. */
     public static final String DLT_REASON = "tpe-dlt-reason";

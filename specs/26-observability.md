@@ -128,10 +128,12 @@ Micrometer, Prometheus registry, `/actuator/prometheus`. Additions:
   **no parameter values, no `FETCH` spans**.
 - **Not traced** (observation predicates): `/actuator/**`, polling-worker iterations that found no due rows, relay
   iterations that found no rows, the relay heartbeat, Kafka consumer polls. A polling worker that handles rows
-  creates one span per handled row.
+  creates one span per handled row. JDBC spans exist only inside another span: a query of a background loop with
+  nothing to do (or of a gauge refresh) is not a trace of its own.
 - Custom spans are listed in §5.2. Business attributes are set only through `PaymentTelemetry`; ArchUnit forbids
   `Span.tag(String, String)`, `Observation.highCardinalityKeyValue(…)` and `io.opentelemetry.api` outside
-  `libs/observability` and `infrastructure` packages.
+  `libs/observability` and `infrastructure` packages. `libs/messaging` sets the technical attributes of its own spans
+  (§5.2: topic, key, event id, message type, ages, `tpe.inbox.duplicate`) itself; it runs no service ArchUnit rules.
 
 ### 4.3 Logs
 
@@ -212,7 +214,8 @@ customers, one per hit).
 | Span name | Kind | Service | Key attributes |
 |---|---|---|---|
 | `send <topic>` | PRODUCER | `messaging` relay | `messaging.destination.name`, `messaging.kafka.message.key`, `tpe.event.id`, `tpe.message.type`, `tpe.outbox.age_ms` (now − `created_at`) |
-| `process <topic>` | CONSUMER | `messaging` listener | as above, `tpe.inbox.duplicate` |
+| `process <topic>` | CONSUMER | `messaging` listener | as above, `tpe.inbox.duplicate`; `tpe.outbox.age_ms` from `tpe-occurred-at` |
+| `worker <name>` | INTERNAL | `messaging` polling worker | one per handled row, a new trace |
 | `payment.saga.action` | INTERNAL | orchestrator | `tpe.saga.action`, `tpe.saga.attempt`, `tpe.saga.result`, `tpe.saga.resumed` |
 | `payment.timer` | INTERNAL | orchestrator | `tpe.timer.type`, `tpe.timer.lateness_ms` (fire − `due_at`) |
 | `payment.transition` | span event on the current span | orchestrator | `tpe.state.from`, `tpe.state.to`, `tpe.reason`, `tpe.cause` |

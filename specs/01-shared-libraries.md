@@ -259,6 +259,10 @@ sweeper, csm-gateway answer deadlines and send retries, notification retries, le
 - Every DLT publish increments `tpe.dlt.messages{topic}` (alert rule: any increase). Services may register a
   `DltHook` to react (orchestrator opens an exception case for `csm.*` DLTs).
 - Listeners MUST NOT make remote REST calls. They validate, deduplicate, record the fact, and commit.
+- Tracing: the library's `RecordInterceptor` opens a `process <topic>` span around each delivery attempt, a child of
+  the `traceparent` header on `csm.*` topics and a new linked trace elsewhere (§3.4, ADR-014). Like the error
+  handler, Spring Boot sets it on its listener container factory, so a service declares no other
+  `RecordInterceptor` bean.
 
 ### 3.7 Acceptance
 

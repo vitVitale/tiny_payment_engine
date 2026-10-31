@@ -20,6 +20,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.context.annotation.Import;
+import org.springframework.jdbc.core.JdbcTemplate;
 
 @SpringBootTest(
         classes = SampleApplication.class,
@@ -49,6 +50,9 @@ class TracingTest {
     @Autowired
     Spans spanFactory;
 
+    @Autowired
+    JdbcTemplate jdbc;
+
     @BeforeEach
     void reset() {
         spans.reset();
@@ -73,6 +77,18 @@ class TracingTest {
         assertThat(query.getAttributes().asMap().values()).allSatisfy(value ->
                 assertThat(String.valueOf(value)).doesNotContain(SampleApplication.SECRET_PARAMETER));
         assertThat(spans.finished()).noneMatch(span -> span.getName().equals("result-set"));
+    }
+
+    @Test
+    void jdbcOutsideASpanCreatesNoSpans() throws Exception {
+        jdbc.queryForObject("select 1", Integer.class);
+        get("/sample/query", Map.of());
+
+        spans.await(span -> span.getName().equals("query"));
+        assertThat(spans.finished()).filteredOn(span -> span.getName().equals("query")).hasSize(1)
+                .allSatisfy(query -> assertThat(query.getParentSpanContext().isValid()).isTrue());
+        assertThat(spans.finished()).noneMatch(span -> span.getName().equals("connection")
+                && !span.getParentSpanContext().isValid());
     }
 
     @Test
