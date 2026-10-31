@@ -27,6 +27,13 @@ Consumer pact tests run with the build and write their pacts to `<module>/target
 ./mvnw -Ppact-verify verify
 ```
 
+That step also verifies the last release's pacts in `pacts/released/` (backward check). The forward check runs the last
+release tag's providers against this commit's pacts (nightly and in the release job):
+
+```bash
+.github/scripts/pact-forward-check.sh
+```
+
 ## Local stack
 
 PostgreSQL, Kafka and the mock OAuth2 issuer of
