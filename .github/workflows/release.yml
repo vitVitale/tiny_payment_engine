@@ -1,0 +1,41 @@
+# Release of specs/00-engineering-baseline.md §14 step 7, from main: the forward pact check must be green, then this
+# commit's pacts are committed to pacts/released/<version>/ and the commit is tagged v<version>. Images and the SBOM
+# are added by their own tickets.
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Release version, <major>.<minor>.<patch>
+        required: true
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release
+
+jobs:
+  release:
+    name: Release pacts
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '25'
+          cache: maven
+      - name: Build this commit's pacts
+        run: ./mvnw -B package
+      - name: Forward pact check, then commit the pacts and tag
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          .github/scripts/pact-release.sh "$VERSION"

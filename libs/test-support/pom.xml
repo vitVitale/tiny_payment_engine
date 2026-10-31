@@ -24,6 +24,11 @@
             <groupId>au.com.dius.pact.core</groupId>
             <artifactId>model</artifactId>
         </dependency>
+        <!-- the loader of @PactVerification: this commit's and the last release's pacts (20 §10.3) -->
+        <dependency>
+            <groupId>au.com.dius.pact</groupId>
+            <artifactId>provider</artifactId>
+        </dependency>
         <dependency>
             <groupId>au.com.dius.pact.core</groupId>
             <artifactId>matchers</artifactId>
@@ -116,6 +121,7 @@
                                         <include>org.junit.jupiter:*</include>
                                         <include>org.assertj:*</include>
                                         <include>au.com.dius.pact.core:*</include>
+                                        <include>au.com.dius.pact:provider</include>
                                         <include>*:*:*:*:test</include>
                                     </includes>
                                 </bannedDependencies>

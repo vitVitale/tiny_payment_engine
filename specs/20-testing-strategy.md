@@ -446,8 +446,8 @@ Not covered by Pact:
 
 ### 10.3 Verifying pacts
 
-- Provider tests live in `src/integrationTest` (`@Provider("<artifactId>")`, `@Tag("pact-verify")`,
-  `@PactFolder("${pact.folder}")`): the real application on a random port with Testcontainers PostgreSQL (and
+- Provider tests live in `src/integrationTest` (`@Provider("<artifactId>")`, `@PactVerification` from
+  `libs/test-support`): the real application on a random port with Testcontainers PostgreSQL (and
   Kafka for message providers); `@State` handlers seed data through application services. Message providers
   produce each message through the real outbox path and return the outbox row's payload and headers, so the
   verified bytes are the bytes the relay publishes.
@@ -455,7 +455,8 @@ Not covered by Pact:
   Services do not depend on each other, so the Maven reactor gives no order between consumer and provider; provider
   verification therefore runs as a separate CI step after the build (`-Ppact-verify`,
   [00 §14](00-engineering-baseline.md#14-continuous-integration)), which runs only the `pact-verify` tests; a normal
-  build excludes them. The parent POM sets `pact.rootDir` for Surefire and `pact.folder` for Failsafe.
+  build excludes them. The parent POM sets `pact.rootDir` for Surefire and `pact.folder` / `pact.released.dir` for
+  Failsafe.
 - Three checks:
 
 | Check | Pacts from | Provider from | When | Protects |
@@ -464,6 +465,14 @@ Not covered by Pact:
 | Backward | last release, `pacts/released/<version>/` (committed by the release job) | this commit | every PR | consumers of the old release still running during a rolling deploy |
 | Forward | this commit | last release tag (its provider tests, checked out) | nightly and before every release | new consumers that start before their providers have finished rolling |
 
+- Mechanics: `@PactVerification` tags a provider verification `pact-verify` and loads this commit's pacts and,
+  for the backward check, the newest `pacts/released/<version>/`, so no provider runs one check without the other. The forward check is
+  `.github/scripts/pact-forward-check.sh`: it checks out the last `v<version>` tag in a worktree and runs its
+  `-Ppact-verify` against this commit's `target/pacts` (`-Dpact.collected.dir`, `-Dpact.released.skip=true`); every
+  release tag therefore carries a `@PactVerification` that honours both properties. The
+  release job (`.github/workflows/release.yml`, `.github/scripts/pact-release.sh`) runs the forward check, then
+  commits the pacts under `pacts/released/<version>/` and tags `v<version>`. Before the first release both checks
+  pass and log that there is nothing to verify.
 - A breaking change follows expand / contract, as for migrations: the provider accepts old and new → release →
   consumers switch → release → the old form is removed. The backward and forward checks enforce that order. Example:
   a consumer adding an optional field to an internal request body is safe only because internal providers ignore

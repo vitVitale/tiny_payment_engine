@@ -67,7 +67,7 @@ Dependency rules (enforced by the Maven Enforcer plugin and ArchUnit):
   logic. `messaging` depends on it.
 - `libs/test-support` holds shared test fixtures (the ArchUnit rules of §3, §5, §6). Any module MAY depend on it in
   `test` scope only; it is never a compile or runtime dependency. It depends only on test libraries (ArchUnit, JUnit,
-  AssertJ, Pact's model and matchers for `StubConformanceTest`).
+  AssertJ, Pact's model and matchers for `StubConformanceTest`, its provider loader API for `@PactVerification`).
 - `tools/*` MAY depend on `libs/*` and MUST NOT be called by any service. No module depends on a tool.
 - `csm-simulator` MUST NOT be packaged into any production image.
 
@@ -370,6 +370,7 @@ Pipeline on every pull request and on `main`:
    Until the services have images, this step starts the infrastructure only and runs `LocalStackSmokeIT`.
 6. Nightly: full scenario catalogue, Gatling load profile, failure-injection scenarios ([20 §5](20-testing-strategy.md#5-failure-injection-scenarios)),
    forward pact check (the last release's providers against this commit's pacts).
-7. Release: the forward pact check must be green; the release job copies the pact files to `pacts/released/<version>/`.
+7. Release: the forward pact check must be green; the release job copies the pact files to `pacts/released/<version>/`,
+   commits them and tags `v<version>` (`.github/workflows/release.yml`).
 
 Branching: trunk-based, short-lived feature branches, squash merge. Conventional Commits for messages.

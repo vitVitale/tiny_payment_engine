@@ -54,6 +54,10 @@
         <pact.version>4.7.5</pact.version>
         <!-- where the build collects every module's pacts (20 §10.3) -->
         <pact.collected.dir>${maven.multiModuleProjectDirectory}/target/pacts</pact.collected.dir>
+        <!-- the pacts of each release, committed by the release job; the backward check verifies the newest -->
+        <pact.released.dir>${maven.multiModuleProjectDirectory}/pacts/released</pact.released.dir>
+        <!-- true in the forward check, which verifies only this commit's pacts -->
+        <pact.released.skip>false</pact.released.skip>
         <!-- provider verification runs only with -Ppact-verify (00 §14 step 2) -->
         <excludedGroups>pact-verify</excludedGroups>
     </properties>
@@ -106,6 +110,13 @@
                 <artifactId>junit5spring</artifactId>
                 <version>${pact.version}</version>
                 <scope>test</scope>
+            </dependency>
+            <!-- PactLoader / PactSource for @PactVerification in libs/test-support, test scope for every module that
+                 uses it (specs/00-engineering-baseline.md §1) -->
+            <dependency>
+                <groupId>au.com.dius.pact</groupId>
+                <artifactId>provider</artifactId>
+                <version>${pact.version}</version>
             </dependency>
             <dependency>
                 <groupId>au.com.dius.pact.core</groupId>
@@ -200,13 +211,16 @@
                     </systemPropertyVariables>
                 </configuration>
             </plugin>
-            <!-- Pact providers (@Tag("pact-verify")) read the collected pacts from pact.folder -->
+            <!-- Pact providers (@PactVerification) read the collected pacts from pact.folder and the last release's
+                 from pact.released.dir -->
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-failsafe-plugin</artifactId>
                 <configuration>
                     <systemPropertyVariables>
                         <pact.folder>${pact.collected.dir}</pact.folder>
+                        <pact.released.dir>${pact.released.dir}</pact.released.dir>
+                        <pact.released.skip>${pact.released.skip}</pact.released.skip>
                     </systemPropertyVariables>
                 </configuration>
             </plugin>

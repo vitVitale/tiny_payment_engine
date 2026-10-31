@@ -6,14 +6,13 @@ import au.com.dius.pact.provider.junit5.MessageTestTarget;
 import au.com.dius.pact.provider.junit5.PactVerificationContext;
 import au.com.dius.pact.provider.junitsupport.Provider;
 import au.com.dius.pact.provider.junitsupport.State;
-import au.com.dius.pact.provider.junitsupport.loader.PactFolder;
 import au.com.dius.pact.provider.PactVerifyProvider;
 import au.com.dius.pact.provider.spring.junit5.PactVerificationSpringProvider;
 import com.tpe.pactsample.provider.SampleProviderApplication.AccountOpened;
+import com.tpe.testsupport.pact.PactVerification;
 import java.util.Map;
 import java.util.UUID;
 import org.junit.jupiter.api.BeforeEach;
-import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.TestTemplate;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -24,13 +23,12 @@ import tools.jackson.databind.json.JsonMapper;
 /**
  * The sample provider verifies every collected pact that names it (specs/20-testing-strategy.md §10.3), HTTP
  * interactions against the running application, messages through {@link #accountOpened()}. Runs only with
- * {@code -Ppact-verify} ({@code @Tag("pact-verify")}), reading the pacts from {@code pact.folder}, which the parent
- * POM sets to {@code <root>/target/pacts}. A sample, not the pattern of §10.3 in full: its states write to an in-memory
- * store instead of going through application services, and the message is built here instead of through the outbox.
+ * {@code -Ppact-verify} and verifies this commit's pacts and the last release's ({@link PactVerification}). A sample,
+ * not the pattern of §10.3 in full: its states write to an in-memory store instead of going through application
+ * services, and the message is built here instead of through the outbox.
  */
-@Tag("pact-verify")
 @Provider("pact-sample-provider")
-@PactFolder("${pact.folder}")
+@PactVerification
 @SpringBootTest(classes = SampleProviderApplication.class, webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
 class SampleProviderPactVerificationIT {
 

@@ -1,0 +1,30 @@
+# Nightly pipeline of specs/00-engineering-baseline.md §14 step 6; the full scenario catalogue, load and failure
+# injection are added by their own tickets.
+name: Nightly
+
+on:
+  schedule:
+    - cron: '0 2 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  forward-pact-check:
+    name: Forward pact check
+    runs-on: ubuntu-latest
+    steps:
+      # the release tags: the last one's providers verify this commit's pacts
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '25'
+          cache: maven
+      - name: Build this commit's pacts
+        run: ./mvnw -B package
+      - name: Forward pact check
+        run: .github/scripts/pact-forward-check.sh
