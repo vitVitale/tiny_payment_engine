@@ -73,5 +73,121 @@ services:
       timeout: 5s
       retries: 30
 
+  # ---- profile `observability` (specs/26-observability.md §13), off by default:
+  #   ./mvnw -pl tests/observability-sample -am package -DskipTests
+  #   docker compose -f deploy/docker-compose.yml --profile observability up -d --wait
+  # Grafana on http://localhost:3000, OTLP on localhost:4317 / 4318. Tenant tpe-local.
+
+  # the agent of 26 §6.1, compose discovery instead of Kubernetes; no gateway locally, so it writes to the backends
+  alloy:
+    profiles: [observability]
+    image: grafana/alloy:v1.10.2
+    command: ["run", "--server.http.listen-addr=0.0.0.0:12345", "--storage.path=/var/lib/alloy/data",
+              "/etc/alloy/agent.alloy"]
+    environment:
+      TPE_PLATFORM_MODULE: /etc/alloy/modules/compose.alloy
+      TPE_ENV: local
+      TPE_CLUSTER: compose
+      TPE_TENANT: tpe-local
+      TPE_METRICS_URL: http://mimir:9009/api/v1/push
+      TPE_LOGS_URL: http://loki:3100/loki/api/v1/push
+      TPE_TRACES_ENDPOINT: tempo:4317
+      TPE_TRACES_INSECURE: "true"
+    ports:
+      - "4317:4317"
+      - "4318:4318"
+      - "12345:12345"
+    volumes:
+      - ./observability/alloy:/etc/alloy:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    depends_on:
+      mimir:
+        condition: service_started
+      loki:
+        condition: service_healthy
+      tempo:
+        condition: service_healthy
+
+  # distroless image: no healthcheck; GET :9009/ready from the host
+  mimir:
+    profiles: [observability]
+    image: grafana/mimir:2.17.0
+    command: ["-config.file=/etc/mimir/mimir.yaml"]
+    ports:
+      - "9009:9009"
+    volumes:
+      - ./observability/mimir/mimir.yaml:/etc/mimir/mimir.yaml:ro
+
+  loki:
+    profiles: [observability]
+    image: grafana/loki:3.5.5
+    command: ["-config.file=/etc/loki/loki.yaml"]
+    ports:
+      - "3100:3100"
+    volumes:
+      - ./observability/loki/loki.yaml:/etc/loki/loki.yaml:ro
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://localhost:3100/ready"]
+      interval: 2s
+      timeout: 5s
+      retries: 60
+
+  tempo:
+    profiles: [observability]
+    image: grafana/tempo:2.8.2
+    command: ["-config.file=/etc/tempo/tempo.yaml"]
+    ports:
+      - "3200:3200"
+    volumes:
+      - ./observability/tempo/tempo.yaml:/etc/tempo/tempo.yaml:ro
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://localhost:3200/ready"]
+      interval: 2s
+      timeout: 5s
+      retries: 60
+
+  grafana:
+    profiles: [observability]
+    image: grafana/grafana:12.1.1
+    environment:
+      GF_AUTH_ANONYMOUS_ENABLED: "true"      # local only
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Admin
+      GF_AUTH_DISABLE_LOGIN_FORM: "true"
+      GF_ANALYTICS_REPORTING_ENABLED: "false"
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./observability/grafana/provisioning:/etc/grafana/provisioning:ro
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://localhost:3000/api/health"]
+      interval: 2s
+      timeout: 5s
+      retries: 60
+
+  # the sample workload of OBS-AC-01 … -04 in M0 (no payments yet): tests/observability-sample, built beforehand
+  observability-sample:
+    profiles: [observability]
+    image: eclipse-temurin:25.0.5_8-jre
+    command: ["java", "-jar", "/app/observability-sample.jar"]
+    environment:
+      OTEL_SERVICE_NAME: observability-sample
+      # service.instance.id = the container name, which the agent sets as the pod / instance labels (26 §3)
+      OTEL_RESOURCE_ATTRIBUTES: service.namespace=tpe,service.version=local,service.instance.id=tpe-observability-sample-1,deployment.environment.name=local
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://alloy:4317
+    labels:
+      tpe.io/scrape: "true"
+      tpe.io/port: "8095"
+    ports:
+      - "8095:8095"
+    volumes:
+      - ../tests/observability-sample/target/observability-sample.jar:/app/observability-sample.jar:ro
+    healthcheck:
+      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/8095 && printf 'GET /actuator/health/readiness HTTP/1.0\\r\\n\\r\\n' >&3 && grep -q UP <&3"]
+      interval: 2s
+      timeout: 5s
+      retries: 60
+    depends_on:
+      - alloy
+
 volumes:
   postgres-data:

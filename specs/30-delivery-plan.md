@@ -70,7 +70,7 @@ release hold), P-10 (calls used so far) and M-04 (vop-service) verified ([20 §1
 | orchestrator CSM path | `SEND`, CSM event listener (outgoing), `SETTLE_HOLD`, investigation timers, exception cases + API | L | payments core |
 
 Exit: E2E-O-01, -07 … -14, -20, -21 green; CH-02, CH-03 green; pacts P-04 (settle hold), P-06, M-01 (send, status
-request) and M-02 (outgoing events) verified.
+request) and M-02 (outgoing events) verified; OBS-AC-01 with a real outgoing payment instead of the M0 sample workload.
 
 ## M4 — Incoming via CSM (UC-06) — can run in parallel with M3 once the simulator transport exists
 
@@ -81,7 +81,7 @@ request) and M-02 (outgoing events) verified.
 | orchestrator incoming saga | `CreditTransferReceived`, incoming actions, `AnswerSent` handling, settlement-overdue timer | L | payments core |
 
 Exit: E2E-I-01 … -10, -12, -13 green; GW-AC-12 race test; CH-04 green; pacts P-04 (pending credits), P-07, M-01
-(verdicts) and M-02 (incoming events) verified.
+(verdicts) and M-02 (incoming events) verified; OBS-AC-01 with a real incoming payment.
 
 ## Parallel tracks (start after M1)
 

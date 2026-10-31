@@ -1,0 +1,142 @@
+// The Alloy agent of specs/26-observability.md §6.1: OTLP traces from the services, their /actuator/prometheus,
+// their stdout. The same file runs in compose, the performance environment and production; what differs comes from
+// the environment:
+//   TPE_PLATFORM_MODULE  how workloads are found: modules/compose.alloy (Docker) or a Kubernetes module
+//   TPE_ENV, TPE_CLUSTER the `env` and `cluster` labels (§3)
+//   TPE_TENANT           X-Scope-OrgID towards the backends, tpe-<env>
+//   TPE_METRICS_URL      Mimir remote write
+//   TPE_LOGS_URL         Loki push (the gateway's, where one runs)
+//   TPE_TRACES_ENDPOINT  OTLP gRPC (the gateway's, where one runs); TPE_TRACES_INSECURE=true for plain text
+// Metrics go straight to Mimir (ADR-013 decision 2).
+
+import.file "platform" {
+  filename = sys.env("TPE_PLATFORM_MODULE")
+}
+
+platform.workloads "services" {
+  metrics_to = [prometheus.relabel.target_labels.receiver]
+  logs_to    = [loki.process.ecs.receiver]
+}
+
+// ---- Metrics: the target labels of §3 only ----
+
+prometheus.relabel "target_labels" {
+  // `job` is Prometheus' own target label, not one of §3
+  rule {
+    action = "labeldrop"
+    regex  = "job"
+  }
+  forward_to = [prometheus.remote_write.mimir.receiver]
+}
+
+prometheus.remote_write "mimir" {
+  external_labels = {
+    env     = sys.env("TPE_ENV"),
+    cluster = sys.env("TPE_CLUSTER"),
+  }
+
+  endpoint {
+    url            = sys.env("TPE_METRICS_URL")
+    send_exemplars = true
+    headers        = {
+      "X-Scope-OrgID" = sys.env("TPE_TENANT"),
+    }
+  }
+}
+
+// ---- Logs: ECS JSON from stdout (26 §4.3) ----
+
+loki.process "ecs" {
+  stage.json {
+    expressions = {
+      level        = "log.level",
+      service_name = "service.name",
+      version      = "service.version",
+      trace_id     = "traceId",
+      span_id      = "spanId",
+      payment_id   = "paymentId",
+      tx_id        = "txId",
+      uetr         = "uetr",
+    }
+  }
+
+  // labels: those of §3 (service_name; the platform module adds service_namespace and pod) plus `level`
+  stage.labels {
+    values = {
+      level        = "",
+      service_name = "",
+    }
+  }
+
+  stage.static_labels {
+    values = {
+      env = sys.env("TPE_ENV"),
+    }
+  }
+
+  // §7: identifiers as structured metadata, never labels
+  stage.structured_metadata {
+    values = {
+      trace_id   = "",
+      span_id    = "",
+      payment_id = "",
+      tx_id      = "",
+      uetr       = "",
+      version    = "",
+    }
+  }
+
+  forward_to = [loki.write.backend.receiver]
+}
+
+loki.write "backend" {
+  endpoint {
+    url       = sys.env("TPE_LOGS_URL")
+    tenant_id = sys.env("TPE_TENANT")
+  }
+}
+
+// ---- Traces: OTLP from the services on this node ----
+
+otelcol.receiver.otlp "services" {
+  grpc {
+    endpoint = "0.0.0.0:4317"
+  }
+
+  http {
+    endpoint = "0.0.0.0:4318"
+  }
+
+  output {
+    traces = [otelcol.processor.memory_limiter.default.input]
+  }
+}
+
+otelcol.processor.memory_limiter "default" {
+  check_interval         = "1s"
+  limit_percentage       = 80
+  spike_limit_percentage = 20
+
+  output {
+    traces = [otelcol.processor.batch.default.input]
+  }
+}
+
+otelcol.processor.batch "default" {
+  output {
+    traces = [otelcol.exporter.otlp.backend.input]
+  }
+}
+
+otelcol.exporter.otlp "backend" {
+  client {
+    endpoint = sys.env("TPE_TRACES_ENDPOINT")
+    headers  = {
+      "X-Scope-OrgID" = sys.env("TPE_TENANT"),
+    }
+
+    tls {
+      insecure = sys.env("TPE_TRACES_INSECURE") == "true"
+    }
+  }
+}

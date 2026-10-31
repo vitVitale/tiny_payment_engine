@@ -39,6 +39,8 @@ public final class ObservabilityEnvironmentPostProcessor implements EnvironmentP
         defaults.put("management.metrics.tags." + TpeMeters.VERSION, identity.serviceVersion());
         defaults.put("management.endpoints.web.exposure.include", "health,prometheus");
         defaults.put("management.endpoint.health.probes.enabled", "true");
+        // ADR-013: metrics are pulled from /actuator/prometheus; OpenTelemetry's starter would also push them
+        defaults.put("management.otlp.metrics.export.enabled", "false");
         SloBoundaries.DEFAULTS.forEach((meter, boundaries) ->
                 defaults.put("management.metrics.distribution.slo." + meter, SloBoundaries.asProperty(boundaries)));
         // 26 §4.4: no request / response bodies or headers in logs

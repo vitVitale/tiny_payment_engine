@@ -104,3 +104,12 @@ collector later is a pipeline change, not an application change.
 3. [ ] M5: Helm values for Mimir, Loki, Tempo, Grafana, Alertmanager; object storage buckets; retention per
    [specs/26 §7](../../specs/26-observability.md#7-backends).
 4. [ ] M5: SLO rule generator, dashboards, runbooks, probes, consumer-lag exporter, invariant checker.
+
+## Amendment (2026-10-31, issue #19): logs as Loki push
+
+The agent sends logs to the gateway, and the gateway to Loki, with the Loki push API instead of OTLP log records. The
+agent's `loki.process` sets the Loki labels of [specs/26 §3](../../specs/26-observability.md#3-resource-identity-and-common-labels)
+and the structured metadata of §7 natively; with OTLP ingest, labels and metadata would come from Loki's mapping of
+resource and log attributes, which does not give the `pod` / `env` / `level` labels without per-tenant overrides. The
+gateway still redacts every log ([specs/26 §6.2](../../specs/26-observability.md#62-gateway)), with `loki.process`
+stages instead of OTTL. Traces stay OTLP; Loki keeps OTLP ingest available.

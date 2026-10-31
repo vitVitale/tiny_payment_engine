@@ -1,0 +1,26 @@
+# Tempo, single binary, for the compose observability profile (specs/26-observability.md §13). Traces arrive over
+# OTLP from the Alloy agent. The service-graph metrics generator of §7 is left out locally: its series would carry
+# labels outside §3 in Mimir.
+multitenancy_enabled: true
+
+server:
+  http_listen_port: 3200
+  log_level: warn
+
+distributor:
+  receivers:
+    otlp:
+      protocols:
+        grpc:
+          endpoint: 0.0.0.0:4317
+
+storage:
+  trace:
+    backend: local
+    local:
+      path: /var/tempo/traces
+    wal:
+      path: /var/tempo/wal
+
+usage_report:
+  reporting_enabled: false

@@ -274,7 +274,9 @@ of the rest.
 ## 6. Collection pipeline (Grafana Alloy)
 
 Configuration in `deploy/observability/alloy/` (`agent.alloy`, `gateway.alloy`, shared modules); the same files run
-in compose, the performance environment and production, with endpoints from environment variables.
+in compose, the performance environment and production, with endpoints from environment variables. How the agent
+finds workloads is a module (`modules/compose.alloy` for Docker; a Kubernetes module with the DaemonSet), chosen by
+`TPE_PLATFORM_MODULE`.
 
 ### 6.1 Agent
 
@@ -284,7 +286,7 @@ DaemonSet, one per node.
 |---|---|---|---|
 | OTLP from pods on the node | OTLP receiver (gRPC 4317, HTTP 4318) | memory limiter, batch | gateway (OTLP) |
 | `/actuator/prometheus` of pods on the node | Kubernetes discovery (pods with annotation `tpe.io/scrape=true`, same node only), scrape 15 s, OpenMetrics, exemplars | target labels of §3 only | Mimir remote write (WAL) |
-| Container stdout | file log receiver, container format parser | parse ECS JSON; `traceId` / `spanId` → log record trace context; `log.level` → severity; `paymentId`, `txId`, `uetr` → attributes | gateway (OTLP) |
+| Container stdout | file log receiver, container format parser | parse ECS JSON; `log.level` → label `level`; `traceId`, `spanId`, `paymentId`, `txId`, `uetr`, `service.version` → structured metadata `trace_id`, `span_id`, `payment_id`, `tx_id`, `uetr`, `version` | gateway (Loki push) |
 | Node | node exporter (built in), `timex` collector on | — | Mimir remote write |
 
 ### 6.2 Gateway
@@ -292,7 +294,8 @@ DaemonSet, one per node.
 Deployment, ≥ 2 replicas behind a Service.
 
 1. Memory limiter (80 % of the container limit), then batch.
-2. **Redaction backstop** (OTTL transform on log bodies and all span / log attributes):
+2. **Redaction backstop** (OTTL transform on all span attributes; for logs, which arrive as Loki push, the same
+   pattern as `loki.process` replace stages on the line and the structured metadata):
    - flag then mask IBAN-shaped tokens: word-bounded, SEPA country code + 2 digits + 11–30 alphanumerics
      (`\b(AT|BE|BG|CH|CY|CZ|DE|DK|EE|ES|FI|FR|GB|GR|HR|HU|IE|IS|IT|LI|LT|LU|LV|MC|MT|NL|NO|PL|PT|RO|SE|SI|SK|SM)\d{2}[A-Z0-9]{11,30}\b`)
      → `tpe.redacted=true` on the record, token replaced by `<iban>`. `TxId`, `MsgId`, UUIDs and already masked IBANs
@@ -485,7 +488,7 @@ flag (§6.2) instead of a daily scan.
 
 | Environment | Stack | Purpose |
 |---|---|---|
-| Local (`deploy/docker-compose.yml`, profile `observability`) | Alloy (agent config, compose discovery instead of Kubernetes), Mimir, Loki, Tempo single-binary, Grafana with provisioned data sources and dashboards; ports Grafana 3000, OTLP 4317 / 4318 | develop dashboards and spans; off by default to keep the stack light |
+| Local (`deploy/docker-compose.yml`, profile `observability`) | Alloy (agent config, compose discovery instead of Kubernetes, no node exporter; no gateway, so the agent writes to the backends and nothing is redacted), Mimir, Loki, Tempo single-binary (no metrics generator, so no service map), Grafana with provisioned data sources (the dashboards of §9 join them with M5); tenant `tpe-local`; ports Grafana 3000, OTLP 4317 / 4318; the sample workload `tests/observability-sample` | develop dashboards and spans; off by default to keep the stack light |
 | CI system tests | same compose profile on `main` builds | OBS-AC-01 … -10: pipeline conformance, trace contract, PII canaries |
 | Performance / chaos ([20 §5](20-testing-strategy.md#5-failure-injection-scenarios)) | production charts at small scale, tenant `tpe-perf`, Alertmanager routed to the receiver stub | rules evaluated exactly as in production; budget report; Pyroscope |
 | Staging, production | §6, §7 | |
@@ -505,7 +508,8 @@ M5 performance-run measurements.
 ## 15. Acceptance criteria
 
 - **OBS-AC-01** Pipeline conformance (CI, compose `observability` profile): after one outgoing and one incoming
-  payment, Mimir, Loki and Tempo each hold that run's data within 60 s.
+  payment, Mimir, Loki and Tempo each hold that run's data within 60 s. Until payments exist (M3 / M4), checked
+  against the sample workload's request.
 - **OBS-AC-02** Every series named by the telemetry contract test exists in Mimir with the identical name and label
   set, including `le` buckets at every SLO threshold; no series in Mimir has a label outside §3 and the allow-list.
 - **OBS-AC-03** A latency histogram sample in Mimir carries an exemplar whose trace id resolves in Tempo.
