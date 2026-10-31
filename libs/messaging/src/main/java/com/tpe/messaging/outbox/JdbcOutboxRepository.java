@@ -27,10 +27,21 @@ public class JdbcOutboxRepository implements OutboxRepository {
     }
 
     @Override
-    public void markPublished(List<Long> ids) {
-        if (!ids.isEmpty()) {
-            jdbc.update("UPDATE outbox SET published_at = now() WHERE id = ANY(?)",
-                    (Object) ids.toArray(Long[]::new));
+    public List<Duration> markPublished(List<Long> ids) {
+        if (ids.isEmpty()) {
+            return List.of();
         }
+        return jdbc.query("""
+                UPDATE outbox SET published_at = now()
+                WHERE id = ANY(?) AND published_at IS NULL
+                RETURNING (extract(epoch FROM now() - created_at) * 1000000)::bigint AS latency_micros""",
+                (rs, row) -> Duration.ofNanos(rs.getLong("latency_micros") * 1000),
+                (Object) ids.toArray(Long[]::new));
+    }
+
+    @Override
+    public long countUnpublished() {
+        Long count = jdbc.queryForObject("SELECT count(*) FROM outbox WHERE published_at IS NULL", Long.class);
+        return count == null ? 0 : count;
     }
 }

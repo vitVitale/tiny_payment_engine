@@ -18,7 +18,6 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
 import javax.sql.DataSource;
-import org.flywaydb.core.Flyway;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
@@ -49,13 +48,9 @@ class RelayFailoverIT {
     @BeforeAll
     static void migrate() throws IOException {
         var postgres = MessagingContainers.POSTGRES;
-        var admin = new JdbcTemplate(new DriverManagerDataSource(postgres.getJdbcUrl(), postgres.getUsername(),
-                postgres.getPassword()));
-        if (admin.queryForList("SELECT 1 FROM pg_database WHERE datname = ?", DATABASE).isEmpty()) {
-            admin.execute("CREATE DATABASE " + DATABASE);
-        }
+        MessagingContainers.database(DATABASE);
         direct = pool(url(postgres.getHost(), postgres.getMappedPort(5432)));
-        Flyway.configure().dataSource(direct).locations("classpath:db/migration/messaging").load().migrate();
+        MessagingContainers.migrate(direct);
 
         TOXIPROXY.start();
         proxy = new ToxiproxyClient(TOXIPROXY.getHost(), TOXIPROXY.getControlPort())

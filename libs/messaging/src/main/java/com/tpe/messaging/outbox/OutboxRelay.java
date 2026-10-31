@@ -2,6 +2,7 @@ package com.tpe.messaging.outbox;
 
 import io.micrometer.core.instrument.Gauge;
 import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.core.instrument.Timer;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import java.nio.charset.StandardCharsets;
 import java.sql.SQLException;
@@ -47,8 +48,10 @@ import org.springframework.context.SmartLifecycle;
  *       make leadership flap.</li>
  * </ul>
  * The lock connection comes from its own, unpooled {@code DataSource}: a pooled session would keep the lock and the
- * listener when handed out again. Gauge {@code tpe.relay.active} is 1 while this instance leads; the metrics
- * {@code tpe.outbox.pending} and {@code tpe.outbox.publish.latency} come with issue #17.
+ * listener when handed out again. Gauge {@code tpe.relay.active} is 1 while this instance leads; timer
+ * {@code tpe.outbox.publish.latency} records, for every row this instance marks, insert → marked published after the
+ * Kafka ack (target p99 < 50 ms), both on the database's clock: no skew between hosts, and a row published twice is
+ * measured once.
  */
 public final class OutboxRelay implements SmartLifecycle {
 
@@ -89,6 +92,7 @@ public final class OutboxRelay implements SmartLifecycle {
     private final Settings settings;
     private final Consumer<Boolean> liveness;
     private final LeaderLease lease;
+    private final Timer publishLatency;
     private final AtomicLong published = new AtomicLong();
 
     private volatile boolean running;
@@ -108,7 +112,7 @@ public final class OutboxRelay implements SmartLifecycle {
     }
 
     /**
-     * @param registry gets the gauge {@code tpe.relay.active}
+     * @param registry gets the gauge {@code tpe.relay.active} and the timer {@code tpe.outbox.publish.latency}
      * @param liveness told when this instance turns not live (a stalled publish loop) and live again
      */
     public OutboxRelay(DataSource lockConnections, OutboxRepository repository, Map<String, Object> producerConfig,
@@ -121,6 +125,9 @@ public final class OutboxRelay implements SmartLifecycle {
         this.lease = new LeaderLease(settings.stallAfter(), settings.lockSessionTimeout(), System::nanoTime);
         Gauge.builder("tpe.relay.active", this, relay -> relay.isLeader() ? 1 : 0)
                 .description("1 while this instance holds the outbox relay lock and publishes")
+                .register(registry);
+        this.publishLatency = Timer.builder("tpe.outbox.publish.latency")
+                .description("Outbox insert to published after the Kafka ack, on the database's clock")
                 .register(registry);
     }
 
@@ -278,7 +285,7 @@ public final class OutboxRelay implements SmartLifecycle {
                 failure = e;
             }
         }
-        repository.markPublished(acked);
+        repository.markPublished(acked).forEach(publishLatency::record);
         published.addAndGet(acked.size());
         if (failure != null) {
             throw new PublishFailedException(failure);

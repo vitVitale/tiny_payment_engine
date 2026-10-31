@@ -30,6 +30,9 @@ public final class ScrapeAssert extends AbstractAssert<ScrapeAssert, PrometheusS
     private static final Set<String> SUFFIXES = Set.of("seconds", "seconds_bucket", "seconds_count", "seconds_sum",
             "seconds_max", "total", "bucket", "count", "sum", "max", "created", "seconds_created");
 
+    /** The Kafka client metrics of Spring Boot. */
+    private static final String KAFKA_CLIENT_PREFIX = "kafka_";
+
     /** 26 §4.1: never tags. Compared lower case without separators, so {@code tx_id} is {@code txId}. */
     private static final Set<String> HIGH_CARDINALITY = Set.of("paymentid", "txid", "uetr", "iban", "debtoriban",
             "creditoriban", "clientid", "endtoendid", "msgid", "commandid", "eventid", "traceid", "spanid", "accountid",
@@ -119,12 +122,16 @@ public final class ScrapeAssert extends AbstractAssert<ScrapeAssert, PrometheusS
         return this;
     }
 
-    /** No series has a high-cardinality tag key such as {@code paymentId} (00 §11, 26 §4.1). */
+    /**
+     * No series has a high-cardinality tag key such as {@code paymentId} (00 §11, 26 §4.1). The {@code client_id} of
+     * the Kafka client metrics, kept as is (26 §4.1), names a consumer or producer of the service, not an API client.
+     */
     public ScrapeAssert hasNoHighCardinalityTags() {
         isNotNull();
         List<String> failures = actual.series().stream()
                 .flatMap(series -> series.labels().keySet().stream()
                         .filter(key -> HIGH_CARDINALITY.contains(normalise(key)))
+                        .filter(key -> !(series.name().startsWith(KAFKA_CLIENT_PREFIX) && key.equals("client_id")))
                         .map(key -> series.name() + " has high-cardinality tag " + key))
                 .distinct()
                 .toList();

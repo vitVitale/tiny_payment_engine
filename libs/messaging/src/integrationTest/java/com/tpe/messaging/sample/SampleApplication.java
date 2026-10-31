@@ -5,9 +5,13 @@ import com.tpe.messaging.consumer.ConsumedMessages;
 import com.tpe.messaging.consumer.DltHook;
 import com.tpe.messaging.inbox.InboxGuard;
 import com.tpe.messaging.outbox.OutboxWriter;
+import com.tpe.messaging.worker.PollingWorker;
 import com.tpe.paymentdomain.Bic;
 import com.tpe.paymentdomain.PaymentId;
 import com.tpe.paymentdomain.TxId;
+import io.micrometer.core.instrument.MeterRegistry;
+import java.time.Clock;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
@@ -17,18 +21,35 @@ import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.atomic.AtomicInteger;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
+import org.springframework.context.annotation.Bean;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.kafka.annotation.KafkaListener;
 import org.springframework.stereotype.Component;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.annotation.Transactional;
 
 /**
  * A service that writes a business change and a message in one transaction, and consumes the message exactly once
- * (issue #14, the M0 exit criterion). Its listener on {@link #EVENTS} shows the error handling (issue #15).
+ * (issue #14, the M0 exit criterion). Its listener on {@link #EVENTS} shows the error handling (issue #15), its
+ * {@code sample_timers} worker the {@link PollingWorker} (issue #17).
  */
 @SpringBootApplication
 public class SampleApplication {
+
+    /** Fires due {@code sample_timers}. */
+    @Bean
+    PollingWorker<Long> sampleTimers(JdbcTemplate jdbc, PlatformTransactionManager transactions,
+            MeterRegistry registry) {
+        return new PollingWorker<>(new PollingWorker.Settings("sample-timers", 50, Duration.ofSeconds(1), 1),
+                jdbc, transactions, """
+                        SELECT id FROM sample_timers WHERE status = 'SCHEDULED' AND due_at <= ?
+                        ORDER BY due_at LIMIT ? FOR UPDATE SKIP LOCKED""",
+                (rs, row) -> rs.getLong("id"),
+                id -> jdbc.update("UPDATE sample_timers SET status = 'FIRED' WHERE id = ?", id),
+                "SELECT min(due_at) FROM sample_timers WHERE status = 'SCHEDULED' AND due_at <= ?",
+                Clock.systemUTC(), registry);
+    }
 
     public static final String TOPIC = "sample.commands";
     /** Accepts only {@code AcceptCreditTransfer}; its effects go to {@code sample_ordered_effects}. */

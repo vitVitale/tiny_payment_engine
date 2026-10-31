@@ -10,7 +10,8 @@ import org.springframework.core.env.MapPropertySource;
 
 /**
  * With {@code tpe.messaging.enabled=true}, adds the defaults of specs/01-shared-libraries.md §3 at the lowest
- * precedence: Flyway also runs the library migrations ({@code classpath:db/migration/messaging}, 00 §9), and the
+ * precedence: Flyway also runs the library migrations ({@code classpath:db/migration/messaging}, 00 §9) with a
+ * session lock instead of a transaction one, so {@code CREATE INDEX CONCURRENTLY} can run, and the
  * Kafka listener container uses the consumer settings of §3.6 (record acks, no auto commit, read committed, 50
  * records per poll). Also: the service name as consumer group (02 §2), and a new group starts at the earliest offset,
  * so it skips nothing already on the topic. Listener concurrency per assigned partitions (§3.6) is not set yet.
@@ -28,6 +29,8 @@ public final class MessagingEnvironmentPostProcessor implements EnvironmentPostP
         }
         Map<String, Object> defaults = new LinkedHashMap<>();
         defaults.put("spring.flyway.locations", "classpath:db/migration,classpath:db/migration/messaging");
+        // CREATE INDEX CONCURRENTLY (00 §9) waits for every open transaction, Flyway's own lock transaction too
+        defaults.put("spring.flyway.postgresql.transactional-lock", "false");
         defaults.put("spring.kafka.listener.ack-mode", "RECORD");
         defaults.put("spring.kafka.consumer.enable-auto-commit", "false");
         defaults.put("spring.kafka.consumer.isolation-level", "read_committed");

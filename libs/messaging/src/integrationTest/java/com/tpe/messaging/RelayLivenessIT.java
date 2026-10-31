@@ -18,7 +18,6 @@ import org.springframework.context.ConfigurableApplicationContext;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.jdbc.core.JdbcTemplate;
-import org.springframework.jdbc.datasource.DriverManagerDataSource;
 
 /**
  * MSG-AC-08, a blocked publish loop: the service instance (a Spring context) gives up the lock within 5 s, another
@@ -37,13 +36,7 @@ class RelayLivenessIT {
 
     @BeforeAll
     static void createDatabase() {
-        var postgres = MessagingContainers.POSTGRES;
-        var admin = new JdbcTemplate(new DriverManagerDataSource(postgres.getJdbcUrl(), postgres.getUsername(),
-                postgres.getPassword()));
-        if (admin.queryForList("SELECT 1 FROM pg_database WHERE datname = ?", DATABASE).isEmpty()) {
-            admin.execute("CREATE DATABASE " + DATABASE);
-        }
-        dataSource = new DriverManagerDataSource(url(), postgres.getUsername(), postgres.getPassword());
+        dataSource = MessagingContainers.dataSource(DATABASE);
     }
 
     @AfterEach
@@ -102,8 +95,7 @@ class RelayLivenessIT {
     }
 
     private static String url() {
-        var postgres = MessagingContainers.POSTGRES;
-        return "jdbc:postgresql://" + postgres.getHost() + ":" + postgres.getMappedPort(5432) + "/" + DATABASE;
+        return MessagingContainers.database(DATABASE);
     }
 
     /** The service's outbox repository, frozen on demand. */

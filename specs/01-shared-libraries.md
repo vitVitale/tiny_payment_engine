@@ -236,8 +236,10 @@ public interface DueItemHandler<T> {
 
 `PollingWorker<T>` executes the `FOR UPDATE SKIP LOCKED` loop of [00 §10](00-engineering-baseline.md#10-persistent-timers-and-polling-workers)
 for a given SQL query + row mapper + handler; configurable batch size, poll interval and thread count; exposes
-`tpe.worker.lag{worker}`. Used by: orchestrator timers and saga sweeper, csm-gateway answer deadlines and send
-retries, notification retries, ledger snapshot job.
+`tpe.worker.lag{worker}`. The worker binds "now" from the service's `Clock` (00 §6) instead of `now()` in SQL:
+the due query takes (now, batch size), and a second query (now) returns the oldest due time for the lag. Each row
+runs behind a savepoint, so a handler that throws rolls back that row only. Used by: orchestrator timers and saga
+sweeper, csm-gateway answer deadlines and send retries, notification retries, ledger snapshot job.
 
 ### 3.6 Consumers, inbox and DLT
 

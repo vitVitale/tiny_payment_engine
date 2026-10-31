@@ -83,6 +83,19 @@ class ScrapeAssertTest {
     }
 
     @Test
+    void theKafkaClientIdOfKafkaClientMetricsIsNotTheApiClientId() {
+        Counter.builder("kafka.consumer.fetch.total").tag("client.id", "consumer-csm-gateway-1")
+                .register(registry).increment();
+        Counter.builder("http.client.requests.custom").tag("client.id", "bank-app")
+                .register(registry).increment();
+
+        assertThatThrownBy(() -> assertThat(PrometheusScrape.parse(registry.scrape())).hasNoHighCardinalityTags())
+                .isInstanceOf(AssertionError.class)
+                .hasMessageContaining("http_client_requests_custom")
+                .hasMessageNotContaining("kafka_consumer");
+    }
+
+    @Test
     void highCardinalityTagOnADeclaredMeterFailsTheContract() {
         Counter.builder("tpe.payment.rejected").tags("direction", "OUTGOING", "reason", "AC04", "cause", "BUSINESS",
                 "tx_id", "TPE01JAB3C4D5E6F7G8H9J0K1M2NP").register(registry).increment();

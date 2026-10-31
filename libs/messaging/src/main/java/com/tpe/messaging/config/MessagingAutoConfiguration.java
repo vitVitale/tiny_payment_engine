@@ -4,6 +4,8 @@ import com.tpe.contracts.ContractJson;
 import com.tpe.messaging.consumer.DltHook;
 import com.tpe.messaging.consumer.DltPublisher;
 import com.tpe.messaging.consumer.TpeErrorHandler;
+import com.tpe.messaging.housekeeping.MessagingHousekeeping;
+import com.tpe.messaging.housekeeping.MessagingRetention;
 import com.tpe.messaging.inbox.InboxGuard;
 import com.tpe.messaging.outbox.JdbcOutboxRepository;
 import com.tpe.messaging.outbox.JdbcOutboxWriter;
@@ -76,6 +78,25 @@ public class MessagingAutoConfiguration {
     @Bean
     TpeErrorHandler tpeErrorHandler(DltPublisher dltPublisher) {
         return new TpeErrorHandler(dltPublisher);
+    }
+
+    /** {@code tpe.messaging.outbox.retention} (7 d) and {@code tpe.messaging.inbox.retention} (8 d), 01 §3.1. */
+    @Bean
+    MessagingRetention messagingRetention(JdbcTemplate jdbc, ObjectProvider<Clock> clock, Environment environment) {
+        MessagingRetention.Settings defaults = MessagingRetention.Settings.defaults();
+        MessagingRetention.Settings settings = new MessagingRetention.Settings(
+                environment.getProperty("tpe.messaging.outbox.retention", Duration.class, defaults.outbox()),
+                environment.getProperty("tpe.messaging.inbox.retention", Duration.class, defaults.inbox()),
+                defaults.chunk());
+        return new MessagingRetention(jdbc, settings, clock.getIfAvailable(Clock::systemUTC));
+    }
+
+    /** Started and stopped with the application context: {@code tpe.outbox.pending} and the retention runs. */
+    @Bean
+    MessagingHousekeeping messagingHousekeeping(OutboxRepository outbox, MessagingRetention retention,
+            ObjectProvider<MeterRegistry> registry) {
+        return new MessagingHousekeeping(outbox, retention, MessagingHousekeeping.Intervals.defaults(),
+                registry.getIfAvailable(SimpleMeterRegistry::new));
     }
 
     @Bean

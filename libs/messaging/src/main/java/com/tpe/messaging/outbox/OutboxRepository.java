@@ -12,6 +12,12 @@ public interface OutboxRepository {
      */
     List<OutboxRow> oldestUnpublished(Duration visibilityWindow, int limit);
 
-    /** Marks rows published, after Kafka acknowledged each of them. */
-    void markPublished(List<Long> ids);
+    /**
+     * Marks rows published, after Kafka acknowledged each of them. Returns, for each row this call marked (not one
+     * another relay marked first), insert → now on the database's clock: {@code tpe.outbox.publish.latency}.
+     */
+    List<Duration> markPublished(List<Long> ids);
+
+    /** Rows not yet published: {@code tpe.outbox.pending}. */
+    long countUnpublished();
 }
