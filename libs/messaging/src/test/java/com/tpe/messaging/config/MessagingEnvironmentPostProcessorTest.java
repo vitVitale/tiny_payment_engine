@@ -20,6 +20,7 @@ class MessagingEnvironmentPostProcessorTest {
 
         assertThat(env.getProperty("spring.flyway.locations"))
                 .isEqualTo("classpath:db/migration,classpath:db/migration/messaging");
+        assertThat(env.getProperty("spring.flyway.postgresql.transactional-lock")).isEqualTo("false");
         assertThat(env.getProperty("spring.kafka.listener.ack-mode")).isEqualTo("RECORD");
         assertThat(env.getProperty("spring.kafka.consumer.enable-auto-commit")).isEqualTo("false");
         assertThat(env.getProperty("spring.kafka.consumer.isolation-level")).isEqualTo("read_committed");

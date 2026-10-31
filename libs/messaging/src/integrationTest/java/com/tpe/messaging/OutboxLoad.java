@@ -17,6 +17,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.IntStream;
 import javax.sql.DataSource;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
@@ -36,6 +37,7 @@ public final class OutboxLoad implements AutoCloseable {
     private final JdbcOutboxWriter writer;
     private final TransactionTemplate transactions;
     private final Map<String, List<UUID>> written = new LinkedHashMap<>();
+    private final AtomicInteger next = new AtomicInteger();
 
     private volatile boolean running;
     private Thread thread;
@@ -50,10 +52,10 @@ public final class OutboxLoad implements AutoCloseable {
         this.keys.forEach(key -> written.put(key, new ArrayList<>()));
     }
 
-    /** Writes {@code rows} rows now, round-robin over the keys. */
+    /** Writes {@code rows} rows now, each for the next key round-robin; thread-safe. */
     public void write(int rows) {
         for (int i = 0; i < rows; i++) {
-            writeOne(keys.get(i % keys.size()));
+            writeOne(keys.get(Math.floorMod(next.getAndIncrement(), keys.size())));
         }
     }
 
@@ -61,8 +63,8 @@ public final class OutboxLoad implements AutoCloseable {
     public OutboxLoad startWriting(Duration pause) {
         running = true;
         thread = Thread.ofPlatform().name("outbox-load").daemon().start(() -> {
-            for (int i = 0; running; i++) {
-                writeOne(keys.get(i % keys.size()));
+            while (running) {
+                write(1);
                 try {
                     Thread.sleep(pause);
                 } catch (InterruptedException e) {

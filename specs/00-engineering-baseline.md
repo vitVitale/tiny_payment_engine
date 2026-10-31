@@ -209,7 +209,8 @@ inside an IBAN, used for routing).
 - **24/7 rule (SCT Inst has no maintenance window):** every migration must be compatible with the previous release
   still running. Use expand / contract: add nullable column → deploy code writing both → backfill → make
   required / drop old in a later release. No `ALTER TABLE … RENAME`, no column type change in place, no long locks
-  (create indexes `CONCURRENTLY`, in their own migration with `-- flyway:executeInTransaction=false`).
+  (create indexes `CONCURRENTLY`, in their own migration with `-- flyway:executeInTransaction=false`; Flyway runs
+  with `postgresql.transactional.lock=false`, a `messaging` default, as its lock transaction would block them).
 - Isolation level `READ COMMITTED` (PostgreSQL default). Where a spec needs stronger guarantees it uses explicit
   row locks (`SELECT … FOR UPDATE`) or conditional updates (`UPDATE … WHERE status = 'X'`), stated in the spec.
 - Optimistic locking: tables that say so carry `version BIGINT NOT NULL`; updates use `WHERE version = :expected`
@@ -232,7 +233,10 @@ SELECT … FROM <timer table>
 ```
 
 - The handler runs inside the same transaction as the select; it marks the row `FIRED` (or reschedules it) before
-  commit. A crash rolls the transaction back and another instance picks the row up.
+  commit. A crash rolls the transaction back and another instance picks the row up. Each row runs behind a savepoint:
+  a handler that throws rolls back that row only, so one row that keeps failing does not stop the others.
+- `PollingWorker` binds "now" from the service's `Clock` (§6) where the query above says `now()`, so tests control
+  time.
 - Handlers MUST NOT make remote calls while holding the row lock. They record a decision / enqueue work and commit;
   remote calls happen afterwards (see orchestrator saga runner, [11 §6.3](11-payment-orchestrator.md#63-saga-runner)).
 - Poll interval default 100 ms for payment-path timers, 1 s for everything else. Timers are allowed to fire late by
@@ -252,7 +256,7 @@ SELECT … FROM <timer table>
 - Every service exposes `/actuator/health/liveness`, `/actuator/health/readiness`, `/actuator/prometheus`.
   Readiness includes DB and (for Kafka consumers) Kafka connectivity.
 - Common metrics provided by `messaging`: `tpe.outbox.pending` (gauge), `tpe.outbox.publish.latency` (timer: insert →
-  Kafka ack), `tpe.inbox.duplicates` (counter), `tpe.dlt.messages` (counter, tag `topic`), `tpe.worker.lag` (gauge,
+  Kafka ack, both on the database's clock), `tpe.inbox.duplicates` (counter), `tpe.dlt.messages` (counter, tag `topic`), `tpe.worker.lag` (gauge,
   oldest due timer age, tag `worker`).
 - Service-specific metrics are listed in each spec. Metric names are `tpe.<area>.<name>`, tags low-cardinality only
   (never `paymentId`).

@@ -114,7 +114,8 @@ Micrometer, Prometheus registry, `/actuator/prometheus`. Additions:
   tags. `uri` uses the route template.
 - **Self metrics:** `tpe.telemetry.spans.dropped` (counter), JVM, process, HikariCP, Kafka client and executor
   metrics from Spring Boot as is, except that `jvm_info` carries the JDK version as `jvm_version`: its own `version`
-  tag would hide the common tag `version`.
+  tag would hide the common tag `version`. The Kafka client metrics keep their `client_id` tag: it names one of the
+  service's consumers or producers, not the API client that the `clientId` rule above is about.
 
 ### 4.2 Traces
 
