@@ -83,7 +83,7 @@ it by `tpe.payment.id`.
 
 ## Action items
 1. [ ] `libs/observability`: `TraceContextCodec` (span context ↔ `traceparent` string), typed payment attributes.
-2. [ ] `messaging`: per-topic consumer parent rule (`CHILD` for `csm.*`, `LINK` otherwise), relay producer spans.
+2. [x] `messaging`: per-topic consumer parent rule (`CHILD` for `csm.*`, `LINK` otherwise), relay producer spans.
 3. [ ] Orchestrator and gateway: `trace_context` columns, spans for saga actions, timers, transmissions, correlation.
 4. [ ] External clients: strip trace headers (CSM, VoP counterparty, webhooks, sanctions provider).
 5. [ ] Trace contract test (OBS-AC-05 … -08 in specs/26).

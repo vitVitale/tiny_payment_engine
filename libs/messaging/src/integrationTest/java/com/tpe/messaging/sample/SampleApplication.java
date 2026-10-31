@@ -6,6 +6,7 @@ import com.tpe.messaging.consumer.DltHook;
 import com.tpe.messaging.inbox.InboxGuard;
 import com.tpe.messaging.outbox.OutboxWriter;
 import com.tpe.messaging.worker.PollingWorker;
+import com.tpe.observability.context.Spans;
 import com.tpe.paymentdomain.Bic;
 import com.tpe.paymentdomain.PaymentId;
 import com.tpe.paymentdomain.TxId;
@@ -40,7 +41,7 @@ public class SampleApplication {
     /** Fires due {@code sample_timers}. */
     @Bean
     PollingWorker<Long> sampleTimers(JdbcTemplate jdbc, PlatformTransactionManager transactions,
-            MeterRegistry registry) {
+            MeterRegistry registry, Spans spans) {
         return new PollingWorker<>(new PollingWorker.Settings("sample-timers", 50, Duration.ofSeconds(1), 1),
                 jdbc, transactions, """
                         SELECT id FROM sample_timers WHERE status = 'SCHEDULED' AND due_at <= ?
@@ -48,7 +49,7 @@ public class SampleApplication {
                 (rs, row) -> rs.getLong("id"),
                 id -> jdbc.update("UPDATE sample_timers SET status = 'FIRED' WHERE id = ?", id),
                 "SELECT min(due_at) FROM sample_timers WHERE status = 'SCHEDULED' AND due_at <= ?",
-                Clock.systemUTC(), registry);
+                Clock.systemUTC(), registry, spans);
     }
 
     public static final String TOPIC = "sample.commands";

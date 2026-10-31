@@ -109,6 +109,28 @@
             <type>test-jar</type>
             <scope>test</scope>
         </dependency>
+        <!-- tracing as a service has it, for the trace rules of issue #18: OpenTelemetry, JDBC spans, in-memory export -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-opentelemetry</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>net.ttddyy.observation</groupId>
+            <artifactId>datasource-micrometer-spring-boot</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>io.opentelemetry</groupId>
+            <artifactId>opentelemetry-sdk-testing</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <!-- SimpleTracer for unit tests -->
+        <dependency>
+            <groupId>io.micrometer</groupId>
+            <artifactId>micrometer-tracing-test</artifactId>
+            <scope>test</scope>
+        </dependency>
         <!-- the DB blackhole of MSG-AC-08 (issue #16); Toxiproxy otherwise arrives with M5 failure injection -->
         <dependency>
             <groupId>org.testcontainers</groupId>

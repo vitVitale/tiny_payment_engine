@@ -1,7 +1,10 @@
 package com.tpe.messaging.worker;
 
+import com.tpe.observability.context.Spans;
 import io.micrometer.core.instrument.Gauge;
 import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.tracing.Span;
+import io.micrometer.tracing.Tracer.SpanInScope;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
@@ -26,7 +29,9 @@ import org.springframework.transaction.support.TransactionTemplate;
  * rows. Each item runs behind a savepoint: a handler that throws rolls back that item's changes only, the rest of the
  * batch commits and the failed row stays due, so one row that keeps failing does not stop the worker. A crashed
  * instance rolls the whole transaction back and another instance picks the rows up. A thread sleeps
- * {@code pollInterval} after a batch that did not fire in full.
+ * {@code pollInterval} after a batch that did not fire in full. Each handled row is one {@code worker <name>} span,
+ * in scope while the handler runs and with an error status if it throws; a poll that finds no due rows creates no
+ * spans (specs/26-observability.md §4.2).
  *
  * <p>The queries take "now" from the {@link Clock}, so tests control time:
  * <ul>
@@ -63,6 +68,7 @@ public final class PollingWorker<T> implements SmartLifecycle {
     private final DueItemHandler<T> handler;
     private final String oldestDueSql;
     private final Clock clock;
+    private final Spans spans;
     private final AtomicLong lagMillis = new AtomicLong();
     private final List<Thread> threads = new ArrayList<>();
 
@@ -71,6 +77,14 @@ public final class PollingWorker<T> implements SmartLifecycle {
     public PollingWorker(Settings settings, JdbcTemplate jdbc, PlatformTransactionManager transactionManager,
             String dueSql, RowMapper<T> mapper, DueItemHandler<T> handler, String oldestDueSql, Clock clock,
             MeterRegistry registry) {
+        this(settings, jdbc, transactionManager, dueSql, mapper, handler, oldestDueSql, clock, registry,
+                Spans.noop());
+    }
+
+    /** @param spans gives the span of each handled row */
+    public PollingWorker(Settings settings, JdbcTemplate jdbc, PlatformTransactionManager transactionManager,
+            String dueSql, RowMapper<T> mapper, DueItemHandler<T> handler, String oldestDueSql, Clock clock,
+            MeterRegistry registry, Spans spans) {
         this.settings = settings;
         this.jdbc = jdbc;
         this.transactions = new TransactionTemplate(transactionManager);
@@ -79,6 +93,7 @@ public final class PollingWorker<T> implements SmartLifecycle {
         this.handler = handler;
         this.oldestDueSql = oldestDueSql;
         this.clock = clock;
+        this.spans = spans;
         Gauge.builder("tpe.worker.lag", lagMillis, millis -> millis.get() / 1000.0)
                 .description("Age of the oldest due row of the worker")
                 .baseUnit("seconds")
@@ -141,14 +156,18 @@ public final class PollingWorker<T> implements SmartLifecycle {
         Integer handled = transactions.execute(status -> {
             int succeeded = 0;
             for (T item : jdbc.query(dueSql, mapper, now(), settings.batchSize())) {
+                Span span = spans.newTrace("worker " + settings.name()).start();
                 Object savepoint = status.createSavepoint();
-                try {
+                try (SpanInScope scope = spans.inScope(span)) {
                     handler.handle(item);
                     status.releaseSavepoint(savepoint);
                     succeeded++;
                 } catch (RuntimeException e) {
+                    span.error(e);
                     status.rollbackToSavepoint(savepoint);
                     log.warn("Worker {} could not handle {}, it stays due: {}", settings.name(), item, e.toString());
+                } finally {
+                    span.end();
                 }
             }
             return succeeded;
