@@ -14,6 +14,19 @@ Prerequisite: JDK 25 on the `PATH` or in `JAVA_HOME`. Maven comes from the wrapp
 - Component tests live in `src/integrationTest` and are named `*IT`; Failsafe runs them in `verify`.
 - The build fails on a test placed in the wrong source set for its name.
 
+## Contract tests (Pact)
+
+Consumer pact tests run with the build and write their pacts to `<module>/target/pacts`; `verify` collects them in
+`target/pacts`. Providers verify them in a second step ([20 §10.3](specs/20-testing-strategy.md#103-verifying-pacts)):
+
+```bash
+./mvnw verify
+```
+
+```bash
+./mvnw -Ppact-verify verify
+```
+
 ## Local stack
 
 PostgreSQL, Kafka and the mock OAuth2 issuer of

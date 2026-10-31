@@ -1,0 +1,11 @@
+{
+  "request": {
+    "method": "POST",
+    "urlPath": "/v1/holds"
+  },
+  "response": {
+    "status": 422,
+    "headers": { "Content-Type": "application/problem+json" },
+    "jsonBody": { "code": "FUNDS_LOW" }
+  }
+}

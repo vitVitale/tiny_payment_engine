@@ -1,0 +1,12 @@
+{
+  "request": {
+    "method": "POST",
+    "urlPath": "/v1/holds",
+    "bodyPatterns": [{ "matchesJsonPath": "$.holdId" }]
+  },
+  "response": {
+    "status": 422,
+    "headers": { "Content-Type": "application/problem+json" },
+    "jsonBody": { "code": "INSUFFICIENT_FUNDS" }
+  }
+}

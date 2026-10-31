@@ -446,14 +446,16 @@ Not covered by Pact:
 
 ### 10.3 Verifying pacts
 
-- Provider tests live in `src/integrationTest` (`@Provider("<artifactId>")`): the real application on a random port
-  with Testcontainers PostgreSQL (and Kafka for message providers); `@State` handlers seed data through application
-  services. Message providers produce each message through the real outbox path and return the outbox row's payload
-  and headers, so the verified bytes are the bytes the relay publishes.
+- Provider tests live in `src/integrationTest` (`@Provider("<artifactId>")`, `@Tag("pact-verify")`,
+  `@PactFolder("${pact.folder}")`): the real application on a random port with Testcontainers PostgreSQL (and
+  Kafka for message providers); `@State` handlers seed data through application services. Message providers
+  produce each message through the real outbox path and return the outbox row's payload and headers, so the
+  verified bytes are the bytes the relay publishes.
 - Consumer tests write pacts to `target/pacts` of their module; the build collects them in `<root>/target/pacts`.
   Services do not depend on each other, so the Maven reactor gives no order between consumer and provider; provider
   verification therefore runs as a separate CI step after the build (`-Ppact-verify`,
-  [00 §14](00-engineering-baseline.md#14-continuous-integration)).
+  [00 §14](00-engineering-baseline.md#14-continuous-integration)), which runs only the `pact-verify` tests; a normal
+  build excludes them. The parent POM sets `pact.rootDir` for Surefire and `pact.folder` for Failsafe.
 - Three checks:
 
 | Check | Pacts from | Provider from | When | Protects |
@@ -476,7 +478,11 @@ Not covered by Pact:
 Component tests keep WireMock for faults and deadline-derived timeouts. Every WireMock mapping that returns a
 business response must match an interaction of the consumer's own pact: `StubConformanceTest` (shared test fixture)
 matches each mapping's request and response against the pact with Pact's matchers. Mappings for faults (delay beyond
-the timeout, `5xx`, connection reset) carry `"metadata": { "pact": "fault" }` and are exempt. This keeps, for example,
+the timeout, `5xx`, connection reset) carry `"metadata": { "pact": "fault" }` and are exempt. A consumer extends it
+once per provider as an `*IT`, so its pact exists when it runs. The request is compared on what the mapping
+constrains (method, exact `url` or `urlPath` with `equalTo` query parameters, `equalTo` / `matches` headers, an
+`equalToJson` body), the response in full; any other constraint (URL patterns, other matchers, body files) cannot be
+compared and fails the test, so business mappings use only these. This keeps, for example,
 the `INSUFFICIENT_FUNDS` stub of ORC-AC-05 identical to what ledger-service actually returns.
 
 ### 10.5 Example (consumer side, P-04)

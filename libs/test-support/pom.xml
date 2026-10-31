@@ -19,6 +19,39 @@
             <groupId>com.tngtech.archunit</groupId>
             <artifactId>archunit-junit5</artifactId>
         </dependency>
+        <!-- StubConformanceTest (specs/20-testing-strategy.md §10.4): pact files and Pact's matchers -->
+        <dependency>
+            <groupId>au.com.dius.pact.core</groupId>
+            <artifactId>model</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>au.com.dius.pact.core</groupId>
+            <artifactId>matchers</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.junit.jupiter</groupId>
+            <artifactId>junit-jupiter-api</artifactId>
+        </dependency>
+
+        <!-- the sample consumer / provider pair that proves the pact chain (issue #20); replaced once P-04 lands -->
+        <dependency>
+            <groupId>au.com.dius.pact.consumer</groupId>
+            <artifactId>junit5</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>au.com.dius.pact.provider</groupId>
+            <artifactId>junit5spring</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-webmvc</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-test</artifactId>
+            <scope>test</scope>
+        </dependency>
 
         <!-- the negative tests need real Spring / Jackson types to violate the rules with -->
         <dependency>
@@ -73,7 +106,7 @@
                             <rules>
                                 <!-- specs/00-engineering-baseline.md §1: allow-list of direct non-test dependencies -->
                                 <bannedDependencies>
-                                    <message>test-support depends only on test libraries (ArchUnit, JUnit, AssertJ) (specs/00-engineering-baseline.md §1).</message>
+                                    <message>test-support depends only on test libraries (ArchUnit, JUnit, AssertJ, Pact) (specs/00-engineering-baseline.md §1).</message>
                                     <searchTransitive>false</searchTransitive>
                                     <excludes>
                                         <exclude>*</exclude>
@@ -82,6 +115,7 @@
                                         <include>com.tngtech.archunit:*</include>
                                         <include>org.junit.jupiter:*</include>
                                         <include>org.assertj:*</include>
+                                        <include>au.com.dius.pact.core:*</include>
                                         <include>*:*:*:*:test</include>
                                     </includes>
                                 </bannedDependencies>

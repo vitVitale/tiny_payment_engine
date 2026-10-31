@@ -1,0 +1,11 @@
+{
+  "request": {
+    "method": "GET",
+    "url": "/sample/accounts/0192f0e4-6b1d-7c3a-9a55-4c1f3b2e9d10"
+  },
+  "response": {
+    "status": 200,
+    "headers": { "Content-Type": "application/json" },
+    "jsonBody": { "id": "0192f0e4-6b1d-7c3a-9a55-4c1f3b2e9d10", "status": "OPEN" }
+  }
+}

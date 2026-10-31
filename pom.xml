@@ -50,6 +50,12 @@
         <jaxb-maven-plugin.version>4.0.16</jaxb-maven-plugin.version>
         <!-- JDBC observations for tracing (specs/26-observability.md §4.2) -->
         <datasource-micrometer.version>2.3.0</datasource-micrometer.version>
+        <!-- consumer-driven contract tests; specs/20-testing-strategy.md §10 -->
+        <pact.version>4.7.5</pact.version>
+        <!-- where the build collects every module's pacts (20 §10.3) -->
+        <pact.collected.dir>${maven.multiModuleProjectDirectory}/target/pacts</pact.collected.dir>
+        <!-- provider verification runs only with -Ppact-verify (00 §14 step 2) -->
+        <excludedGroups>pact-verify</excludedGroups>
     </properties>
 
     <dependencyManagement>
@@ -86,6 +92,36 @@
                 <groupId>com.tngtech.archunit</groupId>
                 <artifactId>archunit-junit5</artifactId>
                 <version>${archunit.version}</version>
+            </dependency>
+            <!-- Pact JVM, specification V4 (specs/20-testing-strategy.md §10): consumer tests, provider verification,
+                 and the model / matchers of StubConformance in libs/test-support -->
+            <dependency>
+                <groupId>au.com.dius.pact.consumer</groupId>
+                <artifactId>junit5</artifactId>
+                <version>${pact.version}</version>
+                <scope>test</scope>
+            </dependency>
+            <dependency>
+                <groupId>au.com.dius.pact.provider</groupId>
+                <artifactId>junit5spring</artifactId>
+                <version>${pact.version}</version>
+                <scope>test</scope>
+            </dependency>
+            <dependency>
+                <groupId>au.com.dius.pact.core</groupId>
+                <artifactId>model</artifactId>
+                <version>${pact.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>au.com.dius.pact.core</groupId>
+                <artifactId>matchers</artifactId>
+                <version>${pact.version}</version>
+            </dependency>
+            <!-- Pact's plugin driver asks for bcutil as a range [1.81,1.82); banDynamicVersions (00 §1) needs it pinned -->
+            <dependency>
+                <groupId>org.bouncycastle</groupId>
+                <artifactId>bcutil-jdk18on</artifactId>
+                <version>1.81.1</version>
             </dependency>
             <!-- property-based tests; specs/20-testing-strategy.md §1 -->
             <dependency>
@@ -154,9 +190,47 @@
                     </execution>
                 </executions>
             </plugin>
+            <!-- Pact consumer tests write to target/pacts of their module (20 §10.3) -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-surefire-plugin</artifactId>
+                <configuration>
+                    <systemPropertyVariables>
+                        <pact.rootDir>${project.build.directory}/pacts</pact.rootDir>
+                    </systemPropertyVariables>
+                </configuration>
+            </plugin>
+            <!-- Pact providers (@Tag("pact-verify")) read the collected pacts from pact.folder -->
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-failsafe-plugin</artifactId>
+                <configuration>
+                    <systemPropertyVariables>
+                        <pact.folder>${pact.collected.dir}</pact.folder>
+                    </systemPropertyVariables>
+                </configuration>
+            </plugin>
+            <!-- ... and the build collects them in <root>/target/pacts, for the providers of -Ppact-verify -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-resources-plugin</artifactId>
+                <executions>
+                    <execution>
+                        <id>collect-pacts</id>
+                        <phase>prepare-package</phase>
+                        <goals>
+                            <goal>copy-resources</goal>
+                        </goals>
+                        <configuration>
+                            <outputDirectory>${pact.collected.dir}</outputDirectory>
+                            <resources>
+                                <resource>
+                                    <directory>${project.build.directory}/pacts</directory>
+                                </resource>
+                            </resources>
+                        </configuration>
+                    </execution>
+                </executions>
             </plugin>
             <!-- Both source sets compile into test-classes, so the class name alone decides Surefire vs Failsafe -->
             <plugin>
@@ -243,4 +317,37 @@
             </plugin>
         </plugins>
     </build>
+    <profiles>
+        <!-- specs/00-engineering-baseline.md §14 step 2: every provider verifies the pacts the build collected. Only the
+             provider verifications run (@Tag("pact-verify")); the unit and other integration tests ran in step 1. -->
+        <profile>
+            <id>pact-verify</id>
+            <properties>
+                <groups>pact-verify</groups>
+                <excludedGroups/>
+            </properties>
+            <build>
+                <plugins>
+                    <plugin>
+                        <groupId>org.apache.maven.plugins</groupId>
+                        <artifactId>maven-surefire-plugin</artifactId>
+                        <configuration>
+                            <skip>true</skip>
+                        </configuration>
+                    </plugin>
+                    <!-- the pacts of step 1 stay as they are -->
+                    <plugin>
+                        <groupId>org.apache.maven.plugins</groupId>
+                        <artifactId>maven-resources-plugin</artifactId>
+                        <executions>
+                            <execution>
+                                <id>collect-pacts</id>
+                                <phase>none</phase>
+                            </execution>
+                        </executions>
+                    </plugin>
+                </plugins>
+            </build>
+        </profile>
+    </profiles>
 </project>

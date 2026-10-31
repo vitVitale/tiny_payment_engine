@@ -1,0 +1,12 @@
+{
+  "request": {
+    "method": "POST",
+    "urlPath": "/v1/holds",
+    "bodyPatterns": [{ "equalToJson": { "holdId": "0192f0e4-0000-7000-8000-000000000001", "amountMinor": 50000 } }]
+  },
+  "response": {
+    "status": 422,
+    "headers": { "Content-Type": "application/problem+json" },
+    "jsonBody": { "code": "INSUFFICIENT_FUNDS", "title": "Insufficient funds" }
+  }
+}
