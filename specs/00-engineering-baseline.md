@@ -336,6 +336,8 @@ docker compose -f deploy/docker-compose.yml up -d --build    # whole stack incl.
 | PostgreSQL | 5432 | |
 | Kafka | 9092 | |
 | mock OAuth2 issuer | 8099 | |
+| profile `observability` ([26 §13](26-observability.md#13-environments)): Grafana / OTLP gRPC, HTTP / Alloy UI | 3000 / 4317, 4318 / 12345 | |
+| profile `observability`: Mimir / Loki / Tempo / sample workload | 9009 / 3100 / 3200 / 8095 | |
 
 Profiles: `local` (compose hosts, debug logging off, funding endpoint enabled), `test` (Testcontainers),
 `systemtest` (compose stack with shortened deadlines and retry schedules, values in
@@ -364,6 +366,7 @@ Pipeline on every pull request and on `main`:
 4. Build container images (Jib or Spring Boot buildpacks), tag with commit SHA; scan the dependency tree and the images,
    and on release write the SBOM (§12.3 SEC-08).
 5. `tests/system-tests`: start the compose stack, run the scenario catalogue tagged `@smoke` on PRs, everything on `main`.
+   On `main` also the compose `observability` profile and its pipeline check (OBS-AC-01 … -04, 26 §13).
    Until the services have images, this step starts the infrastructure only and runs `LocalStackSmokeIT`.
 6. Nightly: full scenario catalogue, Gatling load profile, failure-injection scenarios ([20 §5](20-testing-strategy.md#5-failure-injection-scenarios)),
    forward pact check (the last release's providers against this commit's pacts).

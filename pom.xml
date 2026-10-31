@@ -36,6 +36,7 @@
         <module>tools/consumer-lag-exporter</module>
         <module>tools/invariant-checker</module>
         <module>tools/traceability-check</module>
+        <module>tests/observability-sample</module>
         <module>tests/system-tests</module>
     </modules>
 

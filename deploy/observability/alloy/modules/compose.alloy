@@ -1,0 +1,80 @@
+// Workload discovery of the agent (specs/26-observability.md §6.1) for docker compose, in place of the Kubernetes
+// discovery: containers labelled `tpe.io/scrape=true` are scraped on the port of `tpe.io/port` and their stdout is
+// tailed. Target labels of §3: `namespace` (the compose project), `pod` and `instance` (the container name). No node
+// exporter here: on a laptop it would describe the Docker VM.
+
+declare "workloads" {
+  argument "metrics_to" {
+    comment = "receivers of the scraped samples"
+  }
+
+  argument "logs_to" {
+    comment = "receivers of the container log lines"
+  }
+
+  discovery.docker "containers" {
+    host = "unix:///var/run/docker.sock"
+
+    filter {
+      name   = "label"
+      values = ["tpe.io/scrape=true"]
+    }
+  }
+
+  discovery.relabel "containers" {
+    targets = discovery.docker.containers.targets
+
+    rule {
+      source_labels = ["__meta_docker_container_label_com_docker_compose_project"]
+      target_label  = "namespace"
+    }
+
+    rule {
+      source_labels = ["__meta_docker_container_name"]
+      regex         = "/(.*)"
+      target_label  = "pod"
+    }
+
+    rule {
+      source_labels = ["pod"]
+      target_label  = "instance"
+    }
+
+    rule {
+      source_labels = ["__meta_docker_network_ip", "__meta_docker_container_label_tpe_io_port"]
+      separator     = ":"
+      target_label  = "__address__"
+    }
+  }
+
+  prometheus.scrape "services" {
+    targets         = discovery.relabel.containers.output
+    metrics_path    = "/actuator/prometheus"
+    scrape_interval = "15s"
+    // exemplars come only with OpenMetrics (ADR-013 decision 1)
+    scrape_protocols = ["OpenMetricsText1.0.0", "PrometheusText0.0.4"]
+    forward_to       = argument.metrics_to.value
+  }
+
+  // Loki labels of §3: service_namespace and pod here; service_name and env from the agent
+  discovery.relabel "logs" {
+    targets = discovery.docker.containers.targets
+
+    rule {
+      source_labels = ["__meta_docker_container_label_com_docker_compose_project"]
+      target_label  = "service_namespace"
+    }
+
+    rule {
+      source_labels = ["__meta_docker_container_name"]
+      regex         = "/(.*)"
+      target_label  = "pod"
+    }
+  }
+
+  loki.source.docker "services" {
+    host       = "unix:///var/run/docker.sock"
+    targets    = discovery.relabel.logs.output
+    forward_to = argument.logs_to.value
+  }
+}

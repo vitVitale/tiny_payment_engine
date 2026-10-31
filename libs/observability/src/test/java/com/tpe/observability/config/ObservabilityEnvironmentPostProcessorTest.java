@@ -30,6 +30,8 @@ class ObservabilityEnvironmentPostProcessorTest {
         assertThat(env.getProperty("management.endpoint.health.probes.enabled")).isEqualTo("true");
         assertThat(env.getProperty("management.metrics.distribution.slo.http.server.requests"))
                 .isEqualTo("50ms,100ms,200ms,300ms,500ms,1000ms,2000ms,5000ms,5500ms");
+        // ADR-013: metrics are pulled, never pushed over OTLP
+        assertThat(env.getProperty("management.otlp.metrics.export.enabled")).isEqualTo("false");
     }
 
     @Test

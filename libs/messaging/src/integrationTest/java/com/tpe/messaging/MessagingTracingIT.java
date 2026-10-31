@@ -153,7 +153,7 @@ class MessagingTracingIT {
         UUID eventId = writeIn(writer, CSM_TOPIC);
 
         SpanData send = spans.await(span("send " + CSM_TOPIC, eventId));
-        Topics.await(Duration.ofSeconds(10), () -> listeners.traceparents.containsKey(eventId));
+        spans.await(span("process " + CSM_TOPIC, eventId)); // the listener is done, so no span of it ends later
 
         assertThat(listeners.traceparents.get(eventId))
                 .isEqualTo("00-" + send.getTraceId() + "-" + send.getSpanId() + "-01");
@@ -162,6 +162,7 @@ class MessagingTracingIT {
     @Test
     void idleRelayAndWorkerCreateNoSpans() throws InterruptedException {
         Topics.await(Duration.ofSeconds(10), relay::isLeader);
+        awaitNoNewSpansFor(Duration.ofSeconds(1)); // what an earlier test started has ended
         spans.reset();
 
         Thread.sleep(Duration.ofSeconds(10));
@@ -184,6 +185,14 @@ class MessagingTracingIT {
                 .extracting(SpanData::getName).containsExactly("worker sample-timers");
         assertThat(spans.finished()).filteredOn(span -> span.getName().startsWith("worker "))
                 .singleElement().extracting(SpanData::getKind).isEqualTo(SpanKind.INTERNAL);
+    }
+
+    private void awaitNoNewSpansFor(Duration quiet) throws InterruptedException {
+        int before;
+        do {
+            before = spans.finished().size();
+            Thread.sleep(quiet);
+        } while (spans.finished().size() != before);
     }
 
     /** Writes a message to {@code topic} in a transaction inside {@code writer}, then ends {@code writer}. */

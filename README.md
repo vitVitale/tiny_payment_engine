@@ -35,6 +35,25 @@ docker compose -f deploy/docker-compose.yml up -d --wait postgres kafka oauth2
 curl -s -X POST http://localhost:8099/default/token -d grant_type=client_credentials -d client_id=local-channel -d client_secret=local -d "scope=payments:write payments:read" -d sub=customer-1 -d accounts=DE89370400440532013000
 ```
 
+With the `observability` profile (off by default) the stack also runs Alloy, Mimir, Loki, Tempo and Grafana of
+[26 §13](specs/26-observability.md#13-environments) and a sample workload that produces a trace, a log line and a
+latency histogram:
+
+```bash
+./mvnw -pl tests/observability-sample -am package -DskipTests
+```
+
+```bash
+docker compose -f deploy/docker-compose.yml --profile observability up -d --wait
+```
+
+- Grafana on `http://localhost:3000` (no login locally), with Mimir, Loki and Tempo provisioned and correlated.
+- OTLP on `localhost:4317` (gRPC) / `4318` (HTTP): a service started on the host with
+  `OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4317` sends its traces there. Only containers labelled
+  `tpe.io/scrape=true` are scraped and have their logs collected.
+- `curl -X POST localhost:8095/sample/payments` handles a synthetic payment. The pipeline check (OBS-AC-01 … -04):
+  `./mvnw -pl tests/system-tests -am verify -Dtpe.observability-stack=true`.
+
 Start a service against it with its `local` profile:
 
 ```bash

@@ -1,0 +1,65 @@
+# Data sources of the compose observability profile with the correlations of specs/26-observability.md §7:
+# Tempo → Loki by trace id (± 5 min), Tempo → Mimir, Loki trace_id → Tempo, Mimir exemplars → Tempo. Tenant tpe-local,
+# as the Alloy agent writes it. Read-only: they change by pull request.
+apiVersion: 1
+
+datasources:
+  - name: Mimir
+    uid: mimir
+    type: prometheus
+    url: http://mimir:9009/prometheus
+    isDefault: true
+    editable: false
+    jsonData:
+      httpHeaderName1: X-Scope-OrgID
+      exemplarTraceIdDestinations:
+        - name: trace_id
+          datasourceUid: tempo
+    secureJsonData:
+      httpHeaderValue1: tpe-local
+
+  - name: Loki
+    uid: loki
+    type: loki
+    url: http://loki:3100
+    editable: false
+    jsonData:
+      httpHeaderName1: X-Scope-OrgID
+      derivedFields:
+        - name: TraceID
+          matcherType: label
+          matcherRegex: trace_id
+          datasourceUid: tempo
+          url: "$${__value.raw}"
+    secureJsonData:
+      httpHeaderValue1: tpe-local
+
+  - name: Tempo
+    uid: tempo
+    type: tempo
+    url: http://tempo:3200
+    editable: false
+    jsonData:
+      httpHeaderName1: X-Scope-OrgID
+      tracesToLogsV2:
+        datasourceUid: loki
+        spanStartTimeShift: -5m
+        spanEndTimeShift: 5m
+        tags:
+          - key: service.name
+            value: service_name
+        customQuery: true
+        query: '{$${__tags}} | trace_id="$${__trace.traceId}"'
+      # the span's service, in Mimir by its `application` label; no service map locally (no metrics generator)
+      tracesToMetrics:
+        datasourceUid: mimir
+        spanStartTimeShift: -5m
+        spanEndTimeShift: 5m
+        tags:
+          - key: service.name
+            value: application
+        queries:
+          - name: Request latency p99
+            query: 'histogram_quantile(0.99, sum by (le, uri) (rate(http_server_requests_seconds_bucket{$${__tags}}[5m])))'
+    secureJsonData:
+      httpHeaderValue1: tpe-local

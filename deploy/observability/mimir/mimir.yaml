@@ -1,0 +1,51 @@
+# Mimir, monolithic, for the compose observability profile (specs/26-observability.md §13). Production runs the
+# distributed mode of §7 from the Helm chart; tenants, limits and exemplars match it.
+multitenancy_enabled: true
+target: all
+
+server:
+  http_listen_port: 9009
+  log_level: warn
+
+common:
+  storage:
+    backend: filesystem
+    filesystem:
+      dir: /data/storage
+
+blocks_storage:
+  storage_prefix: blocks
+  tsdb:
+    dir: /data/tsdb
+  bucket_store:
+    sync_dir: /data/tsdb-sync
+
+compactor:
+  data_dir: /data/compactor
+  sharding_ring:
+    kvstore:
+      store: memberlist
+
+distributor:
+  ring:
+    instance_addr: 127.0.0.1
+    kvstore:
+      store: memberlist
+
+ingester:
+  ring:
+    instance_addr: 127.0.0.1
+    kvstore:
+      store: memberlist
+    replication_factor: 1
+
+store_gateway:
+  sharding_ring:
+    replication_factor: 1
+
+ruler_storage:
+  storage_prefix: rules
+
+limits:
+  # §7: exemplars on, so a latency bucket links to its trace (OBS-AC-03)
+  max_global_exemplars_per_user: 100000

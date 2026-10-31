@@ -43,5 +43,25 @@
             <artifactId>jackson-databind</artifactId>
             <scope>test</scope>
         </dependency>
+        <!-- observability pipeline check (ObservabilityPipelineIT): the SLO boundaries, the scrape parser of the
+             telemetry contract, Awaitility (20 §2) -->
+        <dependency>
+            <groupId>com.tpe</groupId>
+            <artifactId>observability</artifactId>
+            <version>${project.version}</version>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.awaitility</groupId>
+            <artifactId>awaitility</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>com.tpe</groupId>
+            <artifactId>observability</artifactId>
+            <version>${project.version}</version>
+            <type>test-jar</type>
+            <scope>test</scope>
+        </dependency>
     </dependencies>
 </project>

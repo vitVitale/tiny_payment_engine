@@ -1,0 +1,6 @@
+spring:
+  application:
+    name: observability-sample
+server:
+  # 8090 is the csm-simulator's (00 §13)
+  port: 8095
