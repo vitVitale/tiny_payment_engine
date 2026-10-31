@@ -67,7 +67,7 @@ Dependency rules (enforced by the Maven Enforcer plugin and ArchUnit):
   logic. `messaging` depends on it.
 - `libs/test-support` holds shared test fixtures (the ArchUnit rules of §3, §5, §6). Any module MAY depend on it in
   `test` scope only; it is never a compile or runtime dependency. It depends only on test libraries (ArchUnit, JUnit,
-  AssertJ).
+  AssertJ, Pact's model and matchers for `StubConformanceTest`).
 - `tools/*` MAY depend on `libs/*` and MUST NOT be called by any service. No module depends on a tool.
 - `csm-simulator` MUST NOT be packaged into any production image.
 

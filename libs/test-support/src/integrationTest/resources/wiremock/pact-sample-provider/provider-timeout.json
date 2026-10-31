@@ -1,0 +1,11 @@
+{
+  "request": {
+    "method": "GET",
+    "url": "/sample/accounts/0192f0e4-0000-7000-8000-00000000dead"
+  },
+  "response": {
+    "status": 200,
+    "fixedDelayMilliseconds": 5000
+  },
+  "metadata": { "pact": "fault" }
+}

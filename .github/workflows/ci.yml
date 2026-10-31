@@ -25,6 +25,9 @@ jobs:
           java-version: '25'
           cache: maven
       - run: ./mvnw -B verify
+      # step 2: every provider verifies the pacts step 1 collected in target/pacts (specs/20-testing-strategy.md §10.3)
+      - name: Verify pacts
+        run: ./mvnw -B -Ppact-verify verify
 
   diagrams:
     name: PlantUML check (step 3)

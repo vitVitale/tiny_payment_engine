@@ -1,6 +1,7 @@
 package com.tpe.observability.export;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.awaitility.Awaitility.await;
 
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import io.opentelemetry.api.trace.Tracer;
@@ -64,14 +65,17 @@ class DropOnFullSpanProcessorTest {
         InMemorySpanExporter exporter = InMemorySpanExporter.create();
         Tracer tracer = tracerExportingTo(exporter, 2);
 
-        for (int round = 0; round < 3; round++) {
+        for (int round = 1; round <= 3; round++) {
             tracer.spanBuilder("a").startSpan().end();
             tracer.spanBuilder("b").startSpan().end();
-            provider.forceFlush().join(5, TimeUnit.SECONDS);
+            // forceFlush may return while the worker still exports a batch it took on its own: wait for the export
+            int exported = 2 * round;
+            await().atMost(Duration.ofSeconds(5))
+                    .until(() -> exporter.getFinishedSpanItems().size() >= exported || dropped.count() > 0);
+            assertThat(dropped.count()).as("dropped in round %d", round).isZero();
         }
 
         assertThat(exporter.getFinishedSpanItems()).hasSize(6);
-        assertThat(dropped.count()).isZero();
     }
 
     private Tracer tracerExportingTo(SpanExporter exporter, int capacity) {
