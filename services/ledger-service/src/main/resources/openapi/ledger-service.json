@@ -1,0 +1,204 @@
+{
+  "openapi" : "3.1.0",
+  "info" : {
+    "description" : "Accounts, journal and memos (specs/12-ledger-service.md)",
+    "title" : "ledger-service",
+    "version" : "v1"
+  },
+  "security" : [ {
+    "staffJwt" : [ ]
+  } ],
+  "paths" : {
+    "/v1/accounts" : {
+      "get" : {
+        "operationId" : "getByIban",
+        "parameters" : [ {
+          "in" : "query",
+          "name" : "iban",
+          "required" : true,
+          "schema" : {
+            "type" : "string"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/AccountResponse"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "tags" : [ "account-controller" ]
+      },
+      "post" : {
+        "operationId" : "open",
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/OpenAccountRequest"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "201" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/AccountResponse"
+                }
+              }
+            },
+            "description" : "Created"
+          }
+        },
+        "tags" : [ "account-controller" ]
+      }
+    },
+    "/v1/accounts/{accountId}" : {
+      "get" : {
+        "operationId" : "get",
+        "parameters" : [ {
+          "in" : "path",
+          "name" : "accountId",
+          "required" : true,
+          "schema" : {
+            "type" : "string",
+            "format" : "uuid"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/AccountResponse"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "tags" : [ "account-controller" ]
+      }
+    }
+  },
+  "components" : {
+    "schemas" : {
+      "AccountResponse" : {
+        "type" : "object",
+        "properties" : {
+          "accountId" : {
+            "type" : "string",
+            "format" : "uuid"
+          },
+          "availableBalanceMinor" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "bookedBalanceMinor" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "closedAt" : {
+            "type" : "string",
+            "format" : "date-time"
+          },
+          "currency" : {
+            "type" : "string"
+          },
+          "customerId" : {
+            "type" : "string"
+          },
+          "holder" : {
+            "$ref" : "#/components/schemas/HolderResponse"
+          },
+          "iban" : {
+            "type" : "string"
+          },
+          "openedAt" : {
+            "type" : "string",
+            "format" : "date-time"
+          },
+          "pendingCreditsMinor" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "status" : {
+            "type" : "string",
+            "enum" : [ "OPEN", "BLOCKED", "CLOSED" ]
+          }
+        }
+      },
+      "HolderRequest" : {
+        "type" : "object",
+        "properties" : {
+          "countryOfResidence" : {
+            "type" : "string"
+          },
+          "dateOfBirth" : {
+            "type" : "string",
+            "format" : "date"
+          },
+          "name" : {
+            "type" : "string"
+          },
+          "organisationId" : {
+            "type" : "string"
+          },
+          "type" : {
+            "type" : "string",
+            "enum" : [ "PERSON", "ORGANISATION" ]
+          }
+        }
+      },
+      "HolderResponse" : {
+        "type" : "object",
+        "properties" : {
+          "countryOfResidence" : {
+            "type" : "string"
+          },
+          "dateOfBirth" : {
+            "type" : "string",
+            "format" : "date"
+          },
+          "name" : {
+            "type" : "string"
+          },
+          "organisationId" : {
+            "type" : "string"
+          },
+          "type" : {
+            "type" : "string",
+            "enum" : [ "PERSON", "ORGANISATION" ]
+          }
+        }
+      },
+      "OpenAccountRequest" : {
+        "type" : "object",
+        "properties" : {
+          "customerId" : {
+            "type" : "string"
+          },
+          "holder" : {
+            "$ref" : "#/components/schemas/HolderRequest"
+          }
+        }
+      }
+    },
+    "securitySchemes" : {
+      "staffJwt" : {
+        "bearerFormat" : "JWT",
+        "description" : "roles claim: BACKOFFICE_OPERATOR, COMPLIANCE_OFFICER",
+        "scheme" : "bearer",
+        "type" : "http"
+      }
+    }
+  }
+}

@@ -16,6 +16,15 @@
           }
         },
         {
+          "requestParam": "roles",
+          "match": "*",
+          "claims": {
+            "sub": "${sub}",
+            "client_id": "${clientId}",
+            "roles": ["${roles}"]
+          }
+        },
+        {
           "requestParam": "grant_type",
           "match": "client_credentials",
           "claims": {

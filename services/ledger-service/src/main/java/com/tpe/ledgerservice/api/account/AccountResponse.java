@@ -1,0 +1,52 @@
+package com.tpe.ledgerservice.api.account;
+
+import com.tpe.ledgerservice.domain.account.Account;
+import com.tpe.ledgerservice.domain.account.AccountStatus;
+import com.tpe.ledgerservice.domain.account.HolderType;
+import java.time.Instant;
+import java.time.LocalDate;
+import java.util.UUID;
+
+/**
+ * A customer account with its balances (specs/12-ledger-service.md §3.2, §3.3): {@code availableBalanceMinor =
+ * booked − Σ active holds}; pending credits are listed separately in {@code pendingCreditsMinor} and are part of
+ * neither balance.
+ */
+record AccountResponse(
+        UUID accountId,
+        String iban,
+        String customerId,
+        HolderResponse holder,
+        AccountStatus status,
+        long bookedBalanceMinor,
+        long availableBalanceMinor,
+        long pendingCreditsMinor,
+        String currency,
+        Instant openedAt,
+        Instant closedAt) {
+
+    record HolderResponse(
+            HolderType type,
+            String name,
+            LocalDate dateOfBirth,
+            String countryOfResidence,
+            String organisationId) {}
+
+    static AccountResponse of(Account account) {
+        var holder = account.holder();
+        return new AccountResponse(
+                account.accountId(),
+                account.iban().value(),
+                account.customerId().value(),
+                new HolderResponse(holder.type(), holder.name().value(), holder.dateOfBirth(),
+                        holder.countryOfResidence(), holder.organisationId()),
+                account.status(),
+                account.bookedMinor(),
+                account.availableMinor(),
+                // Σ ACTIVE pending credits; the ledger creates none yet (pending credits, 12 §3.1, come later)
+                0,
+                account.currency(),
+                account.openedAt(),
+                account.closedAt());
+    }
+}

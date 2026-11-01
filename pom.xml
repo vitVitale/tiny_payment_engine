@@ -50,6 +50,8 @@
         <jaxb-maven-plugin.version>4.0.16</jaxb-maven-plugin.version>
         <!-- JDBC observations for tracing (specs/26-observability.md §4.2) -->
         <datasource-micrometer.version>2.3.0</datasource-micrometer.version>
+        <!-- OpenAPI 3.1 documents at /v3/api-docs (specs/00-engineering-baseline.md §7); the 3.0 line is Boot 4.0's -->
+        <springdoc.version>3.0.3</springdoc.version>
         <!-- consumer-driven contract tests; specs/20-testing-strategy.md §10 -->
         <pact.version>4.7.5</pact.version>
         <!-- where the build collects every module's pacts (20 §10.3) -->
@@ -91,6 +93,11 @@
                 <groupId>net.ttddyy.observation</groupId>
                 <artifactId>datasource-micrometer-spring-boot</artifactId>
                 <version>${datasource-micrometer.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>org.springdoc</groupId>
+                <artifactId>springdoc-openapi-starter-webmvc-api</artifactId>
+                <version>${springdoc.version}</version>
             </dependency>
             <dependency>
                 <groupId>com.tngtech.archunit</groupId>

@@ -1,0 +1,79 @@
+package com.tpe.ledgerservice;
+
+import static org.assertj.core.api.Assertions.assertThat;
+
+import com.tpe.contracts.TechnicalAccounts;
+import com.tpe.paymentdomain.Iban;
+import java.util.List;
+import java.util.Map;
+import java.util.UUID;
+import java.util.stream.Collectors;
+import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.http.MediaType;
+import org.springframework.jdbc.core.simple.JdbcClient;
+import tools.jackson.databind.JsonNode;
+
+/** The seed migration's technical accounts (specs/12-ledger-service.md §5, ADR-005). */
+class TechnicalAccountsIT extends LedgerStack {
+
+    @Autowired
+    JdbcClient jdbc;
+
+    @Test
+    void existAfterMigrationWithTheIdsOfTechnicalAccounts() {
+        Map<UUID, String> codes = jdbc.sql("SELECT account_id, technical_code FROM accounts WHERE kind = 'TECHNICAL'")
+                .query((rs, n) -> Map.entry(rs.getObject("account_id", UUID.class), rs.getString("technical_code")))
+                .list().stream()
+                .collect(Collectors.toMap(Map.Entry::getKey, Map.Entry::getValue));
+
+        assertThat(codes).containsOnly(
+                Map.entry(TechnicalAccounts.CSM_SETTLEMENT_ID, "CSM_SETTLEMENT"),
+                Map.entry(TechnicalAccounts.FUNDING_ID, "FUNDING"));
+    }
+
+    @Test
+    void haveDistinctValidIbansWithOurBankCode() {
+        List<String> ibans = jdbc.sql("SELECT iban FROM accounts WHERE kind = 'TECHNICAL'").query(String.class).list();
+
+        assertThat(ibans).hasSize(2).doesNotHaveDuplicates();
+        assertThat(ibans).allSatisfy(iban -> assertThat(new Iban(iban).bankCode()).isEqualTo("10010010"));
+    }
+
+    /** Their balance comes from postings and snapshots (12 §6.3), not from the row the Account API reads. */
+    @Test
+    void areRefusedByTheAccountApiReadsWith422AccountNotCustomer() {
+        String iban = jdbc.sql("SELECT iban FROM accounts WHERE account_id = ?")
+                .param(TechnicalAccounts.FUNDING_ID).query(String.class).single();
+
+        var byId = http().get().uri("/v1/accounts/{id}", TechnicalAccounts.FUNDING_ID)
+                .header(AUTHORIZATION, operator("op-1"))
+                .retrieve().toEntity(JsonNode.class);
+        var byIban = http().get().uri("/v1/accounts?iban={iban}", iban)
+                .header(AUTHORIZATION, operator("op-1"))
+                .retrieve().toEntity(JsonNode.class);
+
+        assertThat(byId.getStatusCode().value()).isEqualTo(422);
+        assertThat(byId.getBody().get("code").asString()).isEqualTo("ACCOUNT_NOT_CUSTOMER");
+        assertThat(byIban.getStatusCode().value()).isEqualTo(422);
+        assertThat(byIban.getBody().get("code").asString()).isEqualTo("ACCOUNT_NOT_CUSTOMER");
+    }
+
+    /** Only customer accounts reach the outbox: an opening publishes its own account, never a technical one. */
+    @Test
+    void areNeverPublishedToAccountsEvents() {
+        String customerId = "CUST-TECH-" + UUID.randomUUID().toString().substring(0, 8);
+        var opened = http().post().uri("/v1/accounts")
+                .header(AUTHORIZATION, operator("op-1"))
+                .contentType(MediaType.APPLICATION_JSON)
+                .body(Map.of("customerId", customerId, "holder", Map.of("type", "PERSON", "name", "Anna Schmidt")))
+                .retrieve().toBodilessEntity();
+        assertThat(opened.getStatusCode().value()).isEqualTo(201);
+
+        assertThat(jdbc.sql("SELECT count(*) FROM outbox WHERE payload -> 'account' ->> 'customerId' = ?")
+                .param(customerId).query(Long.class).single()).isEqualTo(1);
+        assertThat(jdbc.sql("SELECT count(*) FROM outbox WHERE message_key IN (?, ?)")
+                .params(TechnicalAccounts.CSM_SETTLEMENT_ID.toString(), TechnicalAccounts.FUNDING_ID.toString())
+                .query(Long.class).single()).isZero();
+    }
+}
