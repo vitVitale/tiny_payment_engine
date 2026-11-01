@@ -55,6 +55,13 @@ docker compose -f deploy/docker-compose.yml up -d --wait postgres kafka oauth2
 curl -s -X POST http://localhost:8099/default/token -d grant_type=client_credentials -d client_id=local-channel -d client_secret=local -d "scope=payments:write payments:read" -d sub=customer-1 -d accounts=DE89370400440532013000
 ```
 
+  A staff token with `sub` and `roles` (one role: `BACKOFFICE_OPERATOR` or `COMPLIANCE_OFFICER`), e.g. for the ledger's
+  Account API:
+
+```bash
+curl -s -X POST http://localhost:8099/default/token -d grant_type=client_credentials -d client_id=local-backoffice -d client_secret=local -d sub=operator-1 -d roles=BACKOFFICE_OPERATOR
+```
+
 With the `observability` profile (off by default) the stack also runs Alloy, Mimir, Loki, Tempo and Grafana of
 [26 §13](specs/26-observability.md#13-environments) and a sample workload that produces a trace, a log line and a
 latency histogram:
