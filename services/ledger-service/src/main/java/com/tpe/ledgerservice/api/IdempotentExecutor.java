@@ -53,6 +53,15 @@ public class IdempotentExecutor {
      */
     public ResponseEntity<String> execute(String key, HttpServletRequest http, Object request, HttpStatus success,
             Supplier<?> action) {
+        return executeWithStatus(key, http, request, () -> new Outcome(success, action.get()));
+    }
+
+    /** A successful outcome whose status depends on the change, e.g. {@code 201} for a new hold, {@code 200} a retry. */
+    public record Outcome(HttpStatus status, Object body) {}
+
+    /** {@link #execute} for an endpoint whose success status depends on the outcome. */
+    public ResponseEntity<String> executeWithStatus(String key, HttpServletRequest http, Object request,
+            Supplier<Outcome> action) {
         if (key == null || key.isBlank()) {
             throw new IdempotencyKeyMissingException();
         }
@@ -63,7 +72,8 @@ public class IdempotentExecutor {
         var idempotent = new IdempotentRequest(key, fingerprint.of(path, request));
         StoredResponse response = retry.run(() -> guard.execute(idempotent, () -> {
             try {
-                return new StoredResponse(success.value(), json.writeValueAsString(action.get()));
+                Outcome outcome = action.get();
+                return new StoredResponse(outcome.status().value(), json.writeValueAsString(outcome.body()));
             } catch (LedgerException e) {
                 ProblemDetail problem = Problems.refusedChange(e);
                 if (problem.getStatus() != HttpStatus.UNPROCESSABLE_CONTENT.value()) {

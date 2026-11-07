@@ -72,7 +72,7 @@
     },
     "/v1/accounts/{accountId}" : {
       "get" : {
-        "operationId" : "get",
+        "operationId" : "get_1",
         "parameters" : [ {
           "in" : "path",
           "name" : "accountId",
@@ -307,6 +307,128 @@
         },
         "tags" : [ "customer-controller" ]
       }
+    },
+    "/v1/holds" : {
+      "post" : {
+        "operationId" : "create",
+        "parameters" : [ {
+          "description" : "hold-create:<holdId>; a retry replays the stored response",
+          "in" : "header",
+          "name" : "Idempotency-Key",
+          "required" : true,
+          "schema" : {
+            "type" : "string"
+          }
+        } ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/CreateHoldRequest"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "200" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/HoldResponse"
+                }
+              }
+            },
+            "description" : "The existing hold of a retry"
+          },
+          "201" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/HoldResponse"
+                }
+              }
+            },
+            "description" : "Created"
+          }
+        },
+        "security" : [ ],
+        "tags" : [ "hold-controller" ]
+      }
+    },
+    "/v1/holds/{holdId}" : {
+      "get" : {
+        "operationId" : "get",
+        "parameters" : [ {
+          "in" : "path",
+          "name" : "holdId",
+          "required" : true,
+          "schema" : {
+            "type" : "string",
+            "format" : "uuid"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/HoldResponse"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "security" : [ ],
+        "tags" : [ "hold-controller" ]
+      }
+    },
+    "/v1/holds/{holdId}/release" : {
+      "post" : {
+        "operationId" : "release",
+        "parameters" : [ {
+          "in" : "path",
+          "name" : "holdId",
+          "required" : true,
+          "schema" : {
+            "type" : "string",
+            "format" : "uuid"
+          }
+        }, {
+          "description" : "hold-release:<holdId>; a retry replays the stored response",
+          "in" : "header",
+          "name" : "Idempotency-Key",
+          "required" : true,
+          "schema" : {
+            "type" : "string"
+          }
+        } ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "type" : "object",
+                "additionalProperties" : { }
+              }
+            }
+          }
+        },
+        "responses" : {
+          "200" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/HoldResponse"
+                }
+              }
+            },
+            "description" : "Released"
+          }
+        },
+        "security" : [ ],
+        "tags" : [ "hold-controller" ]
+      }
     }
   },
   "components" : {
@@ -371,6 +493,28 @@
           },
           "reason" : {
             "type" : "string"
+          }
+        }
+      },
+      "CreateHoldRequest" : {
+        "type" : "object",
+        "properties" : {
+          "amountMinor" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "currency" : {
+            "type" : "string"
+          },
+          "debtorIban" : {
+            "type" : "string"
+          },
+          "holdId" : {
+            "type" : "string",
+            "format" : "uuid"
+          },
+          "reference" : {
+            "$ref" : "#/components/schemas/Reference"
           }
         }
       },
@@ -440,6 +584,45 @@
           "journalEntryId" : {
             "type" : "string",
             "format" : "uuid"
+          }
+        }
+      },
+      "HoldResponse" : {
+        "type" : "object",
+        "properties" : {
+          "accountId" : {
+            "type" : "string",
+            "format" : "uuid"
+          },
+          "amountMinor" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "createdAt" : {
+            "type" : "string",
+            "format" : "date-time"
+          },
+          "finalisedAt" : {
+            "type" : "string",
+            "format" : "date-time"
+          },
+          "holdId" : {
+            "type" : "string",
+            "format" : "uuid"
+          },
+          "paymentId" : {
+            "type" : "string",
+            "format" : "uuid"
+          },
+          "status" : {
+            "type" : "string",
+            "enum" : [ "ACTIVE", "SETTLED", "RELEASED" ]
+          },
+          "tombstone" : {
+            "type" : "boolean"
+          },
+          "txId" : {
+            "type" : "string"
           }
         }
       },
@@ -524,6 +707,18 @@
           "side" : {
             "type" : "string",
             "enum" : [ "DR", "CR" ]
+          },
+          "txId" : {
+            "type" : "string"
+          }
+        }
+      },
+      "Reference" : {
+        "type" : "object",
+        "properties" : {
+          "paymentId" : {
+            "type" : "string",
+            "format" : "uuid"
           },
           "txId" : {
             "type" : "string"

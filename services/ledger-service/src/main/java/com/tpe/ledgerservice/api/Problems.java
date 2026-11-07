@@ -43,11 +43,11 @@ public final class Problems {
     /** The statuses of §3.4 on reads: {@code ACCOUNT_NOT_FOUND} is {@code 404}. */
     private static HttpStatus status(LedgerError error) {
         return switch (error) {
-            case ACCOUNT_NOT_FOUND -> HttpStatus.NOT_FOUND;
-            case ACCOUNT_NOT_CUSTOMER, ACCOUNT_CLOSED, CUSTOMER_ID_MISSING, INSUFFICIENT_FUNDS,
+            case ACCOUNT_NOT_FOUND, HOLD_NOT_FOUND -> HttpStatus.NOT_FOUND;
+            case ACCOUNT_NOT_CUSTOMER, ACCOUNT_CLOSED, ACCOUNT_BLOCKED, CUSTOMER_ID_MISSING, INSUFFICIENT_FUNDS,
                     CURRENCY_NOT_SUPPORTED -> HttpStatus.UNPROCESSABLE_CONTENT;
             case SANCTIONS_BLOCK_PROTECTED, FORBIDDEN -> HttpStatus.FORBIDDEN;
-            case IDEMPOTENCY_CONFLICT, CONCURRENT_MODIFICATION -> HttpStatus.CONFLICT;
+            case HOLD_RELEASED, HOLD_SETTLED, IDEMPOTENCY_CONFLICT, CONCURRENT_MODIFICATION -> HttpStatus.CONFLICT;
         };
     }
 

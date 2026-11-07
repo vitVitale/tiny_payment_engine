@@ -1,0 +1,26 @@
+package com.tpe.ledgerservice.application.reservation;
+
+import com.tpe.ledgerservice.domain.reservation.Hold;
+import java.time.Instant;
+import java.util.Optional;
+import java.util.UUID;
+
+/** The {@code holds} table (specs/12-ledger-service.md §5), tombstones included. */
+public interface HoldRepository {
+
+    Optional<Hold> find(UUID holdId);
+
+    /**
+     * {@code INSERT … ON CONFLICT DO NOTHING}: while another open transaction inserts the same id this waits for it;
+     * if that one commits, nothing is inserted and {@link #find} then reads its row (ADR-009).
+     *
+     * @return whether this hold was inserted
+     */
+    boolean insertIfAbsent(Hold hold);
+
+    /** Writes a release of an {@code ACTIVE} hold; returns {@code false} when it is no longer {@code ACTIVE}. */
+    boolean markReleased(Hold released);
+
+    /** Deletes at most {@code limit} tombstones created before {@code cutoff}; returns how many. */
+    int deleteTombstonesCreatedBefore(Instant cutoff, int limit);
+}
