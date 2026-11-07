@@ -9,5 +9,7 @@ public enum LedgerError {
     /** A technical account where the operation needs a customer account. */
     ACCOUNT_NOT_CUSTOMER,
     /** A customer account without a customer number (Q-02). */
-    CUSTOMER_ID_MISSING
+    CUSTOMER_ID_MISSING,
+    /** An {@code Idempotency-Key} reused for a different request (§6.1); a caller bug. */
+    IDEMPOTENCY_CONFLICT
 }

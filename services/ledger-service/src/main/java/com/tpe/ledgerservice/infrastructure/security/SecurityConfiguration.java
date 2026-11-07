@@ -4,7 +4,6 @@ import com.tpe.ledgerservice.api.Problems;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import java.io.IOException;
-import java.util.LinkedHashMap;
 import java.util.Map;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -85,13 +84,7 @@ class SecurityConfiguration {
 
     private static void write(JsonMapper json, HttpServletRequest request, HttpServletResponse response,
             ProblemDetail problem) throws IOException {
-        Map<String, Object> body = new LinkedHashMap<>();
-        body.put("type", problem.getType().toString());
-        body.put("title", problem.getTitle());
-        body.put("status", problem.getStatus());
-        body.put("detail", problem.getDetail());
-        body.put("instance", request.getRequestURI());
-        body.putAll(problem.getProperties());
+        Map<String, Object> body = Problems.body(problem, request.getRequestURI());
         response.setContentType(MediaType.APPLICATION_PROBLEM_JSON_VALUE);
         json.writeValue(response.getOutputStream(), body);
     }

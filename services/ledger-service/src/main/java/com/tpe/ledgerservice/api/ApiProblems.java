@@ -2,7 +2,6 @@ package com.tpe.ledgerservice.api;
 
 import static com.tpe.ledgerservice.api.Problems.problem;
 
-import com.tpe.ledgerservice.domain.LedgerError;
 import com.tpe.ledgerservice.domain.LedgerException;
 import java.util.List;
 import org.springframework.http.HttpHeaders;
@@ -34,18 +33,12 @@ class ApiProblems extends ResponseEntityExceptionHandler {
 
     @ExceptionHandler
     ProblemDetail refused(LedgerException e) {
-        return problem(status(e.error()), e.error().name(), e.getMessage());
+        return Problems.refused(e);
     }
 
-    /**
-     * The Account API's statuses; {@code ACCOUNT_NOT_FOUND} is {@code 404} on its reads (§3.4) and will be
-     * {@code 422} on the Posting API.
-     */
-    private static HttpStatus status(LedgerError error) {
-        return switch (error) {
-            case ACCOUNT_NOT_FOUND -> HttpStatus.NOT_FOUND;
-            case ACCOUNT_NOT_CUSTOMER, CUSTOMER_ID_MISSING -> HttpStatus.UNPROCESSABLE_CONTENT;
-        };
+    @ExceptionHandler
+    ProblemDetail idempotencyKeyMissing(IdempotencyKeyMissingException e) {
+        return problem(HttpStatus.BAD_REQUEST, "IDEMPOTENCY_KEY_MISSING", "The Idempotency-Key header is required");
     }
 
     /** Every other problem Spring MVC raises gets a {@code code} too: {@code VALIDATION_FAILED} or the status name. */

@@ -19,6 +19,10 @@ tpe:
   bank:
     # specs/12-ledger-service.md §7: must equal ownBankCode in the bank directory
     bank-code: "10010010"
+  ledger:
+    idempotency:
+      # keys older than this are deleted hourly (specs/12-ledger-service.md §6.1, §7)
+      retention: 30d
   messaging:
     # the outbox of accounts.events (specs/12-ledger-service.md §4)
     enabled: true
