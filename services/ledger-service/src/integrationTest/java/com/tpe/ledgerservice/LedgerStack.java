@@ -13,6 +13,7 @@ import org.springframework.context.annotation.Primary;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
+import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.web.client.RestClient;
@@ -22,9 +23,11 @@ import tools.jackson.databind.JsonNode;
 
 /**
  * The service on a random port against PostgreSQL and Kafka of the compose stack's versions (deploy/docker-compose.yml),
- * started once per JVM; every subclass shares one Spring context. {@link #http()} never throws on an error status.
+ * started once per JVM; every subclass shares one Spring context, in profile {@code test}. {@link #http()} never
+ * throws on an error status.
  */
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
+@ActiveProfiles("test")
 @Import({StaffTokens.Config.class, LedgerStack.TestClock.class})
 public abstract class LedgerStack {
 
@@ -79,6 +82,38 @@ public abstract class LedgerStack {
             request.header(IDEMPOTENCY_KEY, idempotencyKey);
         }
         return request.retrieve().toEntity(JsonNode.class);
+    }
+
+    /** Opens a customer account as {@code op-1} and returns its id. */
+    protected UUID openCustomer(String customerId) {
+        var opened = open(operator("op-1"), newIdempotencyKey(),
+                Map.of("customerId", customerId, "holder", Map.of("type", "PERSON", "name", "Anna Schmidt")));
+        if (opened.getStatusCode().value() != 201) {
+            throw new IllegalStateException("opening failed: " + opened);
+        }
+        return UUID.fromString(opened.getBody().get("accountId").asString());
+    }
+
+    /**
+     * {@code POST /v1/accounts/{accountId}/funding}; {@code authorization} and {@code idempotencyKey} are left out
+     * when {@code null}.
+     */
+    protected ResponseEntity<JsonNode> fund(String authorization, String idempotencyKey, UUID accountId,
+            Map<String, ?> body) {
+        var request = http().post().uri("/v1/accounts/{id}/funding", accountId)
+                .contentType(MediaType.APPLICATION_JSON).body(body);
+        if (authorization != null) {
+            request.header(AUTHORIZATION, authorization);
+        }
+        if (idempotencyKey != null) {
+            request.header(IDEMPOTENCY_KEY, idempotencyKey);
+        }
+        return request.retrieve().toEntity(JsonNode.class);
+    }
+
+    /** {@code {"amountMinor": amountMinor, "currency": "EUR"}} */
+    protected static Map<String, Object> eur(long amountMinor) {
+        return Map.of("amountMinor", amountMinor, "currency", "EUR");
     }
 
     /** A key no other request used. */

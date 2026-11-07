@@ -11,6 +11,7 @@ import io.swagger.v3.oas.annotations.media.Content;
 import io.swagger.v3.oas.annotations.media.Schema;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import jakarta.servlet.http.HttpServletRequest;
+import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
 import org.springframework.http.HttpStatus;
@@ -64,6 +65,19 @@ class AccountController {
     @PreAuthorize("hasRole('BACKOFFICE_OPERATOR')")
     AccountResponse get(@PathVariable UUID accountId) {
         return AccountResponse.of(accounts.get(accountId));
+    }
+
+    /**
+     * The account's postings, newest first, 100 per page (12 §3.2). {@code from} is inclusive, {@code to} exclusive;
+     * {@code cursor} is the {@code nextCursor} of the previous page.
+     */
+    @GetMapping("/{accountId}/entries")
+    @PreAuthorize("hasRole('BACKOFFICE_OPERATOR')")
+    EntriesResponse entries(@PathVariable UUID accountId,
+            @RequestParam(required = false) Instant from,
+            @RequestParam(required = false) Instant to,
+            @RequestParam(required = false) String cursor) {
+        return EntriesResponse.of(accounts.entries(accountId, from, to, EntriesCursor.decode(cursor)));
     }
 
     @GetMapping(params = "iban")

@@ -49,4 +49,22 @@ public record Account(
     public long availableMinor() {
         return bookedMinor - heldMinor;
     }
+
+    /**
+     * This customer account with {@code changeMinor} booked (positive for a net credit); the version stays, the
+     * repository bumps it when it writes the row (12 §6.2).
+     *
+     * @throws LedgerException {@code INSUFFICIENT_FUNDS} when a net debit exceeds the available balance
+     */
+    public Account book(long changeMinor) {
+        if (kind != AccountKind.CUSTOMER) {
+            throw new IllegalStateException("a technical account's row is never booked (ADR-005)");
+        }
+        long booked = Math.addExact(bookedMinor, changeMinor);
+        if (booked < heldMinor) {
+            throw new LedgerException(LedgerError.INSUFFICIENT_FUNDS, "the available balance does not cover the debit");
+        }
+        return new Account(accountId, iban, kind, customerId, holder, status, currency, booked, heldMinor, version,
+                revision, openedAt, closedAt);
+    }
 }

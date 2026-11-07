@@ -1,0 +1,6 @@
+# Profile test (specs/00-engineering-baseline.md §13): the component tests against Testcontainers.
+tpe:
+  ledger:
+    funding:
+      # test funding (specs/12-ledger-service.md §3.2, §7)
+      enabled: true
