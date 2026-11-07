@@ -15,5 +15,13 @@ public interface AccountRepository {
 
     Optional<Account> findById(UUID accountId);
 
+    /**
+     * Writes a customer account's {@code booked_minor} and {@code held_minor} and bumps its version, if the row still
+     * has {@code account.version()} (12 §6.2).
+     *
+     * @return {@code false} when another transaction changed the row since it was read
+     */
+    boolean updateBalances(Account account);
+
     Optional<Account> findByIban(Iban iban);
 }

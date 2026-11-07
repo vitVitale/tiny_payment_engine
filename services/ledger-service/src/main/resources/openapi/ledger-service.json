@@ -96,6 +96,101 @@
         },
         "tags" : [ "account-controller" ]
       }
+    },
+    "/v1/accounts/{accountId}/entries" : {
+      "get" : {
+        "operationId" : "entries",
+        "parameters" : [ {
+          "in" : "path",
+          "name" : "accountId",
+          "required" : true,
+          "schema" : {
+            "type" : "string",
+            "format" : "uuid"
+          }
+        }, {
+          "in" : "query",
+          "name" : "from",
+          "required" : false,
+          "schema" : {
+            "type" : "string",
+            "format" : "date-time"
+          }
+        }, {
+          "in" : "query",
+          "name" : "to",
+          "required" : false,
+          "schema" : {
+            "type" : "string",
+            "format" : "date-time"
+          }
+        }, {
+          "in" : "query",
+          "name" : "cursor",
+          "required" : false,
+          "schema" : {
+            "type" : "string"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/EntriesResponse"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "tags" : [ "account-controller" ]
+      }
+    },
+    "/v1/accounts/{accountId}/funding" : {
+      "post" : {
+        "operationId" : "fund",
+        "parameters" : [ {
+          "in" : "path",
+          "name" : "accountId",
+          "required" : true,
+          "schema" : {
+            "type" : "string",
+            "format" : "uuid"
+          }
+        }, {
+          "description" : "At most 200 characters; a retry replays the stored response",
+          "in" : "header",
+          "name" : "Idempotency-Key",
+          "required" : true,
+          "schema" : {
+            "type" : "string"
+          }
+        } ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/FundingRequest"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "200" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/FundingResponse"
+                }
+              }
+            },
+            "description" : "Funded"
+          }
+        },
+        "tags" : [ "funding-controller" ]
+      }
     }
   },
   "components" : {
@@ -142,6 +237,64 @@
           "status" : {
             "type" : "string",
             "enum" : [ "OPEN", "BLOCKED", "CLOSED" ]
+          }
+        }
+      },
+      "EntriesResponse" : {
+        "type" : "object",
+        "properties" : {
+          "nextCursor" : {
+            "type" : "string"
+          },
+          "postings" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/PostingResponse"
+            }
+          }
+        }
+      },
+      "FundingRequest" : {
+        "type" : "object",
+        "properties" : {
+          "amountMinor" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "currency" : {
+            "type" : "string"
+          }
+        }
+      },
+      "FundingResponse" : {
+        "type" : "object",
+        "properties" : {
+          "accountId" : {
+            "type" : "string",
+            "format" : "uuid"
+          },
+          "amountMinor" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "availableBalanceMinor" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "bookedBalanceMinor" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "currency" : {
+            "type" : "string"
+          },
+          "fundedAt" : {
+            "type" : "string",
+            "format" : "date-time"
+          },
+          "journalEntryId" : {
+            "type" : "string",
+            "format" : "uuid"
           }
         }
       },
@@ -197,6 +350,38 @@
           },
           "holder" : {
             "$ref" : "#/components/schemas/HolderRequest"
+          }
+        }
+      },
+      "PostingResponse" : {
+        "type" : "object",
+        "properties" : {
+          "amountMinor" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "createdAt" : {
+            "type" : "string",
+            "format" : "date-time"
+          },
+          "entryId" : {
+            "type" : "string",
+            "format" : "uuid"
+          },
+          "entryType" : {
+            "type" : "string",
+            "enum" : [ "PAYMENT_OUT", "PAYMENT_IN", "ON_US", "FUNDING" ]
+          },
+          "paymentId" : {
+            "type" : "string",
+            "format" : "uuid"
+          },
+          "side" : {
+            "type" : "string",
+            "enum" : [ "DR", "CR" ]
+          },
+          "txId" : {
+            "type" : "string"
           }
         }
       }

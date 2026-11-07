@@ -10,6 +10,12 @@ public enum LedgerError {
     ACCOUNT_NOT_CUSTOMER,
     /** A customer account without a customer number (Q-02). */
     CUSTOMER_ID_MISSING,
+    /** A debit beyond the available balance. */
+    INSUFFICIENT_FUNDS,
+    /** A currency other than EUR (A3); defensive. */
+    CURRENCY_NOT_SUPPORTED,
     /** An {@code Idempotency-Key} reused for a different request (§6.1); a caller bug. */
-    IDEMPOTENCY_CONFLICT
+    IDEMPOTENCY_CONFLICT,
+    /** The account kept changing under the optimistic lock after every internal retry (§6.2); the caller retries. */
+    CONCURRENT_MODIFICATION
 }

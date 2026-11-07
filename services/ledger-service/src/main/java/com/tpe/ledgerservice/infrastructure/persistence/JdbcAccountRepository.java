@@ -76,6 +76,18 @@ class JdbcAccountRepository implements AccountRepository {
     }
 
     @Override
+    public boolean updateBalances(Account account) {
+        return jdbc.sql("""
+                UPDATE accounts SET booked_minor = :booked, held_minor = :held, version = version + 1
+                 WHERE account_id = :accountId AND version = :version AND kind = 'CUSTOMER'""")
+                .param("booked", account.bookedMinor())
+                .param("held", account.heldMinor())
+                .param("accountId", account.accountId())
+                .param("version", account.version())
+                .update() == 1;
+    }
+
+    @Override
     public Optional<Account> findByIban(Iban iban) {
         return jdbc.sql(SELECT + " WHERE iban = ?").param(iban.value()).query(JdbcAccountRepository::account)
                 .optional();

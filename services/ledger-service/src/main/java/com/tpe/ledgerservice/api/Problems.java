@@ -30,14 +30,23 @@ public final class Problems {
     }
 
     /**
-     * The Account API's statuses; {@code ACCOUNT_NOT_FOUND} is {@code 404} on its reads (§3.4) and will be
-     * {@code 422} on the Posting API.
+     * A refusal of a mutating request (§3.4): {@code ACCOUNT_NOT_FOUND} is {@code 422} there, a deterministic outcome
+     * the idempotency guard stores; only reads answer it with {@code 404}.
      */
+    public static ProblemDetail refusedChange(LedgerException e) {
+        HttpStatus status = e.error() == LedgerError.ACCOUNT_NOT_FOUND
+                ? HttpStatus.UNPROCESSABLE_CONTENT
+                : status(e.error());
+        return problem(status, e.error().name(), e.getMessage());
+    }
+
+    /** The statuses of §3.4 on reads: {@code ACCOUNT_NOT_FOUND} is {@code 404}. */
     private static HttpStatus status(LedgerError error) {
         return switch (error) {
             case ACCOUNT_NOT_FOUND -> HttpStatus.NOT_FOUND;
-            case ACCOUNT_NOT_CUSTOMER, CUSTOMER_ID_MISSING -> HttpStatus.UNPROCESSABLE_CONTENT;
-            case IDEMPOTENCY_CONFLICT -> HttpStatus.CONFLICT;
+            case ACCOUNT_NOT_CUSTOMER, CUSTOMER_ID_MISSING, INSUFFICIENT_FUNDS, CURRENCY_NOT_SUPPORTED ->
+                    HttpStatus.UNPROCESSABLE_CONTENT;
+            case IDEMPOTENCY_CONFLICT, CONCURRENT_MODIFICATION -> HttpStatus.CONFLICT;
         };
     }
 

@@ -3,6 +3,7 @@ package com.tpe.ledgerservice.api;
 import com.tpe.ledgerservice.application.idempotency.IdempotencyGuard;
 import com.tpe.ledgerservice.application.idempotency.IdempotentRequest;
 import com.tpe.ledgerservice.application.idempotency.StoredResponse;
+import com.tpe.ledgerservice.application.posting.OptimisticRetry;
 import com.tpe.ledgerservice.domain.LedgerException;
 import jakarta.servlet.http.HttpServletRequest;
 import java.util.List;
@@ -20,6 +21,10 @@ import tools.jackson.databind.json.JsonMapper;
  * stores and replays — the success body, or the Problem Details of a {@code 422} refusal. Any other exception
  * propagates to {@link ApiProblems} unstored. The body is written as stored, so a first response and its replays are
  * the same JSON. Replays carry no headers beyond the content type: only status and body are stored.
+ *
+ * <p>The guard's transaction is the business transaction, so an optimistic-lock conflict on a customer account runs
+ * it again through {@link OptimisticRetry} (12 §6.2): key lookup, change and key insert, all of it. Exhausted retries
+ * are {@code 409 CONCURRENT_MODIFICATION}, which is not stored.
  */
 @Component
 public class IdempotentExecutor {
@@ -27,11 +32,14 @@ public class IdempotentExecutor {
     public static final String IDEMPOTENCY_KEY = "Idempotency-Key";
 
     private final IdempotencyGuard guard;
+    private final OptimisticRetry retry;
     private final RequestFingerprint fingerprint;
     private final JsonMapper json;
 
-    public IdempotentExecutor(IdempotencyGuard guard, RequestFingerprint fingerprint, JsonMapper json) {
+    public IdempotentExecutor(IdempotencyGuard guard, OptimisticRetry retry, RequestFingerprint fingerprint,
+            JsonMapper json) {
         this.guard = guard;
+        this.retry = retry;
         this.fingerprint = fingerprint;
         this.json = json;
     }
@@ -53,17 +61,17 @@ public class IdempotentExecutor {
         }
         String path = http.getRequestURI();
         var idempotent = new IdempotentRequest(key, fingerprint.of(path, request));
-        StoredResponse response = guard.execute(idempotent, () -> {
+        StoredResponse response = retry.run(() -> guard.execute(idempotent, () -> {
             try {
                 return new StoredResponse(success.value(), json.writeValueAsString(action.get()));
             } catch (LedgerException e) {
-                ProblemDetail problem = Problems.refused(e);
+                ProblemDetail problem = Problems.refusedChange(e);
                 if (problem.getStatus() != HttpStatus.UNPROCESSABLE_CONTENT.value()) {
                     throw e;
                 }
                 return new StoredResponse(problem.getStatus(), json.writeValueAsString(Problems.body(problem, path)));
             }
-        });
+        }));
         return ResponseEntity.status(response.status())
                 .contentType(response.isSuccess() ? MediaType.APPLICATION_JSON : MediaType.APPLICATION_PROBLEM_JSON)
                 .body(response.body());
