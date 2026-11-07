@@ -78,6 +78,48 @@ public record Account(
     }
 
     /**
+     * This customer account with a hold of {@code amountMinor} more (12 §3.1, ADR-005): available goes down, booked
+     * stays. The version stays; the repository bumps it when it writes the row.
+     *
+     * @throws LedgerException {@code CUSTOMER_ID_MISSING}, {@code ACCOUNT_BLOCKED}, {@code ACCOUNT_CLOSED},
+     *     {@code INSUFFICIENT_FUNDS}
+     */
+    public Account placeHold(long amountMinor) {
+        if (kind != AccountKind.CUSTOMER) {
+            throw new IllegalStateException("technical accounts take no holds (ADR-005)");
+        }
+        if (customerId == null) {
+            // Q-02: never move money of an account sanctions screening cannot group by customer
+            throw new LedgerException(LedgerError.CUSTOMER_ID_MISSING, "the account has no customer number");
+        }
+        switch (status) {
+            case BLOCKED -> throw new LedgerException(LedgerError.ACCOUNT_BLOCKED, "the account is blocked");
+            case CLOSED -> throw new LedgerException(LedgerError.ACCOUNT_CLOSED, "the account is closed");
+            case OPEN -> { }
+        }
+        if (availableMinor() < amountMinor) {
+            throw new LedgerException(LedgerError.INSUFFICIENT_FUNDS, "the available balance does not cover the hold");
+        }
+        return withHeld(Math.addExact(heldMinor, amountMinor));
+    }
+
+    /**
+     * This customer account with a hold of {@code amountMinor} less: the money is available again. No status check:
+     * a release is a compensation (12 §3.1).
+     */
+    public Account releaseHold(long amountMinor) {
+        if (amountMinor > heldMinor) {
+            throw new IllegalStateException("releasing more than is held");
+        }
+        return withHeld(heldMinor - amountMinor);
+    }
+
+    private Account withHeld(long held) {
+        return new Account(accountId, iban, kind, customerId, holder, status, activeBlockReasons, currency, bookedMinor,
+                held, version, revision, openedAt, closedAt);
+    }
+
+    /**
      * Adds a block of {@code reason} (12 §3.2): the account is {@code BLOCKED}, the revision one higher. A reason
      * already active is a no-op; {@code SANCTIONS} replaces an active {@code SANCTIONS_PROVISIONAL} in the same change.
      *

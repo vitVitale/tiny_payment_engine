@@ -9,6 +9,14 @@ public enum LedgerError {
     /** A technical account where the operation needs a customer account. */
     ACCOUNT_NOT_CUSTOMER,
     ACCOUNT_CLOSED,
+    /** The account has an active block: no debits (holds). */
+    ACCOUNT_BLOCKED,
+    /** No hold with this id (reads, 404). */
+    HOLD_NOT_FOUND,
+    /** The hold was released, or tombstoned before it was created (ADR-009); 409. */
+    HOLD_RELEASED,
+    /** The hold was settled: the money has left; 409. */
+    HOLD_SETTLED,
     /** A back-office operator adding or lifting a {@code SANCTIONS*} block (§3.2); 403. */
     SANCTIONS_BLOCK_PROTECTED,
     /** The caller may not touch blocks of this reason at all, e.g. risk-service and {@code OPERATOR}; 403. */

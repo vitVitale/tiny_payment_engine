@@ -1,5 +1,6 @@
 package com.tpe.ledgerservice.infrastructure.security;
 
+import com.tpe.ledgerservice.api.InternalApi;
 import com.tpe.ledgerservice.api.Problems;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
@@ -46,6 +47,8 @@ class SecurityConfiguration {
                 .authorizeHttpRequests(requests -> requests
                         .requestMatchers("/actuator/health/**", "/v3/api-docs", "/v3/api-docs/**", "/error")
                         .permitAll()
+                        // @InternalApi: network isolation only until M5 (00 §12.1, ADR-012)
+                        .requestMatchers(InternalApi.POSTING_API_PATHS).permitAll()
                         .anyRequest().authenticated())
                 .oauth2ResourceServer(server -> server
                         .jwt(jwt -> jwt.jwtAuthenticationConverter(staffRoles()))
