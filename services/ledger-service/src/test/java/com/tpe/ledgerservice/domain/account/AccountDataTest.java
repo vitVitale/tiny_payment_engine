@@ -8,6 +8,7 @@ import com.tpe.ledgerservice.domain.LedgerException;
 import com.tpe.paymentdomain.Iban;
 import java.time.Instant;
 import java.time.LocalDate;
+import java.util.List;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -107,7 +108,7 @@ class AccountDataTest {
     void availableBalanceIsBookedMinusHeld() {
         Account account = new Account(UUID.randomUUID(), new IbanGenerator("10010010").generate(3),
                 AccountKind.CUSTOMER, new CustomerId("C1"), Holder.of(HolderType.PERSON, "A", null, null, null),
-                AccountStatus.OPEN, Account.EUR, 10_000, 2_500, 0, 1, Instant.EPOCH, null);
+                AccountStatus.OPEN, List.of(), Account.EUR, 10_000, 2_500, 0, 1, Instant.EPOCH, null);
 
         assertThat(account.availableMinor()).isEqualTo(7_500);
     }
@@ -116,7 +117,7 @@ class AccountDataTest {
     void anAccountInAnotherCurrencyThanEuroIsRefused() {
         assertThatThrownBy(() -> new Account(UUID.randomUUID(), new IbanGenerator("10010010").generate(3),
                 AccountKind.CUSTOMER, new CustomerId("C1"), Holder.of(HolderType.PERSON, "A", null, null, null),
-                AccountStatus.OPEN, "USD", 0, 0, 0, 1, Instant.EPOCH, null))
+                AccountStatus.OPEN, List.of(), "USD", 0, 0, 0, 1, Instant.EPOCH, null))
                 .isInstanceOf(IllegalArgumentException.class);
     }
 }

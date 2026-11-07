@@ -46,6 +46,28 @@ public final class StaffTokens {
         return jwt.serialize();
     }
 
+    /**
+     * A service's client-credentials token as ADR-012 describes it: {@code sub} = {@code client_id} = {@code clientId},
+     * the {@code scopes} space-separated in {@code scope}, no roles. Valid for 5 minutes.
+     */
+    public static String serviceToken(String clientId, String... scopes) {
+        var claims = new JWTClaimsSet.Builder()
+                .subject(clientId)
+                .issuer("http://localhost:8099/default")
+                .claim("client_id", clientId)
+                .claim("scope", String.join(" ", scopes))
+                .issueTime(new Date())
+                .expirationTime(Date.from(Instant.now().plusSeconds(300)))
+                .build();
+        var jwt = new SignedJWT(new JWSHeader(JWSAlgorithm.RS256), claims);
+        try {
+            jwt.sign(new RSASSASigner(KEYS.getPrivate()));
+        } catch (JOSEException e) {
+            throw new IllegalStateException(e);
+        }
+        return jwt.serialize();
+    }
+
     private static KeyPair rsaKeys() {
         try {
             var generator = KeyPairGenerator.getInstance("RSA");

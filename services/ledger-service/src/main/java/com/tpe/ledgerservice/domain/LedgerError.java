@@ -8,6 +8,11 @@ public enum LedgerError {
     ACCOUNT_NOT_FOUND,
     /** A technical account where the operation needs a customer account. */
     ACCOUNT_NOT_CUSTOMER,
+    ACCOUNT_CLOSED,
+    /** A back-office operator adding or lifting a {@code SANCTIONS*} block (§3.2); 403. */
+    SANCTIONS_BLOCK_PROTECTED,
+    /** The caller may not touch blocks of this reason at all, e.g. risk-service and {@code OPERATOR}; 403. */
+    FORBIDDEN,
     /** A customer account without a customer number (Q-02). */
     CUSTOMER_ID_MISSING,
     /** A debit beyond the available balance. */

@@ -97,6 +97,51 @@
         "tags" : [ "account-controller" ]
       }
     },
+    "/v1/accounts/{accountId}/block" : {
+      "post" : {
+        "operationId" : "block",
+        "parameters" : [ {
+          "in" : "path",
+          "name" : "accountId",
+          "required" : true,
+          "schema" : {
+            "type" : "string",
+            "format" : "uuid"
+          }
+        }, {
+          "description" : "At most 200 characters; a retry replays the stored response",
+          "in" : "header",
+          "name" : "Idempotency-Key",
+          "required" : true,
+          "schema" : {
+            "type" : "string"
+          }
+        } ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/BlockRequest"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "200" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/AccountResponse"
+                }
+              }
+            },
+            "description" : "Blocked"
+          }
+        },
+        "tags" : [ "account-controller" ]
+      }
+    },
     "/v1/accounts/{accountId}/entries" : {
       "get" : {
         "operationId" : "entries",
@@ -191,6 +236,77 @@
         },
         "tags" : [ "funding-controller" ]
       }
+    },
+    "/v1/accounts/{accountId}/unblock" : {
+      "post" : {
+        "operationId" : "unblock",
+        "parameters" : [ {
+          "in" : "path",
+          "name" : "accountId",
+          "required" : true,
+          "schema" : {
+            "type" : "string",
+            "format" : "uuid"
+          }
+        }, {
+          "description" : "At most 200 characters; a retry replays the stored response",
+          "in" : "header",
+          "name" : "Idempotency-Key",
+          "required" : true,
+          "schema" : {
+            "type" : "string"
+          }
+        } ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/BlockRequest"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "200" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/AccountResponse"
+                }
+              }
+            },
+            "description" : "Unblocked"
+          }
+        },
+        "tags" : [ "account-controller" ]
+      }
+    },
+    "/v1/customers/{customerId}/accounts" : {
+      "get" : {
+        "operationId" : "accounts",
+        "parameters" : [ {
+          "in" : "path",
+          "name" : "customerId",
+          "required" : true,
+          "schema" : {
+            "type" : "string"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/CustomerAccountsResponse"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "tags" : [ "customer-controller" ]
+      }
     }
   },
   "components" : {
@@ -201,6 +317,13 @@
           "accountId" : {
             "type" : "string",
             "format" : "uuid"
+          },
+          "activeBlockReasons" : {
+            "type" : "array",
+            "items" : {
+              "type" : "string",
+              "enum" : [ "SANCTIONS_PROVISIONAL", "SANCTIONS", "OPERATOR" ]
+            }
           },
           "availableBalanceMinor" : {
             "type" : "integer",
@@ -237,6 +360,28 @@
           "status" : {
             "type" : "string",
             "enum" : [ "OPEN", "BLOCKED", "CLOSED" ]
+          }
+        }
+      },
+      "BlockRequest" : {
+        "type" : "object",
+        "properties" : {
+          "comment" : {
+            "type" : "string"
+          },
+          "reason" : {
+            "type" : "string"
+          }
+        }
+      },
+      "CustomerAccountsResponse" : {
+        "type" : "object",
+        "properties" : {
+          "accounts" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/AccountResponse"
+            }
           }
         }
       },
@@ -389,7 +534,7 @@
     "securitySchemes" : {
       "staffJwt" : {
         "bearerFormat" : "JWT",
-        "description" : "roles claim: BACKOFFICE_OPERATOR, COMPLIANCE_OFFICER",
+        "description" : "staff: roles claim BACKOFFICE_OPERATOR, COMPLIANCE_OFFICER; risk-service: scope ledger:sanctions-block, ledger:customer-accounts",
         "scheme" : "bearer",
         "type" : "http"
       }

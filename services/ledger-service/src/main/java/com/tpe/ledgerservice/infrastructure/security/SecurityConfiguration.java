@@ -4,6 +4,8 @@ import com.tpe.ledgerservice.api.Problems;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import java.io.IOException;
+import java.util.ArrayList;
+import java.util.Collection;
 import java.util.Map;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -14,6 +16,7 @@ import org.springframework.security.config.annotation.method.configuration.Enabl
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configurers.AbstractHttpConfigurer;
 import org.springframework.security.config.http.SessionCreationPolicy;
+import org.springframework.security.core.GrantedAuthority;
 import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationConverter;
 import org.springframework.security.oauth2.server.resource.authentication.JwtGrantedAuthoritiesConverter;
 import org.springframework.security.oauth2.server.resource.web.BearerTokenAuthenticationEntryPoint;
@@ -54,12 +57,22 @@ class SecurityConfiguration {
                 .build();
     }
 
+    /**
+     * Staff roles as {@code ROLE_*}, and the scopes of service client-credentials tokens (ADR-012, e.g. risk-service's
+     * {@code ledger:sanctions-block}) as {@code SCOPE_*}.
+     */
     static JwtAuthenticationConverter staffRoles() {
-        var authorities = new JwtGrantedAuthoritiesConverter();
-        authorities.setAuthoritiesClaimName(ROLES_CLAIM);
-        authorities.setAuthorityPrefix("ROLE_");
+        var roles = new JwtGrantedAuthoritiesConverter();
+        roles.setAuthoritiesClaimName(ROLES_CLAIM);
+        roles.setAuthorityPrefix("ROLE_");
+        // the default: the scope / scp claim as SCOPE_*
+        var scopes = new JwtGrantedAuthoritiesConverter();
         var converter = new JwtAuthenticationConverter();
-        converter.setJwtGrantedAuthoritiesConverter(authorities);
+        converter.setJwtGrantedAuthoritiesConverter(jwt -> {
+            Collection<GrantedAuthority> authorities = new ArrayList<>(roles.convert(jwt));
+            authorities.addAll(scopes.convert(jwt));
+            return authorities;
+        });
         return converter;
     }
 
