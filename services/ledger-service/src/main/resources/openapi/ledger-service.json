@@ -429,6 +429,98 @@
         "security" : [ ],
         "tags" : [ "hold-controller" ]
       }
+    },
+    "/v1/holds/{holdId}/settle" : {
+      "post" : {
+        "operationId" : "settle",
+        "parameters" : [ {
+          "in" : "path",
+          "name" : "holdId",
+          "required" : true,
+          "schema" : {
+            "type" : "string",
+            "format" : "uuid"
+          }
+        }, {
+          "description" : "hold-settle:<holdId>; a retry replays the stored response",
+          "in" : "header",
+          "name" : "Idempotency-Key",
+          "required" : true,
+          "schema" : {
+            "type" : "string"
+          }
+        } ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "type" : "object",
+                "additionalProperties" : { }
+              }
+            }
+          }
+        },
+        "responses" : {
+          "200" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/SettlementResponse"
+                }
+              }
+            },
+            "description" : "Settled"
+          }
+        },
+        "security" : [ ],
+        "tags" : [ "hold-controller" ]
+      }
+    },
+    "/v1/holds/{holdId}/settle-on-us" : {
+      "post" : {
+        "operationId" : "settleOnUs",
+        "parameters" : [ {
+          "in" : "path",
+          "name" : "holdId",
+          "required" : true,
+          "schema" : {
+            "type" : "string",
+            "format" : "uuid"
+          }
+        }, {
+          "description" : "hold-settle-on-us:<holdId>; a retry replays the stored response",
+          "in" : "header",
+          "name" : "Idempotency-Key",
+          "required" : true,
+          "schema" : {
+            "type" : "string"
+          }
+        } ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/SettleOnUsRequest"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "200" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/SettlementResponse"
+                }
+              }
+            },
+            "description" : "Settled on-us"
+          }
+        },
+        "security" : [ ],
+        "tags" : [ "hold-controller" ]
+      }
     }
   },
   "components" : {
@@ -610,6 +702,10 @@
             "type" : "string",
             "format" : "uuid"
           },
+          "journalEntryId" : {
+            "type" : "string",
+            "format" : "uuid"
+          },
           "paymentId" : {
             "type" : "string",
             "format" : "uuid"
@@ -722,6 +818,39 @@
           },
           "txId" : {
             "type" : "string"
+          }
+        }
+      },
+      "SettleOnUsRequest" : {
+        "type" : "object",
+        "properties" : {
+          "creditorIban" : {
+            "type" : "string"
+          }
+        }
+      },
+      "SettlementResponse" : {
+        "type" : "object",
+        "properties" : {
+          "creditorAccountId" : {
+            "type" : "string",
+            "format" : "uuid"
+          },
+          "holdId" : {
+            "type" : "string",
+            "format" : "uuid"
+          },
+          "journalEntryId" : {
+            "type" : "string",
+            "format" : "uuid"
+          },
+          "settledAt" : {
+            "type" : "string",
+            "format" : "date-time"
+          },
+          "status" : {
+            "type" : "string",
+            "enum" : [ "ACTIVE", "SETTLED", "RELEASED" ]
           }
         }
       }

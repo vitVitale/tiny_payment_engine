@@ -5,6 +5,7 @@ import com.tpe.ledgerservice.api.IdempotentExecutor.Outcome;
 import com.tpe.ledgerservice.api.InternalApi;
 import com.tpe.ledgerservice.application.reservation.HoldCreation;
 import com.tpe.ledgerservice.application.reservation.HoldService;
+import com.tpe.ledgerservice.application.reservation.SettlementService;
 import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.media.Content;
 import io.swagger.v3.oas.annotations.media.Schema;
@@ -26,7 +27,8 @@ import org.springframework.web.bind.annotation.RestController;
 
 /**
  * Holds of the Posting API (specs/12-ledger-service.md §3.1), for payment-orchestrator. Mutating calls go through the
- * idempotency guard; the orchestrator's keys are {@code hold-create:<holdId>} and {@code hold-release:<holdId>}.
+ * idempotency guard; the orchestrator's keys are {@code hold-create:<holdId>}, {@code hold-release:<holdId>},
+ * {@code hold-settle:<holdId>} and {@code hold-settle-on-us:<holdId>}.
  */
 @InternalApi
 @RestController
@@ -36,10 +38,12 @@ import org.springframework.web.bind.annotation.RestController;
 class HoldController {
 
     private final HoldService holds;
+    private final SettlementService settlements;
     private final IdempotentExecutor idempotent;
 
-    HoldController(HoldService holds, IdempotentExecutor idempotent) {
+    HoldController(HoldService holds, SettlementService settlements, IdempotentExecutor idempotent) {
         this.holds = holds;
+        this.settlements = settlements;
         this.idempotent = idempotent;
     }
 
@@ -71,6 +75,35 @@ class HoldController {
             @RequestBody(required = false) Map<String, Object> body, HttpServletRequest http) {
         return idempotent.execute(idempotencyKey, http, body == null ? Map.of() : body, HttpStatus.OK,
                 () -> HoldResponse.of(holds.release(holdId)));
+    }
+
+    /**
+     * Dr payer / Cr CSM settlement account, whatever the payer's status; already settled → {@code 200} with the same
+     * result.
+     */
+    @PostMapping("/{holdId}/settle")
+    @ApiResponse(responseCode = "200", description = "Settled",
+            content = @Content(schema = @Schema(implementation = SettlementResponse.class)))
+    ResponseEntity<String> settle(
+            @PathVariable UUID holdId,
+            @Parameter(required = true, description = "hold-settle:<holdId>; a retry replays the stored response")
+            @RequestHeader(name = IdempotentExecutor.IDEMPOTENCY_KEY, required = false) String idempotencyKey,
+            @RequestBody(required = false) Map<String, Object> body, HttpServletRequest http) {
+        return idempotent.execute(idempotencyKey, http, body == null ? Map.of() : body, HttpStatus.OK,
+                () -> SettlementResponse.of(settlements.settle(holdId)));
+    }
+
+    /** Dr payer / Cr payee after the payee check; a refusal ({@code 422}) leaves the hold {@code ACTIVE}. */
+    @PostMapping("/{holdId}/settle-on-us")
+    @ApiResponse(responseCode = "200", description = "Settled on-us",
+            content = @Content(schema = @Schema(implementation = SettlementResponse.class)))
+    ResponseEntity<String> settleOnUs(
+            @PathVariable UUID holdId,
+            @Parameter(required = true, description = "hold-settle-on-us:<holdId>; a retry replays the stored response")
+            @RequestHeader(name = IdempotentExecutor.IDEMPOTENCY_KEY, required = false) String idempotencyKey,
+            @RequestBody SettleOnUsRequest request, HttpServletRequest http) {
+        return idempotent.execute(idempotencyKey, http, request, HttpStatus.OK,
+                () -> SettlementResponse.of(settlements.settleOnUs(holdId, request.toIban())));
     }
 
     @GetMapping("/{holdId}")

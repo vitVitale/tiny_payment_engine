@@ -88,6 +88,33 @@ public record Account(
         if (kind != AccountKind.CUSTOMER) {
             throw new IllegalStateException("technical accounts take no holds (ADR-005)");
         }
+        requireOpenWithCustomerNumber();
+        if (availableMinor() < amountMinor) {
+            throw new LedgerException(LedgerError.INSUFFICIENT_FUNDS, "the available balance does not cover the hold");
+        }
+        return withHeld(Math.addExact(heldMinor, amountMinor));
+    }
+
+    /**
+     * This account, if it may be credited by an on-us settlement (12 §3.1): a customer account with a customer number,
+     * {@code OPEN}. The caller has checked it is a customer account.
+     *
+     * @throws LedgerException {@code CUSTOMER_ID_MISSING}, {@code ACCOUNT_BLOCKED}, {@code ACCOUNT_CLOSED}
+     */
+    public Account requireOnUsPayee() {
+        if (kind != AccountKind.CUSTOMER) {
+            throw new IllegalStateException("a technical account is never an on-us payee");
+        }
+        requireOpenWithCustomerNumber();
+        return this;
+    }
+
+    /** {@link #requireOnUsPayee} as a question: whether this account may be credited on-us now. */
+    public boolean isOnUsPayee() {
+        return kind == AccountKind.CUSTOMER && customerId != null && status == AccountStatus.OPEN;
+    }
+
+    private void requireOpenWithCustomerNumber() {
         if (customerId == null) {
             // Q-02: never move money of an account sanctions screening cannot group by customer
             throw new LedgerException(LedgerError.CUSTOMER_ID_MISSING, "the account has no customer number");
@@ -97,10 +124,6 @@ public record Account(
             case CLOSED -> throw new LedgerException(LedgerError.ACCOUNT_CLOSED, "the account is closed");
             case OPEN -> { }
         }
-        if (availableMinor() < amountMinor) {
-            throw new LedgerException(LedgerError.INSUFFICIENT_FUNDS, "the available balance does not cover the hold");
-        }
-        return withHeld(Math.addExact(heldMinor, amountMinor));
     }
 
     /**

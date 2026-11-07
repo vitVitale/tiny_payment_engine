@@ -32,6 +32,35 @@ class JournalEntryTest {
     }
 
     @Test
+    void aSettledHoldDebitsThePayerAndCreditsTheCsmSettlementAccount() {
+        UUID entryId = UUID.randomUUID();
+        UUID paymentId = UUID.randomUUID();
+
+        JournalEntry entry = JournalEntry.paymentOut(entryId, CUSTOMER, 12_345, paymentId, "TPE-TX-1", AT);
+
+        assertThat(entry.type()).isEqualTo(EntryType.PAYMENT_OUT);
+        assertThat(entry.paymentId()).isEqualTo(paymentId);
+        assertThat(entry.txId()).isEqualTo("TPE-TX-1");
+        assertThat(entry.postings()).containsExactly(
+                new Posting(CUSTOMER, Side.DR, 12_345),
+                new Posting(TechnicalAccounts.CSM_SETTLEMENT_ID, Side.CR, 12_345));
+    }
+
+    @Test
+    void anOnUsPaymentDebitsThePayerAndCreditsThePayee() {
+        UUID paymentId = UUID.randomUUID();
+
+        JournalEntry entry = JournalEntry.onUs(UUID.randomUUID(), CUSTOMER, OTHER, 500, paymentId, "TPE-TX-2", AT);
+
+        assertThat(entry.type()).isEqualTo(EntryType.ON_US);
+        assertThat(entry.paymentId()).isEqualTo(paymentId);
+        assertThat(entry.postings()).containsExactly(
+                new Posting(CUSTOMER, Side.DR, 500),
+                new Posting(OTHER, Side.CR, 500));
+        assertThat(entry.creditedAccount()).isEqualTo(OTHER);
+    }
+
+    @Test
     void anEntryWhosePostingsDoNotBalanceIsRefused() {
         var postings = List.of(new Posting(CUSTOMER, Side.DR, 100), new Posting(OTHER, Side.CR, 99));
 
