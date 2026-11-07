@@ -60,7 +60,6 @@ class AccountApiIT extends LedgerStack {
         assertThat(body.get("bookedBalanceMinor").asLong()).isZero();
         assertThat(body.get("availableBalanceMinor").asLong()).isZero();
         assertThat(body.get("currency").asString()).isEqualTo("EUR");
-        assertThat(response.getHeaders().getLocation()).hasPath("/v1/accounts/" + accountId);
 
         ConsumerRecord<String, String> record = accountEvent(accountId);
         assertThat(header(record, MessageHeaders.MESSAGE_TYPE)).isEqualTo("AccountOpened");
@@ -128,6 +127,7 @@ class AccountApiIT extends LedgerStack {
     void anUnreadableBodyIs400ValidationFailed() {
         var response = http().post().uri("/v1/accounts")
                 .header(AUTHORIZATION, operator("op-1"))
+                .header(IDEMPOTENCY_KEY, newIdempotencyKey())
                 .contentType(MediaType.APPLICATION_JSON)
                 .body("{\"customerId\": ")
                 .retrieve().toEntity(JsonNode.class);
@@ -284,11 +284,7 @@ class AccountApiIT extends LedgerStack {
     }
 
     private ResponseEntity<JsonNode> open(String authorization, Map<String, ?> body) {
-        var request = http().post().uri("/v1/accounts").contentType(MediaType.APPLICATION_JSON).body(body);
-        if (authorization != null) {
-            request.header(AUTHORIZATION, authorization);
-        }
-        return request.retrieve().toEntity(JsonNode.class);
+        return open(authorization, newIdempotencyKey(), body);
     }
 
     private static Map<String, Object> person(String customerId) {

@@ -36,6 +36,15 @@
       },
       "post" : {
         "operationId" : "open",
+        "parameters" : [ {
+          "description" : "At most 200 characters; a retry replays the stored response",
+          "in" : "header",
+          "name" : "Idempotency-Key",
+          "required" : true,
+          "schema" : {
+            "type" : "string"
+          }
+        } ],
         "requestBody" : {
           "content" : {
             "application/json" : {

@@ -1,13 +1,17 @@
 package com.tpe.ledgerservice.api;
 
+import com.tpe.ledgerservice.domain.LedgerError;
+import com.tpe.ledgerservice.domain.LedgerException;
 import java.net.URI;
+import java.util.LinkedHashMap;
 import java.util.Locale;
+import java.util.Map;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ProblemDetail;
 
 /**
- * RFC 9457 Problem Details with the {@code code} extension (specs/00-engineering-baseline.md §7), for the MVC advice
- * and for the security filters, which answer before any controller.
+ * RFC 9457 Problem Details with the {@code code} extension (specs/00-engineering-baseline.md §7), for the MVC advice,
+ * the idempotency executor, which stores them, and the security filters, which answer before any controller.
  */
 public final class Problems {
 
@@ -20,8 +24,39 @@ public final class Problems {
         return problem;
     }
 
+    /** A business refusal with the status of specs/12-ledger-service.md §3.4. */
+    public static ProblemDetail refused(LedgerException e) {
+        return problem(status(e.error()), e.error().name(), e.getMessage());
+    }
+
+    /**
+     * The Account API's statuses; {@code ACCOUNT_NOT_FOUND} is {@code 404} on its reads (§3.4) and will be
+     * {@code 422} on the Posting API.
+     */
+    private static HttpStatus status(LedgerError error) {
+        return switch (error) {
+            case ACCOUNT_NOT_FOUND -> HttpStatus.NOT_FOUND;
+            case ACCOUNT_NOT_CUSTOMER, CUSTOMER_ID_MISSING -> HttpStatus.UNPROCESSABLE_CONTENT;
+            case IDEMPOTENCY_CONFLICT -> HttpStatus.CONFLICT;
+        };
+    }
+
     /** {@code CUSTOMER_ID_MISSING} → {@code https://tpe.example/problems/customer-id-missing}. */
     public static URI type(String code) {
         return URI.create("https://tpe.example/problems/" + code.toLowerCase(Locale.ROOT).replace('_', '-'));
+    }
+
+    /** The JSON members of {@code problem} as Spring MVC writes them, for code that writes the body itself. */
+    public static Map<String, Object> body(ProblemDetail problem, String instance) {
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("type", problem.getType().toString());
+        body.put("title", problem.getTitle());
+        body.put("status", problem.getStatus());
+        body.put("detail", problem.getDetail());
+        body.put("instance", instance);
+        if (problem.getProperties() != null) {
+            body.putAll(problem.getProperties());
+        }
+        return body;
     }
 }

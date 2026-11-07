@@ -10,7 +10,6 @@ import java.util.UUID;
 import java.util.stream.Collectors;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import tools.jackson.databind.JsonNode;
 
@@ -63,11 +62,8 @@ class TechnicalAccountsIT extends LedgerStack {
     @Test
     void areNeverPublishedToAccountsEvents() {
         String customerId = "CUST-TECH-" + UUID.randomUUID().toString().substring(0, 8);
-        var opened = http().post().uri("/v1/accounts")
-                .header(AUTHORIZATION, operator("op-1"))
-                .contentType(MediaType.APPLICATION_JSON)
-                .body(Map.of("customerId", customerId, "holder", Map.of("type", "PERSON", "name", "Anna Schmidt")))
-                .retrieve().toBodilessEntity();
+        var opened = open(operator("op-1"), newIdempotencyKey(),
+                Map.of("customerId", customerId, "holder", Map.of("type", "PERSON", "name", "Anna Schmidt")));
         assertThat(opened.getStatusCode().value()).isEqualTo(201);
 
         assertThat(jdbc.sql("SELECT count(*) FROM outbox WHERE payload -> 'account' ->> 'customerId' = ?")

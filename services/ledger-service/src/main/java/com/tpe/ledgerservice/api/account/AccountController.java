@@ -1,12 +1,16 @@
 package com.tpe.ledgerservice.api.account;
 
 import com.tpe.ledgerservice.api.FieldError;
+import com.tpe.ledgerservice.api.IdempotentExecutor;
 import com.tpe.ledgerservice.api.ValidationFailedException;
 import com.tpe.ledgerservice.application.account.AccountService;
-import com.tpe.ledgerservice.domain.account.Account;
 import com.tpe.paymentdomain.DomainValidationException;
 import com.tpe.paymentdomain.Iban;
-import java.net.URI;
+import io.swagger.v3.oas.annotations.Parameter;
+import io.swagger.v3.oas.annotations.media.Content;
+import io.swagger.v3.oas.annotations.media.Schema;
+import io.swagger.v3.oas.annotations.responses.ApiResponse;
+import jakarta.servlet.http.HttpServletRequest;
 import java.util.List;
 import java.util.UUID;
 import org.springframework.http.HttpStatus;
@@ -19,6 +23,7 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.ResponseStatus;
@@ -30,20 +35,29 @@ import org.springframework.web.bind.annotation.RestController;
 class AccountController {
 
     private final AccountService accounts;
+    private final IdempotentExecutor idempotent;
 
-    AccountController(AccountService accounts) {
+    AccountController(AccountService accounts, IdempotentExecutor idempotent) {
         this.accounts = accounts;
+        this.idempotent = idempotent;
     }
 
-    /** The JWT {@code sub} is the audit actor (LED-AC-18). */
+    /**
+     * Idempotent by {@code Idempotency-Key} (12 §6.1): a retry replays the stored {@code 201} or {@code 422}. The JWT
+     * {@code sub} is the audit actor (LED-AC-18).
+     */
     @PostMapping
     @ResponseStatus(HttpStatus.CREATED)
     @PreAuthorize("hasRole('BACKOFFICE_OPERATOR')")
-    ResponseEntity<AccountResponse> open(@RequestBody OpenAccountRequest request,
-            @AuthenticationPrincipal Jwt operator) {
-        Account account = accounts.open(request.toCommand(), operator.getSubject());
-        return ResponseEntity.created(URI.create("/v1/accounts/" + account.accountId()))
-                .body(AccountResponse.of(account));
+    @ApiResponse(responseCode = "201", description = "Created",
+            content = @Content(schema = @Schema(implementation = AccountResponse.class)))
+    ResponseEntity<String> open(
+            // required: absent, it is our 400 IDEMPOTENCY_KEY_MISSING rather than Spring's
+            @Parameter(required = true, description = "At most 200 characters; a retry replays the stored response")
+            @RequestHeader(name = IdempotentExecutor.IDEMPOTENCY_KEY, required = false) String idempotencyKey,
+            @RequestBody OpenAccountRequest request, @AuthenticationPrincipal Jwt operator, HttpServletRequest http) {
+        return idempotent.execute(idempotencyKey, http, request, HttpStatus.CREATED,
+                () -> AccountResponse.of(accounts.open(request.toCommand(), operator.getSubject())));
     }
 
     @GetMapping("/{accountId}")
