@@ -18,6 +18,7 @@ class HoldTest {
     private static final UUID HOLD = UUID.fromString("0192f0e4-0000-7000-8000-0000000000a1");
     private static final UUID ACCOUNT = UUID.fromString("0192f0e4-0000-7000-8000-0000000000b1");
     private static final UUID PAYMENT = UUID.fromString("0192f0e4-0000-7000-8000-0000000000c1");
+    private static final UUID ENTRY = UUID.fromString("0192f0e4-0000-7000-8000-0000000000d1");
 
     @Test
     void aNewHoldIsActiveWithItsAccountAndAmount() {
@@ -74,14 +75,14 @@ class HoldTest {
 
     @Test
     void aCreateOfASettledHoldIsHoldSettled() {
-        Hold settled = new Hold(HOLD, ACCOUNT, 100L, HoldStatus.SETTLED, PAYMENT, null, AT, LATER, false);
+        Hold settled = Hold.active(HOLD, ACCOUNT, 100, PAYMENT, null, AT).settle(ENTRY, LATER);
 
         assertRefused(() -> settled.replayFor(ACCOUNT, 100), LedgerError.HOLD_SETTLED);
     }
 
     @Test
     void onlyAnActiveHoldCanBeReleased() {
-        Hold settled = new Hold(HOLD, ACCOUNT, 100L, HoldStatus.SETTLED, PAYMENT, null, AT, LATER, false);
+        Hold settled = Hold.active(HOLD, ACCOUNT, 100, PAYMENT, null, AT).settle(ENTRY, LATER);
 
         assertRefused(() -> settled.release(LATER), LedgerError.HOLD_SETTLED);
     }
@@ -95,6 +96,41 @@ class HoldTest {
         assertThat(tombstone.release(LATER)).isSameAs(tombstone);
         assertThat(released.active()).isFalse();
         assertThat(tombstone.active()).isFalse();
+    }
+
+    @Test
+    void settlingAnActiveHoldFinalisesItWithItsJournalEntry() {
+        Hold settled = Hold.active(HOLD, ACCOUNT, 100, PAYMENT, "TPE-TX-1", AT).settle(ENTRY, LATER);
+
+        assertThat(settled.status()).isEqualTo(HoldStatus.SETTLED);
+        assertThat(settled.entryId()).isEqualTo(ENTRY);
+        assertThat(settled.finalisedAt()).isEqualTo(LATER);
+        assertThat(settled.amountMinor()).isEqualTo(100);
+        assertThat(settled.accountId()).isEqualTo(ACCOUNT);
+        assertThat(settled.active()).isFalse();
+    }
+
+    @Test
+    void settlingASettledHoldChangesNothing() {
+        Hold settled = Hold.active(HOLD, ACCOUNT, 100, PAYMENT, null, AT).settle(ENTRY, LATER);
+
+        assertThat(settled.settle(UUID.randomUUID(), LATER.plusSeconds(5))).isSameAs(settled);
+    }
+
+    @Test
+    void aReleasedOrTombstonedHoldCannotBeSettled() {
+        assertRefused(() -> Hold.tombstone(HOLD, AT).settle(ENTRY, LATER), LedgerError.HOLD_RELEASED);
+        assertRefused(() -> Hold.active(HOLD, ACCOUNT, 100, PAYMENT, null, AT).release(LATER).settle(ENTRY, LATER),
+                LedgerError.HOLD_RELEASED);
+    }
+
+    @Test
+    void anActiveOrReleasedHoldHasNoJournalEntry() {
+        Hold hold = Hold.active(HOLD, ACCOUNT, 100, PAYMENT, null, AT);
+
+        assertThat(hold.entryId()).isNull();
+        assertThat(hold.release(LATER).entryId()).isNull();
+        assertThat(Hold.tombstone(HOLD, AT).entryId()).isNull();
     }
 
     @Test

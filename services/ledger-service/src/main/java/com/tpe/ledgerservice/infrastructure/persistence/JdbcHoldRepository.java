@@ -16,6 +16,11 @@ import org.springframework.stereotype.Repository;
 @Repository
 class JdbcHoldRepository implements HoldRepository {
 
+    private static final String SELECT = """
+            SELECT hold_id, account_id, amount_minor, status, payment_id, tx_id, created_at, finalised_at, entry_id,
+                   tombstone
+              FROM holds WHERE hold_id = ?""";
+
     private final JdbcClient jdbc;
 
     JdbcHoldRepository(JdbcClient jdbc) {
@@ -24,12 +29,12 @@ class JdbcHoldRepository implements HoldRepository {
 
     @Override
     public Optional<Hold> find(UUID holdId) {
-        return jdbc.sql("""
-                SELECT hold_id, account_id, amount_minor, status, payment_id, tx_id, created_at, finalised_at, tombstone
-                  FROM holds WHERE hold_id = ?""")
-                .param(holdId)
-                .query(JdbcHoldRepository::hold)
-                .optional();
+        return jdbc.sql(SELECT).param(holdId).query(JdbcHoldRepository::hold).optional();
+    }
+
+    @Override
+    public Optional<Hold> findForUpdate(UUID holdId) {
+        return jdbc.sql(SELECT + " FOR UPDATE").param(holdId).query(JdbcHoldRepository::hold).optional();
     }
 
     @Override
@@ -61,6 +66,15 @@ class JdbcHoldRepository implements HoldRepository {
     }
 
     @Override
+    public boolean markSettled(Hold settled) {
+        return jdbc.sql("""
+                UPDATE holds SET status = 'SETTLED', finalised_at = ?, entry_id = ?
+                 WHERE hold_id = ? AND status = 'ACTIVE'""")
+                .params(utc(settled.finalisedAt()), settled.entryId(), settled.holdId())
+                .update() == 1;
+    }
+
+    @Override
     public int deleteTombstonesCreatedBefore(Instant cutoff, int limit) {
         return jdbc.sql("""
                 DELETE FROM holds WHERE hold_id IN (
@@ -79,6 +93,7 @@ class JdbcHoldRepository implements HoldRepository {
                 rs.getString("tx_id"),
                 rs.getObject("created_at", OffsetDateTime.class).toInstant(),
                 instant(rs.getObject("finalised_at", OffsetDateTime.class)),
+                rs.getObject("entry_id", UUID.class),
                 rs.getBoolean("tombstone"));
     }
 

@@ -6,8 +6,8 @@ import java.time.Instant;
 import java.util.UUID;
 
 /**
- * A hold (specs/12-ledger-service.md §3.1). A tombstone ({@code tombstone: true}) has no account and no amount; absent
- * optional fields are left out.
+ * A hold (specs/12-ledger-service.md §3.1), with the journal entry that settled it. A tombstone
+ * ({@code tombstone: true}) has no account and no amount; absent optional fields are left out.
  */
 record HoldResponse(
         UUID holdId,
@@ -18,10 +18,11 @@ record HoldResponse(
         String txId,
         Instant createdAt,
         Instant finalisedAt,
+        UUID journalEntryId,
         boolean tombstone) {
 
     static HoldResponse of(Hold hold) {
         return new HoldResponse(hold.holdId(), hold.accountId(), hold.status(), hold.amountMinor(), hold.paymentId(),
-                hold.txId(), hold.createdAt(), hold.finalisedAt(), hold.tombstone());
+                hold.txId(), hold.createdAt(), hold.finalisedAt(), hold.entryId(), hold.tombstone());
     }
 }

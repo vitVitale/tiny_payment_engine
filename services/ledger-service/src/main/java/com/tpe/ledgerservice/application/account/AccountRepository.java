@@ -5,6 +5,7 @@ import com.tpe.ledgerservice.domain.account.BlockReason;
 import com.tpe.ledgerservice.domain.account.CustomerId;
 import com.tpe.paymentdomain.Iban;
 import java.time.Instant;
+import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -23,6 +24,14 @@ public interface AccountRepository {
     Optional<Account> findById(UUID accountId);
 
     Optional<Account> findByIban(Iban iban);
+
+    /**
+     * Reads the accounts with {@code SELECT … FOR UPDATE}, locking their rows in ascending {@code account_id} order
+     * (12 §6.2), so two transactions locking the same accounts never deadlock on each other.
+     *
+     * @return the accounts found, in ascending {@code account_id} order
+     */
+    List<Account> lockForUpdate(Collection<UUID> accountIds);
 
     /** The customer accounts of a customer, in any status, oldest first. */
     List<Account> findByCustomerId(CustomerId customerId);

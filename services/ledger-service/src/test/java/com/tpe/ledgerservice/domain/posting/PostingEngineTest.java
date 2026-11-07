@@ -77,6 +77,37 @@ class PostingEngineTest {
                 .singleElement().extracting(Account::bookedMinor).isEqualTo(10L);
     }
 
+    /**
+     * Settle (12 §6.2): the hold is released and the entry debits what it held, so a balance held in full settles
+     * to zero; the CSM settlement account's row stays as it is.
+     */
+    @Test
+    void settlingAFullyHeldBalanceLeavesThePayerWithNothingBookedOrHeld() {
+        Account payer = customer(UUID.randomUUID(), 1_000, 1_000);
+        Account csm = technical(TechnicalAccounts.CSM_SETTLEMENT_ID);
+        JournalEntry entry = JournalEntry.paymentOut(UUID.randomUUID(), payer.accountId(), 1_000, null, null, AT);
+
+        List<Account> changed = PostingEngine.post(entry, List.of(payer.releaseHold(1_000), csm));
+
+        assertThat(changed).singleElement().satisfies(account -> {
+            assertThat(account.bookedMinor()).isZero();
+            assertThat(account.heldMinor()).isZero();
+        });
+    }
+
+    @Test
+    void settlingOnUsMovesTheHeldMoneyToThePayee() {
+        Account payer = customer(UUID.randomUUID(), 1_000, 300);
+        Account payee = customer(UUID.randomUUID(), 50, 0);
+        JournalEntry entry = JournalEntry.onUs(UUID.randomUUID(), payer.accountId(), payee.accountId(), 300, null,
+                null, AT);
+
+        List<Account> changed = PostingEngine.post(entry, List.of(payer.releaseHold(300), payee));
+
+        assertThat(changed).extracting(Account::bookedMinor).containsExactly(700L, 350L);
+        assertThat(changed).extracting(Account::heldMinor).containsExactly(0L, 0L);
+    }
+
     @Test
     void anAccountOfAPostingMustBeGiven() {
         Account customer = customer(UUID.randomUUID(), 0, 0);

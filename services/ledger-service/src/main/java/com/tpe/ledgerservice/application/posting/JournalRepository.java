@@ -3,6 +3,7 @@ package com.tpe.ledgerservice.application.posting;
 import com.tpe.ledgerservice.domain.posting.JournalEntry;
 import java.time.Instant;
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 
 /** {@code journal_entries} and {@code postings} (specs/12-ledger-service.md §5); postings are only ever inserted. */
@@ -10,6 +11,9 @@ public interface JournalRepository {
 
     /** Inserts the entry and its postings, in their order. */
     void insert(JournalEntry entry);
+
+    /** The entry with its postings, in their order. */
+    Optional<JournalEntry> find(UUID entryId);
 
     /**
      * The postings of an account, newest (highest {@code posting_id}) first.

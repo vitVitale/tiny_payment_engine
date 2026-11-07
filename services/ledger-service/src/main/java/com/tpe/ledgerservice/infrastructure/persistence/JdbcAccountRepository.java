@@ -17,6 +17,7 @@ import java.time.LocalDate;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.util.Arrays;
+import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -78,6 +79,15 @@ class JdbcAccountRepository implements AccountRepository {
     public Optional<Account> findById(UUID accountId) {
         return jdbc.sql(SELECT + " WHERE account_id = ?").param(accountId).query(JdbcAccountRepository::account)
                 .optional();
+    }
+
+    /** {@code ORDER BY} under {@code FOR UPDATE}: PostgreSQL locks the rows as the sorted scan returns them. */
+    @Override
+    public List<Account> lockForUpdate(Collection<UUID> accountIds) {
+        return jdbc.sql(SELECT + " WHERE a.account_id IN (:ids) ORDER BY a.account_id FOR UPDATE OF a")
+                .param("ids", accountIds)
+                .query(JdbcAccountRepository::account)
+                .list();
     }
 
     @Override

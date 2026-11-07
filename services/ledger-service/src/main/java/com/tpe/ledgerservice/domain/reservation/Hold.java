@@ -15,6 +15,7 @@ import java.util.UUID;
  * @param accountId {@code null} for a tombstone
  * @param amountMinor {@code null} for a tombstone
  * @param finalisedAt when it was settled or released, {@code null} while {@code ACTIVE}
+ * @param entryId the journal entry that settled it, {@code null} unless {@code SETTLED}
  */
 public record Hold(
         UUID holdId,
@@ -25,6 +26,7 @@ public record Hold(
         String txId,
         Instant createdAt,
         Instant finalisedAt,
+        UUID entryId,
         boolean tombstone) {
 
     public Hold {
@@ -40,12 +42,13 @@ public record Hold(
         if (amountMinor <= 0) {
             throw new IllegalArgumentException("a hold amount must be positive");
         }
-        return new Hold(holdId, accountId, amountMinor, HoldStatus.ACTIVE, paymentId, txId, createdAt, null, false);
+        return new Hold(holdId, accountId, amountMinor, HoldStatus.ACTIVE, paymentId, txId, createdAt, null, null,
+                false);
     }
 
     /** The record of a release that arrived before the create (ADR-009). */
     public static Hold tombstone(UUID holdId, Instant at) {
-        return new Hold(holdId, null, null, HoldStatus.RELEASED, null, null, at, at, true);
+        return new Hold(holdId, null, null, HoldStatus.RELEASED, null, null, at, at, null, true);
     }
 
     /**
@@ -79,9 +82,24 @@ public record Hold(
     public Hold release(Instant at) {
         return switch (status) {
             case ACTIVE -> new Hold(holdId, accountId, amountMinor, HoldStatus.RELEASED, paymentId, txId, createdAt,
-                    at, false);
+                    at, null, false);
             case SETTLED -> throw new LedgerException(LedgerError.HOLD_SETTLED, "the hold was settled");
             case RELEASED -> this;
+        };
+    }
+
+    /**
+     * The hold {@code SETTLED} at {@code at} by the journal entry {@code entryId}: the money it held has left. An
+     * already settled hold is returned as it is, with the entry that settled it first.
+     *
+     * @throws LedgerException {@code HOLD_RELEASED} (also for a tombstone): nothing is held any more
+     */
+    public Hold settle(UUID entryId, Instant at) {
+        return switch (status) {
+            case ACTIVE -> new Hold(holdId, accountId, amountMinor, HoldStatus.SETTLED, paymentId, txId, createdAt,
+                    at, Objects.requireNonNull(entryId, "entryId"), false);
+            case RELEASED -> throw new LedgerException(LedgerError.HOLD_RELEASED, "the hold was released");
+            case SETTLED -> this;
         };
     }
 

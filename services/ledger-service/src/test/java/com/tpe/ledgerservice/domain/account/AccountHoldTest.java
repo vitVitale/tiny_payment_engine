@@ -63,6 +63,27 @@ class AccountHoldTest {
     }
 
     @Test
+    void anOpenCustomerAccountWithACustomerNumberTakesAnOnUsCredit() {
+        Account payee = account(AccountStatus.OPEN, new CustomerId("C2"), 0, 0);
+
+        assertThat(payee.requireOnUsPayee()).isSameAs(payee);
+        assertThat(payee.isOnUsPayee()).isTrue();
+    }
+
+    @Test
+    void aBlockedClosedOrUnnumberedPayeeRefusesAnOnUsCredit() {
+        assertRefused(() -> account(AccountStatus.BLOCKED, new CustomerId("C2"), 0, 0).requireOnUsPayee(),
+                LedgerError.ACCOUNT_BLOCKED);
+        assertRefused(() -> account(AccountStatus.CLOSED, new CustomerId("C2"), 0, 0).requireOnUsPayee(),
+                LedgerError.ACCOUNT_CLOSED);
+        assertRefused(() -> account(AccountStatus.OPEN, null, 0, 0).requireOnUsPayee(),
+                LedgerError.CUSTOMER_ID_MISSING);
+        assertThat(account(AccountStatus.BLOCKED, new CustomerId("C2"), 0, 0).isOnUsPayee()).isFalse();
+        assertThat(account(AccountStatus.CLOSED, new CustomerId("C2"), 0, 0).isOnUsPayee()).isFalse();
+        assertThat(account(AccountStatus.OPEN, null, 0, 0).isOnUsPayee()).isFalse();
+    }
+
+    @Test
     void releasingMoreThanIsHeldIsAProgrammingError() {
         Account account = account(AccountStatus.OPEN, new CustomerId("C1"), 1_000, 300);
 

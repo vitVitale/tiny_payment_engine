@@ -49,6 +49,31 @@ public record JournalEntry(
                 new Posting(customerAccountId, Side.CR, amountMinor)));
     }
 
+    /** A settled hold (12 §6.2): Dr payer / Cr CSM settlement account. */
+    public static JournalEntry paymentOut(UUID entryId, UUID payerAccountId, long amountMinor, UUID paymentId,
+            String txId, Instant createdAt) {
+        return new JournalEntry(entryId, EntryType.PAYMENT_OUT, paymentId, txId, createdAt, List.of(
+                new Posting(payerAccountId, Side.DR, amountMinor),
+                new Posting(TechnicalAccounts.CSM_SETTLEMENT_ID, Side.CR, amountMinor)));
+    }
+
+    /** A hold settled on-us (12 §6.2): Dr payer / Cr payee, both our customers. */
+    public static JournalEntry onUs(UUID entryId, UUID payerAccountId, UUID payeeAccountId, long amountMinor,
+            UUID paymentId, String txId, Instant createdAt) {
+        return new JournalEntry(entryId, EntryType.ON_US, paymentId, txId, createdAt, List.of(
+                new Posting(payerAccountId, Side.DR, amountMinor),
+                new Posting(payeeAccountId, Side.CR, amountMinor)));
+    }
+
+    /**
+     * The account of the first credit posting: the payee of an {@code ON_US} entry, the CSM settlement account of a
+     * {@code PAYMENT_OUT} one.
+     */
+    public UUID creditedAccount() {
+        return postings.stream().filter(posting -> posting.side() == Side.CR).findFirst().orElseThrow()
+                .accountId();
+    }
+
     private static long total(List<Posting> postings, Side side) {
         long total = 0;
         for (Posting posting : postings) {
