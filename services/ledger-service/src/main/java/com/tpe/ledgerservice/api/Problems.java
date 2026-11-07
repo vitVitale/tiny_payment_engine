@@ -44,8 +44,9 @@ public final class Problems {
     private static HttpStatus status(LedgerError error) {
         return switch (error) {
             case ACCOUNT_NOT_FOUND -> HttpStatus.NOT_FOUND;
-            case ACCOUNT_NOT_CUSTOMER, CUSTOMER_ID_MISSING, INSUFFICIENT_FUNDS, CURRENCY_NOT_SUPPORTED ->
-                    HttpStatus.UNPROCESSABLE_CONTENT;
+            case ACCOUNT_NOT_CUSTOMER, ACCOUNT_CLOSED, CUSTOMER_ID_MISSING, INSUFFICIENT_FUNDS,
+                    CURRENCY_NOT_SUPPORTED -> HttpStatus.UNPROCESSABLE_CONTENT;
+            case SANCTIONS_BLOCK_PROTECTED, FORBIDDEN -> HttpStatus.FORBIDDEN;
             case IDEMPOTENCY_CONFLICT, CONCURRENT_MODIFICATION -> HttpStatus.CONFLICT;
         };
     }

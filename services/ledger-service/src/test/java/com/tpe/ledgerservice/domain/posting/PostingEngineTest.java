@@ -87,12 +87,13 @@ class PostingEngineTest {
 
     static Account customer(UUID accountId, long booked, long held) {
         return new Account(accountId, new Iban("DE89370400440532013000"), AccountKind.CUSTOMER,
-                new CustomerId("CUST-1"), holder(), AccountStatus.OPEN, Account.EUR, booked, held, 3, 1, AT, null);
+                new CustomerId("CUST-1"), holder(), AccountStatus.OPEN, List.of(), Account.EUR, booked, held, 3, 1,
+                AT, null);
     }
 
     static Account technical(UUID accountId) {
         return new Account(accountId, new Iban("DE89370400440532013000"), AccountKind.TECHNICAL, null, null,
-                AccountStatus.OPEN, Account.EUR, 0, 0, 0, 1, AT, null);
+                AccountStatus.OPEN, List.of(), Account.EUR, 0, 0, 0, 1, AT, null);
     }
 
     private static Holder holder() {

@@ -1,5 +1,6 @@
 package com.tpe.ledgerservice.api.account;
 
+import com.tpe.ledgerservice.api.Callers;
 import com.tpe.ledgerservice.api.FieldError;
 import com.tpe.ledgerservice.api.IdempotentExecutor;
 import com.tpe.ledgerservice.api.ValidationFailedException;
@@ -18,6 +19,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.security.core.Authentication;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -34,6 +36,9 @@ import org.springframework.web.bind.annotation.RestController;
 @RestController
 @RequestMapping(path = "/v1/accounts", produces = MediaType.APPLICATION_JSON_VALUE)
 class AccountController {
+
+    private static final String MAY_CHANGE_BLOCKS =
+            "hasAnyRole('BACKOFFICE_OPERATOR', 'COMPLIANCE_OFFICER') or hasAuthority('SCOPE_ledger:sanctions-block')";
 
     private final AccountService accounts;
     private final IdempotentExecutor idempotent;
@@ -59,6 +64,41 @@ class AccountController {
             @RequestBody OpenAccountRequest request, @AuthenticationPrincipal Jwt operator, HttpServletRequest http) {
         return idempotent.execute(idempotencyKey, http, request, HttpStatus.CREATED,
                 () -> AccountResponse.of(accounts.open(request.toCommand(), operator.getSubject())));
+    }
+
+    /**
+     * Adds a block (12 §3.2, UC-10). {@code OPERATOR} blocks are for back-office operators; {@code SANCTIONS*} ones
+     * for a compliance officer or risk-service ({@code ledger:sanctions-block}), anyone else gets
+     * {@code 403 SANCTIONS_BLOCK_PROTECTED}. A reason already active is a no-op {@code 200}.
+     */
+    @PostMapping("/{accountId}/block")
+    @PreAuthorize(MAY_CHANGE_BLOCKS)
+    @ApiResponse(responseCode = "200", description = "Blocked",
+            content = @Content(schema = @Schema(implementation = AccountResponse.class)))
+    ResponseEntity<String> block(
+            @PathVariable UUID accountId,
+            @Parameter(required = true, description = "At most 200 characters; a retry replays the stored response")
+            @RequestHeader(name = IdempotentExecutor.IDEMPOTENCY_KEY, required = false) String idempotencyKey,
+            @RequestBody BlockRequest request, Authentication caller, HttpServletRequest http) {
+        return idempotent.execute(idempotencyKey, http, request, HttpStatus.OK, () -> AccountResponse.of(
+                accounts.block(accountId, request.validReason(), request.comment(), Callers.of(caller)).account()));
+    }
+
+    /**
+     * Lifts the block of a reason (12 §3.2, UC-10), with the same rules per reason as {@link #block}; the account
+     * stays {@code BLOCKED} while other blocks remain. A reason that is not active is a no-op {@code 200}.
+     */
+    @PostMapping("/{accountId}/unblock")
+    @PreAuthorize(MAY_CHANGE_BLOCKS)
+    @ApiResponse(responseCode = "200", description = "Unblocked",
+            content = @Content(schema = @Schema(implementation = AccountResponse.class)))
+    ResponseEntity<String> unblock(
+            @PathVariable UUID accountId,
+            @Parameter(required = true, description = "At most 200 characters; a retry replays the stored response")
+            @RequestHeader(name = IdempotentExecutor.IDEMPOTENCY_KEY, required = false) String idempotencyKey,
+            @RequestBody BlockRequest request, Authentication caller, HttpServletRequest http) {
+        return idempotent.execute(idempotencyKey, http, request, HttpStatus.OK, () -> AccountResponse.of(
+                accounts.unblock(accountId, request.validReason(), request.comment(), Callers.of(caller)).account()));
     }
 
     @GetMapping("/{accountId}")

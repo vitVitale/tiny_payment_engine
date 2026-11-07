@@ -21,7 +21,8 @@ class OpenApiConfiguration {
                         .description("Accounts, journal and memos (specs/12-ledger-service.md)"))
                 .components(new Components().addSecuritySchemes(STAFF_JWT, new SecurityScheme()
                         .type(SecurityScheme.Type.HTTP).scheme("bearer").bearerFormat("JWT")
-                        .description("roles claim: BACKOFFICE_OPERATOR, COMPLIANCE_OFFICER")))
+                        .description("staff: roles claim BACKOFFICE_OPERATOR, COMPLIANCE_OFFICER; risk-service: "
+                                + "scope ledger:sanctions-block, ledger:customer-accounts")))
                 .addSecurityItem(new SecurityRequirement().addList(STAFF_JWT));
     }
 }

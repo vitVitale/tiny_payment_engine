@@ -2,11 +2,15 @@ package com.tpe.ledgerservice.application.account;
 
 import com.tpe.ledgerservice.application.posting.AccountPosting;
 import com.tpe.ledgerservice.application.posting.JournalRepository;
+import com.tpe.ledgerservice.application.posting.OptimisticConflict;
 import com.tpe.ledgerservice.application.posting.PostingsPage;
 import com.tpe.ledgerservice.domain.LedgerError;
 import com.tpe.ledgerservice.domain.LedgerException;
 import com.tpe.ledgerservice.domain.account.Account;
 import com.tpe.ledgerservice.domain.account.AccountKind;
+import com.tpe.ledgerservice.domain.account.BlockChange;
+import com.tpe.ledgerservice.domain.account.BlockReason;
+import com.tpe.ledgerservice.domain.account.CustomerId;
 import com.tpe.ledgerservice.domain.account.IbanGenerator;
 import com.tpe.messaging.outbox.OutboxWriter;
 import com.tpe.paymentdomain.Iban;
@@ -14,6 +18,7 @@ import com.tpe.paymentdomain.UuidV7Generator;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -28,6 +33,8 @@ import org.springframework.transaction.annotation.Transactional;
 public class AccountService {
 
     static final String OPEN = "OPEN";
+    static final String BLOCK = "BLOCK";
+    static final String UNBLOCK = "UNBLOCK";
 
     /** Page size of the entries feed (12 §3.2). */
     public static final int ENTRIES_PAGE = 100;
@@ -72,6 +79,85 @@ public class AccountService {
                 now);
         outbox.write(AccountEvents.TOPIC, account.accountId().toString(), AccountEvents.opened(account));
         return account;
+    }
+
+    /**
+     * Adds a block of {@code reason} and publishes {@code AccountBlocked} (12 §3.2, UC-10). A reason already active is
+     * a no-op: no event, no audit row, the revision stays. {@code SANCTIONS} lifts an active
+     * {@code SANCTIONS_PROVISIONAL} in the same change.
+     *
+     * @param comment the caller's note, or {@code null}
+     * @throws LedgerException {@code SANCTIONS_BLOCK_PROTECTED}, {@code FORBIDDEN}, {@code ACCOUNT_NOT_FOUND},
+     *     {@code ACCOUNT_NOT_CUSTOMER}, {@code ACCOUNT_CLOSED}
+     * @throws OptimisticConflict when the account changed since it was read: run the transaction again
+     */
+    @Transactional
+    public BlockChange block(UUID accountId, BlockReason reason, String comment, Caller caller) {
+        caller.requireMayChange(reason);
+        BlockChange change = get(accountId).block(reason);
+        if (!change.changed()) {
+            return change;
+        }
+        Account blocked = change.account();
+        Instant now = writeLifecycle(blocked);
+        if (change.replaced() != null) {
+            accounts.liftBlock(accountId, change.replaced(), now, caller.actor());
+        }
+        accounts.addBlock(accountId, reason, now, caller.actor(), comment);
+        audit.record(caller.actor(), BLOCK, accountId, blockDetails(reason, change.replaced(), comment), now);
+        outbox.write(AccountEvents.TOPIC, accountId.toString(), AccountEvents.blocked(blocked, reason, now));
+        return change;
+    }
+
+    /**
+     * Lifts the block of {@code reason} and publishes {@code AccountUnblocked} (12 §3.2, UC-10); the account stays
+     * {@code BLOCKED} while other blocks remain. A reason that is not active is a no-op.
+     *
+     * @param comment the caller's note, or {@code null}; kept in the audit row
+     * @throws LedgerException {@code SANCTIONS_BLOCK_PROTECTED}, {@code FORBIDDEN}, {@code ACCOUNT_NOT_FOUND},
+     *     {@code ACCOUNT_NOT_CUSTOMER}, {@code ACCOUNT_CLOSED}
+     * @throws OptimisticConflict when the account changed since it was read: run the transaction again
+     */
+    @Transactional
+    public BlockChange unblock(UUID accountId, BlockReason reason, String comment, Caller caller) {
+        caller.requireMayChange(reason);
+        BlockChange change = get(accountId).unblock(reason);
+        if (!change.changed()) {
+            return change;
+        }
+        Account unblocked = change.account();
+        Instant now = writeLifecycle(unblocked);
+        accounts.liftBlock(accountId, reason, now, caller.actor());
+        audit.record(caller.actor(), UNBLOCK, accountId, blockDetails(reason, null, comment), now);
+        outbox.write(AccountEvents.TOPIC, accountId.toString(), AccountEvents.unblocked(unblocked, reason, now));
+        return change;
+    }
+
+    /** All customer accounts of {@code customerId}, in any status (12 §3.2, for risk-service). */
+    @Transactional(readOnly = true)
+    public List<Account> byCustomer(CustomerId customerId) {
+        return accounts.findByCustomerId(customerId);
+    }
+
+    /** The audit details of a block or unblock; {@code replaced} and {@code comment} only when present. */
+    private static Map<String, Object> blockDetails(BlockReason reason, BlockReason replaced, String comment) {
+        Map<String, Object> details = new LinkedHashMap<>();
+        details.put("reason", reason.name());
+        if (replaced != null) {
+            details.put("replaced", replaced.name());
+        }
+        if (comment != null) {
+            details.put("comment", comment);
+        }
+        return details;
+    }
+
+    /** Writes the account's new status and revision version-checked (12 §6.2); returns the time of the change. */
+    private Instant writeLifecycle(Account changed) {
+        if (!accounts.updateLifecycle(changed)) {
+            throw new OptimisticConflict("account " + changed.accountId() + " changed since it was read");
+        }
+        return clock.instant().truncatedTo(ChronoUnit.MILLIS);
     }
 
     /** @throws LedgerException {@code ACCOUNT_NOT_FOUND}, {@code ACCOUNT_NOT_CUSTOMER} */

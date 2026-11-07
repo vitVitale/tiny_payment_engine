@@ -4,6 +4,7 @@ import com.tpe.ledgerservice.application.account.AccountRepository;
 import com.tpe.ledgerservice.domain.account.Account;
 import com.tpe.ledgerservice.domain.account.AccountKind;
 import com.tpe.ledgerservice.domain.account.AccountStatus;
+import com.tpe.ledgerservice.domain.account.BlockReason;
 import com.tpe.ledgerservice.domain.account.CustomerId;
 import com.tpe.ledgerservice.domain.account.Holder;
 import com.tpe.ledgerservice.domain.account.HolderType;
@@ -15,6 +16,8 @@ import java.time.Instant;
 import java.time.LocalDate;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
+import java.util.Arrays;
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 import org.springframework.jdbc.core.simple.JdbcClient;
@@ -24,9 +27,11 @@ import org.springframework.stereotype.Repository;
 class JdbcAccountRepository implements AccountRepository {
 
     private static final String SELECT = """
-            SELECT account_id, iban, kind, customer_id, holder_type, holder_name, holder_dob, holder_country,
-                   holder_org_id, status, currency, booked_minor, held_minor, version, revision, opened_at, closed_at
-              FROM accounts""";
+            SELECT a.account_id, iban, kind, customer_id, holder_type, holder_name, holder_dob, holder_country,
+                   holder_org_id, status, currency, booked_minor, held_minor, version, revision, opened_at, closed_at,
+                   ARRAY(SELECT b.reason FROM account_blocks b
+                          WHERE b.account_id = a.account_id AND b.lifted_at IS NULL) AS active_blocks
+              FROM accounts a""";
 
     private final JdbcClient jdbc;
 
@@ -88,9 +93,49 @@ class JdbcAccountRepository implements AccountRepository {
     }
 
     @Override
+    public boolean updateLifecycle(Account account) {
+        return jdbc.sql("""
+                UPDATE accounts SET status = :status, revision = :revision, closed_at = :closedAt,
+                                    version = version + 1
+                 WHERE account_id = :accountId AND version = :version AND kind = 'CUSTOMER'""")
+                .param("status", account.status().name())
+                .param("revision", account.revision())
+                .param("closedAt", utc(account.closedAt()))
+                .param("accountId", account.accountId())
+                .param("version", account.version())
+                .update() == 1;
+    }
+
+    @Override
+    public void addBlock(UUID accountId, BlockReason reason, Instant at, String actor, String comment) {
+        jdbc.sql("""
+                INSERT INTO account_blocks (account_id, reason, created_at, created_by, comment)
+                VALUES (?, ?, ?, ?, ?)""")
+                .params(accountId, reason.name(), utc(at), actor, comment)
+                .update();
+    }
+
+    @Override
+    public void liftBlock(UUID accountId, BlockReason reason, Instant at, String actor) {
+        jdbc.sql("""
+                UPDATE account_blocks SET lifted_at = ?, lifted_by = ?
+                 WHERE account_id = ? AND reason = ? AND lifted_at IS NULL""")
+                .params(utc(at), actor, accountId, reason.name())
+                .update();
+    }
+
+    @Override
     public Optional<Account> findByIban(Iban iban) {
         return jdbc.sql(SELECT + " WHERE iban = ?").param(iban.value()).query(JdbcAccountRepository::account)
                 .optional();
+    }
+
+    @Override
+    public List<Account> findByCustomerId(CustomerId customerId) {
+        return jdbc.sql(SELECT + " WHERE customer_id = ? AND kind = 'CUSTOMER' ORDER BY opened_at, a.account_id")
+                .param(customerId.value())
+                .query(JdbcAccountRepository::account)
+                .list();
     }
 
     private static Account account(ResultSet rs, int row) throws SQLException {
@@ -109,6 +154,7 @@ class JdbcAccountRepository implements AccountRepository {
                 customerId == null ? null : new CustomerId(customerId),
                 holder,
                 AccountStatus.valueOf(rs.getString("status")),
+                Arrays.stream((String[]) rs.getArray("active_blocks").getArray()).map(BlockReason::valueOf).toList(),
                 rs.getString("currency"),
                 rs.getLong("booked_minor"),
                 rs.getLong("held_minor"),
