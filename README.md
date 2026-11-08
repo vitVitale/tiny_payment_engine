@@ -92,11 +92,15 @@ port; the connection settings take effect as those dependencies arrive. The cred
 purpose: they work only against this stack ([00 §12.2](specs/00-engineering-baseline.md#122-data-handling)).
 
 Smoke check of the running stack (databases and roles, topics against
-[02 §2](specs/02-messaging-contracts.md#2-topics), token claims); CI runs it as well:
+[02 §2](specs/02-messaging-contracts.md#2-topics), token claims) and the ledger system tests (E2E-A-01, ending with
+the ledger invariants of [20 §3](specs/20-testing-strategy.md#3-global-invariants)); CI runs them as well. The system
+tests start ledger-service from its jar in profiles `local,systemtest`, so the same build packages it first:
 
 ```bash
-./mvnw -pl tests/system-tests -am verify -Dtpe.local-stack=true
+./mvnw -pl services/ledger-service,tests/system-tests -am verify -Dtpe.local-stack=true
 ```
+
+The service's log is `tests/system-tests/target/ledger-service-systemtest.log`.
 
 ## Traceability check
 

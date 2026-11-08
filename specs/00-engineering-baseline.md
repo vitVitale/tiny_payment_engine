@@ -68,7 +68,10 @@ Dependency rules (enforced by the Maven Enforcer plugin and ArchUnit):
 - `libs/test-support` holds shared test fixtures (the ArchUnit rules of §3, §5, §6). Any module MAY depend on it in
   `test` scope only; it is never a compile or runtime dependency. It depends only on test libraries (ArchUnit, JUnit,
   AssertJ, Pact's model and matchers for `StubConformanceTest`, its provider loader API for `@PactVerification`).
-- `tools/*` MAY depend on `libs/*` and MUST NOT be called by any service. No module depends on a tool.
+- `tools/*` MAY depend on `libs/*` and MUST NOT be called by any service. No module depends on a tool, with one
+  exception: `tests/system-tests` depends on `tools/invariant-checker` in `test` scope, so the system tests run the
+  same invariant checks as the soak and the production job ([20 §3](20-testing-strategy.md#3-global-invariants),
+  [26 §12](26-observability.md#12-production-invariant-checks)).
 - `csm-simulator` MUST NOT be packaged into any production image.
 
 ## 2. Technology stack

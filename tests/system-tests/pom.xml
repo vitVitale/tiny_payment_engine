@@ -63,5 +63,69 @@
             <type>test-jar</type>
             <scope>test</scope>
         </dependency>
+        <!-- ledger system tests (E2E-A-01): the accounts.events records, the relay timing the bounds derive from
+             (20 §2), the per-test ledger invariants (20 §3) -->
+        <dependency>
+            <groupId>com.tpe</groupId>
+            <artifactId>contracts</artifactId>
+            <version>${project.version}</version>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>com.tpe</groupId>
+            <artifactId>messaging</artifactId>
+            <version>${project.version}</version>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>com.tpe</groupId>
+            <artifactId>invariant-checker</artifactId>
+            <version>${project.version}</version>
+            <scope>test</scope>
+        </dependency>
     </dependencies>
+
+    <build>
+        <plugins>
+            <!-- the parent's ban (specs/00-engineering-baseline.md §1) with its one exception: the system tests run the
+                 invariant checks of tools/invariant-checker, in test scope only (20 §3, 26 §12) -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-enforcer-plugin</artifactId>
+                <executions>
+                    <execution>
+                        <id>enforce-build-rules</id>
+                        <configuration>
+                            <rules>
+                                <bannedDependencies>
+                                    <message>No module may depend on a service, the simulator or a tool (system-tests: invariant-checker in test scope only), and libs/test-support is test scope only (specs/00-engineering-baseline.md §1).</message>
+                                    <excludes combine.self="override">
+                                        <exclude>com.tpe:payment-api</exclude>
+                                        <exclude>com.tpe:payment-orchestrator</exclude>
+                                        <exclude>com.tpe:ledger-service</exclude>
+                                        <exclude>com.tpe:vop-service</exclude>
+                                        <exclude>com.tpe:risk-service</exclude>
+                                        <exclude>com.tpe:csm-gateway</exclude>
+                                        <exclude>com.tpe:notification-service</exclude>
+                                        <exclude>com.tpe:csm-simulator</exclude>
+                                        <exclude>com.tpe:slo-rules</exclude>
+                                        <exclude>com.tpe:consumer-lag-exporter</exclude>
+                                        <exclude>com.tpe:invariant-checker:*:*:compile</exclude>
+                                        <exclude>com.tpe:invariant-checker:*:*:runtime</exclude>
+                                        <exclude>com.tpe:invariant-checker:*:*:provided</exclude>
+                                        <exclude>com.tpe:invariant-checker:*:*:system</exclude>
+                                        <exclude>com.tpe:traceability-check</exclude>
+                                        <exclude>com.tpe:test-support:*:*:compile</exclude>
+                                        <exclude>com.tpe:test-support:*:*:runtime</exclude>
+                                        <exclude>com.tpe:test-support:*:*:provided</exclude>
+                                        <exclude>com.tpe:test-support:*:*:system</exclude>
+                                    </excludes>
+                                </bannedDependencies>
+                            </rules>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+        </plugins>
+    </build>
 </project>
