@@ -29,6 +29,9 @@ tpe:
     idempotency:
       # keys older than this are deleted hourly (specs/12-ledger-service.md §6.1, §7)
       retention: 30d
+    account-tombstones:
+      # the daily job deleting accounts closed 13 months ago from accounts.events (specs/12-ledger-service.md §4, §7)
+      poll-interval: 1d
   messaging:
     # the outbox of accounts.events (specs/12-ledger-service.md §4)
     enabled: true

@@ -14,6 +14,7 @@ import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import jakarta.servlet.http.HttpServletRequest;
 import java.time.Instant;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
@@ -99,6 +100,25 @@ class AccountController {
             @RequestBody BlockRequest request, Authentication caller, HttpServletRequest http) {
         return idempotent.execute(idempotencyKey, http, request, HttpStatus.OK, () -> AccountResponse.of(
                 accounts.unblock(accountId, request.validReason(), request.comment(), Callers.of(caller)).account()));
+    }
+
+    /**
+     * Closes an empty account (12 §3.2, UC-10): booked balance 0, no {@code ACTIVE} holds or pending credits, else
+     * {@code 422 ACCOUNT_NOT_EMPTY}; an active sanctions block refuses it with {@code 422 ACCOUNT_BLOCKED}. Publishes
+     * {@code AccountClosed}; 13 months later the account's key is deleted from {@code accounts.events}.
+     */
+    @PostMapping("/{accountId}/close")
+    @PreAuthorize("hasRole('BACKOFFICE_OPERATOR')")
+    @ApiResponse(responseCode = "200", description = "Closed",
+            content = @Content(schema = @Schema(implementation = AccountResponse.class)))
+    ResponseEntity<String> close(
+            @PathVariable UUID accountId,
+            @Parameter(required = true, description = "At most 200 characters; a retry replays the stored response")
+            @RequestHeader(name = IdempotentExecutor.IDEMPOTENCY_KEY, required = false) String idempotencyKey,
+            @RequestBody(required = false) Map<String, Object> body, @AuthenticationPrincipal Jwt operator,
+            HttpServletRequest http) {
+        return idempotent.execute(idempotencyKey, http, body == null ? Map.of() : body, HttpStatus.OK,
+                () -> AccountResponse.of(accounts.close(accountId, operator.getSubject())));
     }
 
     @GetMapping("/{accountId}")

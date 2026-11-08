@@ -173,8 +173,14 @@ Published outbox rows are deleted after `tpe.messaging.outbox.retention` (defaul
 public interface OutboxWriter {
   /** MUST be called inside an active transaction; throws IllegalStateException otherwise. */
   UUID write(String topic, String key, Message message);
+  /** A null-value record deleting `key` on a compacted topic (ADR-007); same transaction rule. */
+  UUID writeTombstone(String topic, String key);
 }
 ```
+
+A tombstone row has `message_type`, `schema_version` and `payload` `NULL` (migration `V0_5`); the relay sends it with
+a `null` value and the headers `tpe-event-id`, `tpe-occurred-at`, `tpe-producer` and `traceparent` (no
+`tpe-message-type` / `tpe-schema-version`). Consumers of a compacted topic treat a `null` value as "delete this key".
 
 `Message` is the sealed root of all records in `contracts` (each declares its `type` and `schemaVersion`). The
 writer serialises with the shared `ObjectMapper`, generates `eventId` (UUID v7), adds headers (§3.4), inserts the

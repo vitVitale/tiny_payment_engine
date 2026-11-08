@@ -119,6 +119,15 @@ class JdbcAccountRepository implements AccountRepository {
     }
 
     @Override
+    public boolean markEventsTombstoned(UUID accountId, Instant at) {
+        return jdbc.sql("""
+                UPDATE accounts SET events_tombstoned_at = ?
+                 WHERE account_id = ? AND status = 'CLOSED' AND events_tombstoned_at IS NULL""")
+                .params(utc(at), accountId)
+                .update() == 1;
+    }
+
+    @Override
     public void addBlock(UUID accountId, BlockReason reason, Instant at, String actor, String comment) {
         jdbc.sql("""
                 INSERT INTO account_blocks (account_id, reason, created_at, created_by, comment)

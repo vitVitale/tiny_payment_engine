@@ -147,7 +147,9 @@ Rules:
 - Closed accounts cannot be blocked / unblocked (`ACCOUNT_CLOSED`).
 
 **Close** — allowed only if booked balance = 0, no `ACTIVE` holds, no `ACTIVE` pending credits; otherwise
-`422 ACCOUNT_NOT_EMPTY`.
+`422 ACCOUNT_NOT_EMPTY`. An active `SANCTIONS` or `SANCTIONS_PROVISIONAL` block refuses it with `422 ACCOUNT_BLOCKED`:
+a closed account's blocks can never be lifted, so compliance lifts or confirms the block first. An account with only
+an `OPERATOR` block may be closed; the reason stays on record.
 
 **Funding** — `{ "amountMinor": 100000, "currency": "EUR" }` → entry Dr FUNDING technical account / Cr customer.
 In profile `prod` the controller bean does not exist → `404` (UC-10 3a).
@@ -370,6 +372,7 @@ Check digits computed with mod 97-10. Generated IBANs MUST pass `Iban` validatio
 | `tpe.ledger.optimistic-retry.max-attempts` | `5` | |
 | `tpe.ledger.idempotency.retention` | `30d` | |
 | `tpe.ledger.snapshot.interval` | `15m` | |
+| `tpe.ledger.account-tombstones.poll-interval` | `1d` | the `accounts.events` tombstone job (§4) |
 | `tpe.ledger.funding.enabled` | `true` in `local`/`test`, `false` in `prod` | `prod` startup fails if `true` |
 
 ## 8. Non-functional requirements

@@ -142,6 +142,51 @@
         "tags" : [ "account-controller" ]
       }
     },
+    "/v1/accounts/{accountId}/close" : {
+      "post" : {
+        "operationId" : "close",
+        "parameters" : [ {
+          "in" : "path",
+          "name" : "accountId",
+          "required" : true,
+          "schema" : {
+            "type" : "string",
+            "format" : "uuid"
+          }
+        }, {
+          "description" : "At most 200 characters; a retry replays the stored response",
+          "in" : "header",
+          "name" : "Idempotency-Key",
+          "required" : true,
+          "schema" : {
+            "type" : "string"
+          }
+        } ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "type" : "object",
+                "additionalProperties" : { }
+              }
+            }
+          }
+        },
+        "responses" : {
+          "200" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/AccountResponse"
+                }
+              }
+            },
+            "description" : "Closed"
+          }
+        },
+        "tags" : [ "account-controller" ]
+      }
+    },
     "/v1/accounts/{accountId}/entries" : {
       "get" : {
         "operationId" : "entries",

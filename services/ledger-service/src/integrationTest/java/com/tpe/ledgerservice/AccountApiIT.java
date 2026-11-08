@@ -34,8 +34,8 @@ import tools.jackson.databind.JsonNode;
 
 /**
  * The Account API's open and reads (specs/12-ledger-service.md §3.2, UC-10 1, 2, 4). The open part of LED-AC-17 (the
- * hold and pending-credit parts are in HoldIT and PendingCreditIT) and the open case of LED-AC-18 are covered here;
- * LED-AC-18 stays pending until close covers the rest.
+ * hold and pending-credit parts are in HoldIT and PendingCreditIT) and the open case of LED-AC-18 (fund, block,
+ * unblock and close: FundingIT, BlockIT, CloseIT) are covered here.
  */
 class AccountApiIT extends LedgerStack {
 
@@ -146,7 +146,7 @@ class AccountApiIT extends LedgerStack {
     }
 
     @Test
-    void openingWritesOneAuditRowWithTheOperatorAsActor() {
+    void LED_AC_18_openingWritesOneAuditRowWithTheOperatorAsActor() {
         var response = open(operator("operator-anna"), person(customerId()));
         UUID accountId = UUID.fromString(response.getBody().get("accountId").asString());
 

@@ -1,6 +1,7 @@
 package com.tpe.ledgerservice.application.account;
 
 import com.tpe.contracts.AccountBlocked;
+import com.tpe.contracts.AccountClosed;
 import com.tpe.contracts.AccountKind;
 import com.tpe.contracts.AccountOpened;
 import com.tpe.contracts.AccountSnapshot;
@@ -32,6 +33,10 @@ final class AccountEvents {
 
     static AccountUnblocked unblocked(Account account, BlockReason reason, Instant at) {
         return new AccountUnblocked(account.accountId(), account.revision(), at, snapshot(account), contract(reason));
+    }
+
+    static AccountClosed closed(Account account) {
+        return new AccountClosed(account.accountId(), account.revision(), account.closedAt(), snapshot(account));
     }
 
     private static AccountSnapshot snapshot(Account account) {

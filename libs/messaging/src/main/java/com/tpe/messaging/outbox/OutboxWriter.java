@@ -15,4 +15,13 @@ public interface OutboxWriter {
      * @return the {@code eventId} of the message
      */
     UUID write(String topic, String key, Message message);
+
+    /**
+     * A tombstone for {@code key} on a compacted topic: a record with a {@code null} value, which deletes the key
+     * (e.g. {@code accounts.events}, ADR-007). It carries the event headers but no message type or schema version.
+     * MUST be called inside an active transaction; throws {@link IllegalStateException} otherwise.
+     *
+     * @return the {@code eventId} of the record
+     */
+    UUID writeTombstone(String topic, String key);
 }

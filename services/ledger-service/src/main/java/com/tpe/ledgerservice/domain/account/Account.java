@@ -6,6 +6,7 @@ import com.tpe.paymentdomain.Iban;
 import java.time.Instant;
 import java.util.EnumSet;
 import java.util.List;
+import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
 
@@ -179,6 +180,36 @@ public record Account(
         Set<BlockReason> active = mutableReasons();
         active.remove(reason);
         return new BlockChange(withBlocks(active), true, null);
+    }
+
+    /**
+     * Closes this account at {@code at} (12 §3.2, UC-10): {@code CLOSED}, the revision one higher. Only an empty
+     * account closes: booked balance 0, nothing held, no pending credits (tombstones are never part of either sum).
+     * An active {@code SANCTIONS} or {@code SANCTIONS_PROVISIONAL} block keeps it open: a closed account's blocks can
+     * never be lifted, so compliance must decide first. With only an {@code OPERATOR} block it closes, the reason
+     * staying on record.
+     *
+     * @throws LedgerException {@code ACCOUNT_CLOSED}, {@code ACCOUNT_BLOCKED} (a sanctions block),
+     *     {@code ACCOUNT_NOT_EMPTY}
+     */
+    public Account close(Instant at) {
+        if (kind != AccountKind.CUSTOMER) {
+            throw new IllegalStateException("technical accounts have no lifecycle");
+        }
+        if (status == AccountStatus.CLOSED) {
+            throw new LedgerException(LedgerError.ACCOUNT_CLOSED, "the account is already closed");
+        }
+        if (activeBlockReasons.stream().anyMatch(BlockReason::sanctions)) {
+            throw new LedgerException(LedgerError.ACCOUNT_BLOCKED,
+                    "an account with an active sanctions block cannot be closed");
+        }
+        if (bookedMinor != 0 || heldMinor != 0 || pendingCreditsMinor != 0) {
+            throw new LedgerException(LedgerError.ACCOUNT_NOT_EMPTY,
+                    "the account has a balance, an active hold or an active pending credit");
+        }
+        return new Account(accountId, iban, kind, customerId, holder, AccountStatus.CLOSED, activeBlockReasons,
+                currency, bookedMinor, heldMinor, pendingCreditsMinor, version, revision + 1, openedAt,
+                Objects.requireNonNull(at, "at"));
     }
 
     private void requireOpenToBlocks() {

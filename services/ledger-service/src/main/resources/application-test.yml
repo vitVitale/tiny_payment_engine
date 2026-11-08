@@ -4,3 +4,6 @@ tpe:
     funding:
       # test funding (specs/12-ledger-service.md §3.2, §7)
       enabled: true
+    account-tombstones:
+      # component tests move the clock and wait for the job, not for a day
+      poll-interval: 200ms

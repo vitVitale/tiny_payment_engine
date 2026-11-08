@@ -29,6 +29,8 @@ public enum LedgerError {
     FORBIDDEN,
     /** A customer account without a customer number (Q-02). */
     CUSTOMER_ID_MISSING,
+    /** A close of an account with a balance, an active hold or an active pending credit (§3.2). */
+    ACCOUNT_NOT_EMPTY,
     /** A debit beyond the available balance. */
     INSUFFICIENT_FUNDS,
     /** A currency other than EUR (A3); defensive. */
