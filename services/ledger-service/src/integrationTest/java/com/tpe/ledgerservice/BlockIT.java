@@ -66,8 +66,9 @@ class BlockIT extends LedgerStack {
         assertThat(status(accountId)).isEqualTo("OPEN");
     }
 
+    /** The block and unblock cases of LED-AC-18. */
     @Test
-    void eachBlockAndUnblockWritesOneAuditRowWithTheActor() {
+    void LED_AC_18_eachBlockAndUnblockWritesOneAuditRowWithTheActor() {
         UUID accountId = openCustomer(customerId());
 
         block(operator("operator-anna"), accountId, "OPERATOR", "fraud suspicion");

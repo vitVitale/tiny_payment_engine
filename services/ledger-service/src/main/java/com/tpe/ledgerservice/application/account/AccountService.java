@@ -35,6 +35,7 @@ public class AccountService {
     static final String OPEN = "OPEN";
     static final String BLOCK = "BLOCK";
     static final String UNBLOCK = "UNBLOCK";
+    static final String CLOSE = "CLOSE";
 
     /** Page size of the entries feed (12 §3.2). */
     public static final int ENTRIES_PAGE = 100;
@@ -131,6 +132,28 @@ public class AccountService {
         audit.record(caller.actor(), UNBLOCK, accountId, blockDetails(reason, null, comment), now);
         outbox.write(AccountEvents.TOPIC, accountId.toString(), AccountEvents.unblocked(unblocked, reason, now));
         return change;
+    }
+
+    /**
+     * Closes an empty account and publishes {@code AccountClosed} (12 §3.2, UC-10), audited. The row is locked first
+     * and only then read: the read sees every hold and pending credit committed before the lock, and none can be
+     * created until the close commits (12 §6.2), so an {@code ACTIVE} memo is never missed.
+     *
+     * @param actor the JWT {@code sub} of the operator
+     * @throws LedgerException {@code ACCOUNT_NOT_FOUND}, {@code ACCOUNT_NOT_CUSTOMER}, {@code ACCOUNT_CLOSED},
+     *     {@code ACCOUNT_NOT_EMPTY}
+     */
+    @Transactional
+    public Account close(UUID accountId, String actor) {
+        accounts.lockForUpdate(List.of(accountId));
+        Instant now = clock.instant().truncatedTo(ChronoUnit.MILLIS);
+        Account closed = get(accountId).close(now);
+        if (!accounts.updateLifecycle(closed)) {
+            throw new IllegalStateException("account " + accountId + " changed under its row lock");
+        }
+        audit.record(actor, CLOSE, accountId, Map.of(), now);
+        outbox.write(AccountEvents.TOPIC, accountId.toString(), AccountEvents.closed(closed));
+        return closed;
     }
 
     /** All customer accounts of {@code customerId}, in any status (12 §3.2, for risk-service). */

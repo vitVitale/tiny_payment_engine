@@ -61,6 +61,14 @@ public interface AccountRepository {
      */
     boolean updateLifecycle(Account account);
 
+    /**
+     * Records that the closed account's key was deleted from {@code accounts.events} (12 §4); the row's version and
+     * revision stay.
+     *
+     * @return {@code false} when it was recorded already
+     */
+    boolean markEventsTombstoned(UUID accountId, Instant at);
+
     /** Inserts an active block of {@code reason}. */
     void addBlock(UUID accountId, BlockReason reason, Instant at, String actor, String comment);
 

@@ -24,6 +24,8 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.support.TransactionTemplate;
 
 /** The M0 tracer bullet: business change + message in one transaction → outbox → relay → Kafka → inbox. */
 @SpringBootTest(classes = SampleApplication.class, properties = {
@@ -51,6 +53,9 @@ class OutboxToInboxIT {
 
     @Autowired
     MeterRegistry meters;
+
+    @Autowired
+    PlatformTransactionManager transactionManager;
 
     @Test
     void everyMessageHasExactlyOneBusinessEffect() {
@@ -98,6 +103,32 @@ class OutboxToInboxIT {
         assertThat(Topics.header(record, "tpe-producer")).isEqualTo("sample-service");
         assertThat(Topics.header(record, "tpe-occurred-at")).matches("\\d{4}-\\d\\d-\\d\\dT[0-9:.]+Z");
         assertThat(UUID.fromString(Topics.header(record, "tpe-event-id")).version()).isEqualTo(7);
+    }
+
+    /** A compacted topic's delete marker (02 §5, ADR-007): a {@code null} value under the key, with the event headers. */
+    @Test
+    void aTombstoneIsPublishedAsANullValueWithTheEventHeadersButNoMessageType() {
+        String topic = "sample.snapshots";
+        String key = UUID.randomUUID().toString();
+        UUID eventId = new TransactionTemplate(transactionManager).execute(status -> outbox.writeTombstone(topic, key));
+
+        Topics.await(Duration.ofSeconds(20), () -> jdbc.queryForObject(
+                "SELECT count(*) FROM outbox WHERE event_id = ? AND published_at IS NOT NULL", Integer.class,
+                eventId) == 1);
+        ConsumerRecord<String, String> record = Topics.find(topic, eventId);
+
+        assertThat(record.key()).isEqualTo(key);
+        assertThat(record.value()).isNull();
+        assertThat(Topics.header(record, "tpe-producer")).isEqualTo("sample-service");
+        assertThat(Topics.header(record, "tpe-occurred-at")).isNotBlank();
+        assertThat(Topics.header(record, "tpe-message-type")).isNull();
+        assertThat(Topics.header(record, "tpe-schema-version")).isNull();
+    }
+
+    @Test
+    void aTombstoneOutsideATransactionThrows() {
+        assertThatThrownBy(() -> outbox.writeTombstone("sample.snapshots", UUID.randomUUID().toString()))
+                .isInstanceOf(IllegalStateException.class);
     }
 
     @Test

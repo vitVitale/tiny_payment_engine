@@ -87,9 +87,9 @@ class FundingIT extends LedgerStack {
         assertThat(fundingRow()).isEqualTo(before);
     }
 
-    /** The fund case of LED-AC-18, which stays pending until block, unblock and close have theirs. */
+    /** The fund case of LED-AC-18; open, block, unblock and close are in AccountApiIT, BlockIT and CloseIT. */
     @Test
-    void fundingWritesOneAuditRowWithTheOperatorAsActor() {
+    void LED_AC_18_fundingWritesOneAuditRowWithTheOperatorAsActor() {
         UUID accountId = openCustomer(customerId());
 
         var funded = fund(operator("operator-ben"), newIdempotencyKey(), accountId, eur(4_200));

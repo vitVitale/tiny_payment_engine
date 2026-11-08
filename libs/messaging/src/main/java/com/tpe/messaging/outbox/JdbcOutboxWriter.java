@@ -48,24 +48,39 @@ public final class JdbcOutboxWriter implements OutboxWriter {
 
     @Override
     public UUID write(String topic, String key, Message message) {
+        requireTransaction();
+        return insert(topic, key, message.type(), message.schemaVersion(), json.write(message));
+    }
+
+    @Override
+    public UUID writeTombstone(String topic, String key) {
+        requireTransaction();
+        return insert(topic, key, null, null, null);
+    }
+
+    private static void requireTransaction() {
         if (!TransactionSynchronizationManager.isActualTransactionActive()) {
-            throw new IllegalStateException("OutboxWriter.write needs an active transaction: the message must "
-                    + "commit or roll back with the business change (specs/01-shared-libraries.md §3.2)");
+            throw new IllegalStateException("OutboxWriter needs an active transaction: the record must commit or "
+                    + "roll back with the business change (specs/01-shared-libraries.md §3.2)");
         }
-        String payload = json.write(message);
+    }
+
+    /** A message; with {@code messageType}, {@code schemaVersion} and {@code payload} all {@code null}, a tombstone. */
+    private UUID insert(String topic, String key, String messageType, Integer schemaVersion, String payload) {
         UUID eventId = eventIds.next();
         Map<String, String> headers = new LinkedHashMap<>();
         headers.put(MessageHeaders.EVENT_ID, eventId.toString());
-        headers.put(MessageHeaders.MESSAGE_TYPE, message.type());
-        headers.put(MessageHeaders.SCHEMA_VERSION, Integer.toString(message.schemaVersion()));
+        if (messageType != null) {
+            headers.put(MessageHeaders.MESSAGE_TYPE, messageType);
+            headers.put(MessageHeaders.SCHEMA_VERSION, Integer.toString(schemaVersion));
+        }
         headers.put(MessageHeaders.OCCURRED_AT, clock.instant().toString());
         headers.put(MessageHeaders.PRODUCER, producer);
         spans.currentTraceparent().ifPresent(traceparent -> headers.put(MessageHeaders.TRACEPARENT, traceparent));
         jdbc.update("""
                 INSERT INTO outbox (event_id, topic, message_key, message_type, schema_version, payload, headers)
                 VALUES (?, ?, ?, ?, ?, ?::jsonb, ?::jsonb)""",
-                eventId, topic, key, message.type(), message.schemaVersion(), payload,
-                OutboxHeaders.toJson(headers));
+                eventId, topic, key, messageType, schemaVersion, payload, OutboxHeaders.toJson(headers));
         jdbc.execute("NOTIFY " + CHANNEL);
         return eventId;
     }
