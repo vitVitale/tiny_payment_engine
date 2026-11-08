@@ -12,4 +12,25 @@
     </parent>
 
     <artifactId>invariant-checker</artifactId>
+
+    <!-- The global invariant checks of specs/20-testing-strategy.md §3: one implementation for the system tests, the
+         soak and the production job (specs/26-observability.md §12). Plain JDBC, no driver: the caller brings it. -->
+    <dependencies>
+        <!-- negative tests: the ledger schema from ledger-service's migrations, seeded with each violation -->
+        <dependency>
+            <groupId>org.postgresql</groupId>
+            <artifactId>postgresql</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.flywaydb</groupId>
+            <artifactId>flyway-database-postgresql</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.testcontainers</groupId>
+            <artifactId>testcontainers-postgresql</artifactId>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
 </project>
