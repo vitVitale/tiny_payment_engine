@@ -157,7 +157,10 @@ In profile `prod` the controller bean does not exist → `404` (UC-10 3a).
 ### 3.3 Responses: balances
 
 `bookedBalanceMinor` (sum of postings) and `availableBalanceMinor = booked − Σ active holds`. Pending credits are
-listed separately (`pendingCreditsMinor`) and are never part of either balance.
+listed separately (`pendingCreditsMinor`) and are never part of either balance. The two reads (`GET
+/v1/accounts/{accountId}`, `?iban=`) also serve a technical account (`kind: TECHNICAL`, no `customerId` or holder):
+its booked and available balance is the derived balance of §6.3. Every other Account API operation, the entries feed
+included, refuses a technical account with `ACCOUNT_NOT_CUSTOMER`.
 
 ### 3.4 Error codes
 
@@ -357,7 +360,12 @@ before insert; the trigger is the safety net.
 Snapshot job (`PollingWorker`, every 15 min) takes a new snapshot per technical account using
 `max(posting_id)` from a committed read. Note: `BIGSERIAL` ids can commit out of order; the job therefore snapshots
 only up to `posting_id`s older than 60 s (`created_at < now() − 60 s`) so in-flight transactions cannot slip below
-the snapshot boundary.
+the snapshot boundary. This holds because no transaction lives that long: `spring.transaction.default-timeout` is
+30 s. The job locks the technical account's row `FOR NO KEY UPDATE SKIP LOCKED` (not `FOR UPDATE`), so a second
+instance skips it while postings, whose foreign key takes `FOR KEY SHARE`, never wait for it. Without a snapshot the
+balance is the full sum (the base is boundary 0, balance 0); a run that finds no new settled posting confirms the
+latest snapshot as of now (`taken_at`), so an idle account is due again only after the next interval. The key
+`(account_id, up_to_posting_id)` stores each boundary once.
 
 ### 6.4 IBAN generation
 

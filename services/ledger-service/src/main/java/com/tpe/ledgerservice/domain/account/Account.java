@@ -64,6 +64,18 @@ public record Account(
     }
 
     /**
+     * This technical account as read with its balance derived from snapshots and postings (12 §6.3): its row's
+     * {@code booked_minor} stays 0, as postings never write it (ADR-005). For a read only, never written back.
+     */
+    public Account withDerivedBalance(long balanceMinor) {
+        if (kind != AccountKind.TECHNICAL) {
+            throw new IllegalStateException("a customer account's balance is booked on its row");
+        }
+        return new Account(accountId, iban, kind, customerId, holder, status, activeBlockReasons, currency,
+                balanceMinor, heldMinor, pendingCreditsMinor, version, revision, openedAt, closedAt);
+    }
+
+    /**
      * This customer account with {@code changeMinor} booked (positive for a net credit); the version stays, the
      * repository bumps it when it writes the row (12 §6.2).
      *

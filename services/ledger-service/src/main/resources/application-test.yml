@@ -4,6 +4,9 @@ tpe:
     funding:
       # test funding (specs/12-ledger-service.md §3.2, §7)
       enabled: true
+    snapshot:
+      # the snapshot job runs alongside the tests, as a second writer next to the ones they drive
+      interval: 1s
     account-tombstones:
       # component tests move the clock and wait for the job, not for a day
       poll-interval: 200ms

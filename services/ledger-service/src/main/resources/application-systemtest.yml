@@ -1,0 +1,6 @@
+# Profile systemtest (specs/20-testing-strategy.md §2.1): short intervals keep the system tests fast.
+tpe:
+  ledger:
+    snapshot:
+      # snapshots are exercised during system tests (LED-AC-11)
+      interval: 5s
