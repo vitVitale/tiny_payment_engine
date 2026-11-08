@@ -57,6 +57,14 @@ public record JournalEntry(
                 new Posting(TechnicalAccounts.CSM_SETTLEMENT_ID, Side.CR, amountMinor)));
     }
 
+    /** A confirmed pending credit (12 §6.2): Dr CSM settlement account / Cr payee. */
+    public static JournalEntry paymentIn(UUID entryId, UUID payeeAccountId, long amountMinor, UUID paymentId,
+            String txId, Instant createdAt) {
+        return new JournalEntry(entryId, EntryType.PAYMENT_IN, paymentId, txId, createdAt, List.of(
+                new Posting(TechnicalAccounts.CSM_SETTLEMENT_ID, Side.DR, amountMinor),
+                new Posting(payeeAccountId, Side.CR, amountMinor)));
+    }
+
     /** A hold settled on-us (12 §6.2): Dr payer / Cr payee, both our customers. */
     public static JournalEntry onUs(UUID entryId, UUID payerAccountId, UUID payeeAccountId, long amountMinor,
             UUID paymentId, String txId, Instant createdAt) {

@@ -344,7 +344,10 @@ before insert; the trigger is the safety net.
   read with `SELECT … FOR UPDATE` in that order inside the transaction, then version-checked).
 - Status checks (`OPEN`, not blocked) read the account row in the same transaction as the change; because the block
   operation updates the same row (`revision`, `status`, `version`), a concurrent block either commits first (and
-  the check sees it) or conflicts on `version`.
+  the check sees it) or conflicts on `version`. Create pending credit writes no account row, so it reads the payee
+  row `SELECT … FOR SHARE`: a concurrent block either commits first (the check sees it) or waits until the pending
+  credit has committed (LED-AC-09). A close, which must see no `ACTIVE` pending credits, locks the row before it
+  counts them.
 
 ### 6.3 Technical account balance
 

@@ -51,7 +51,7 @@ class RetentionHousekeeping implements SmartLifecycle {
                 }
                 int tombstones = tombstoneRetention.purge();
                 if (tombstones > 0) {
-                    log.info("Retention deleted {} hold tombstones", tombstones);
+                    log.info("Retention deleted {} hold and pending-credit tombstones", tombstones);
                 }
             } catch (RuntimeException e) {
                 log.warn("Retention failed, trying again in {}: {}", INTERVAL, e.toString());

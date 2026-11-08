@@ -15,6 +15,8 @@ import java.util.UUID;
  * {@code accounts.events}, {@code version} is the optimistic lock. Technical accounts have no customer and no holder.
  *
  * @param activeBlockReasons the reasons of the active blocks, in declaration order; {@code BLOCKED} while not empty
+ * @param pendingCreditsMinor Σ {@code ACTIVE} pending credits, read with the row (12 §3.3): part of neither balance,
+ *     never written with the row
  */
 public record Account(
         UUID accountId,
@@ -27,6 +29,7 @@ public record Account(
         String currency,
         long bookedMinor,
         long heldMinor,
+        long pendingCreditsMinor,
         long version,
         long revision,
         Instant openedAt,
@@ -51,7 +54,7 @@ public record Account(
             throw new LedgerException(LedgerError.CUSTOMER_ID_MISSING, "a customer account needs a customer number");
         }
         return new Account(accountId, iban, AccountKind.CUSTOMER, customerId, holder, AccountStatus.OPEN, List.of(),
-                EUR, 0, 0, 0, 1, openedAt, null);
+                EUR, 0, 0, 0, 0, 1, openedAt, null);
     }
 
     /** {@code booked − Σ active holds} (12 §3.3). */
@@ -74,7 +77,7 @@ public record Account(
             throw new LedgerException(LedgerError.INSUFFICIENT_FUNDS, "the available balance does not cover the debit");
         }
         return new Account(accountId, iban, kind, customerId, holder, status, activeBlockReasons, currency, booked,
-                heldMinor, version, revision, openedAt, closedAt);
+                heldMinor, pendingCreditsMinor, version, revision, openedAt, closedAt);
     }
 
     /**
@@ -96,21 +99,21 @@ public record Account(
     }
 
     /**
-     * This account, if it may be credited by an on-us settlement (12 §3.1): a customer account with a customer number,
-     * {@code OPEN}. The caller has checked it is a customer account.
+     * This account, if it may become the payee of a payment (12 §3.1): of an on-us settlement or a pending credit. A
+     * customer account with a customer number, {@code OPEN}. The caller has checked it is a customer account.
      *
      * @throws LedgerException {@code CUSTOMER_ID_MISSING}, {@code ACCOUNT_BLOCKED}, {@code ACCOUNT_CLOSED}
      */
-    public Account requireOnUsPayee() {
+    public Account requirePayee() {
         if (kind != AccountKind.CUSTOMER) {
-            throw new IllegalStateException("a technical account is never an on-us payee");
+            throw new IllegalStateException("a technical account is never a payee");
         }
         requireOpenWithCustomerNumber();
         return this;
     }
 
-    /** {@link #requireOnUsPayee} as a question: whether this account may be credited on-us now. */
-    public boolean isOnUsPayee() {
+    /** {@link #requirePayee} as a question: whether this account may become a payee now. */
+    public boolean isPayee() {
         return kind == AccountKind.CUSTOMER && customerId != null && status == AccountStatus.OPEN;
     }
 
@@ -139,7 +142,7 @@ public record Account(
 
     private Account withHeld(long held) {
         return new Account(accountId, iban, kind, customerId, holder, status, activeBlockReasons, currency, bookedMinor,
-                held, version, revision, openedAt, closedAt);
+                held, pendingCreditsMinor, version, revision, openedAt, closedAt);
     }
 
     /**
@@ -194,6 +197,6 @@ public record Account(
     private Account withBlocks(Set<BlockReason> active) {
         AccountStatus next = active.isEmpty() ? AccountStatus.OPEN : AccountStatus.BLOCKED;
         return new Account(accountId, iban, kind, customerId, holder, next, List.copyOf(active), currency, bookedMinor,
-                heldMinor, version, revision + 1, openedAt, closedAt);
+                heldMinor, pendingCreditsMinor, version, revision + 1, openedAt, closedAt);
     }
 }

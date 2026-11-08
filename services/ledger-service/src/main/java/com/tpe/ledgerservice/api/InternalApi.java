@@ -17,5 +17,5 @@ import java.lang.annotation.Target;
 public @interface InternalApi {
 
     /** The Posting API paths the security configuration opens without a token while network isolation guards them. */
-    String[] POSTING_API_PATHS = {"/v1/holds", "/v1/holds/**"};
+    String[] POSTING_API_PATHS = {"/v1/holds", "/v1/holds/**", "/v1/pending-credits", "/v1/pending-credits/**"};
 }

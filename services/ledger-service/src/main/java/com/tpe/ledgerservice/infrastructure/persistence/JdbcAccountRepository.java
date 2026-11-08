@@ -31,7 +31,9 @@ class JdbcAccountRepository implements AccountRepository {
             SELECT a.account_id, iban, kind, customer_id, holder_type, holder_name, holder_dob, holder_country,
                    holder_org_id, status, currency, booked_minor, held_minor, version, revision, opened_at, closed_at,
                    ARRAY(SELECT b.reason FROM account_blocks b
-                          WHERE b.account_id = a.account_id AND b.lifted_at IS NULL) AS active_blocks
+                          WHERE b.account_id = a.account_id AND b.lifted_at IS NULL) AS active_blocks,
+                   (SELECT coalesce(sum(p.amount_minor), 0) FROM pending_credits p
+                     WHERE p.account_id = a.account_id AND p.status = 'ACTIVE') AS pending_credits_minor
               FROM accounts a""";
 
     private final JdbcClient jdbc;
@@ -141,6 +143,12 @@ class JdbcAccountRepository implements AccountRepository {
     }
 
     @Override
+    public Optional<Account> findByIbanForShare(Iban iban) {
+        return jdbc.sql(SELECT + " WHERE iban = ? FOR SHARE OF a").param(iban.value())
+                .query(JdbcAccountRepository::account).optional();
+    }
+
+    @Override
     public List<Account> findByCustomerId(CustomerId customerId) {
         return jdbc.sql(SELECT + " WHERE customer_id = ? AND kind = 'CUSTOMER' ORDER BY opened_at, a.account_id")
                 .param(customerId.value())
@@ -168,6 +176,7 @@ class JdbcAccountRepository implements AccountRepository {
                 rs.getString("currency"),
                 rs.getLong("booked_minor"),
                 rs.getLong("held_minor"),
+                rs.getLong("pending_credits_minor"),
                 rs.getLong("version"),
                 rs.getLong("revision"),
                 instant(rs, "opened_at"),

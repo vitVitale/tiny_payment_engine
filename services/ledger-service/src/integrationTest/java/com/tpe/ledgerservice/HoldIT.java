@@ -101,9 +101,9 @@ class HoldIT extends LedgerStack {
         assertThat(read.get("status").asString()).isEqualTo("RELEASED");
     }
 
-    /** The hold half of LED-AC-17, which stays pending until pending credits have theirs. */
+    /** The hold part of LED-AC-17; the open and pending-credit parts are in AccountApiIT and PendingCreditIT. */
     @Test
-    void aCustomerAccountWithoutCustomerIdMakesHoldCreationFailCustomerIdMissing() {
+    void LED_AC_17_aCustomerAccountWithoutCustomerIdMakesHoldCreationFailCustomerIdMissing() {
         Funded payer = fundedCustomer(10_000);
         String constraint = jdbc.sql("""
                 SELECT conname FROM pg_constraint

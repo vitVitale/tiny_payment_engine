@@ -26,6 +26,14 @@ public interface AccountRepository {
     Optional<Account> findByIban(Iban iban);
 
     /**
+     * {@link #findByIban} with {@code SELECT … FOR SHARE}: until the transaction ends, a block, unblock or close (which
+     * update the row) waits for it, while other share readers do not (12 §6.2). For a status check that writes no
+     * account row. A close must therefore lock the row before it counts {@code ACTIVE} pending credits. The row's
+     * status is current after such a wait; its block reasons and pending credits are read as of the statement start.
+     */
+    Optional<Account> findByIbanForShare(Iban iban);
+
+    /**
      * Reads the accounts with {@code SELECT … FOR UPDATE}, locking their rows in ascending {@code account_id} order
      * (12 §6.2), so two transactions locking the same accounts never deadlock on each other.
      *

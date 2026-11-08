@@ -33,9 +33,9 @@ import org.springframework.jdbc.core.simple.JdbcClient;
 import tools.jackson.databind.JsonNode;
 
 /**
- * The Account API's open and reads (specs/12-ledger-service.md §3.2, UC-10 1, 2, 4). The opening half of LED-AC-17 and
- * the open case of LED-AC-18 are covered here; both ids stay pending until block, close and the postings cover the
- * rest.
+ * The Account API's open and reads (specs/12-ledger-service.md §3.2, UC-10 1, 2, 4). The open part of LED-AC-17 (the
+ * hold and pending-credit parts are in HoldIT and PendingCreditIT) and the open case of LED-AC-18 are covered here;
+ * LED-AC-18 stays pending until close covers the rest.
  */
 class AccountApiIT extends LedgerStack {
 
@@ -77,7 +77,7 @@ class AccountApiIT extends LedgerStack {
     }
 
     @Test
-    void openingWithoutCustomerIdIsRefusedWith422CustomerIdMissing() {
+    void LED_AC_17_openingWithoutCustomerIdIsRefusedWith422CustomerIdMissing() {
         for (String missing : new String[] {null, "", "  "}) {
             var request = new HashMap<>(person("unused"));
             request.put("customerId", missing);

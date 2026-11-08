@@ -66,21 +66,21 @@ class AccountHoldTest {
     void anOpenCustomerAccountWithACustomerNumberTakesAnOnUsCredit() {
         Account payee = account(AccountStatus.OPEN, new CustomerId("C2"), 0, 0);
 
-        assertThat(payee.requireOnUsPayee()).isSameAs(payee);
-        assertThat(payee.isOnUsPayee()).isTrue();
+        assertThat(payee.requirePayee()).isSameAs(payee);
+        assertThat(payee.isPayee()).isTrue();
     }
 
     @Test
     void aBlockedClosedOrUnnumberedPayeeRefusesAnOnUsCredit() {
-        assertRefused(() -> account(AccountStatus.BLOCKED, new CustomerId("C2"), 0, 0).requireOnUsPayee(),
+        assertRefused(() -> account(AccountStatus.BLOCKED, new CustomerId("C2"), 0, 0).requirePayee(),
                 LedgerError.ACCOUNT_BLOCKED);
-        assertRefused(() -> account(AccountStatus.CLOSED, new CustomerId("C2"), 0, 0).requireOnUsPayee(),
+        assertRefused(() -> account(AccountStatus.CLOSED, new CustomerId("C2"), 0, 0).requirePayee(),
                 LedgerError.ACCOUNT_CLOSED);
-        assertRefused(() -> account(AccountStatus.OPEN, null, 0, 0).requireOnUsPayee(),
+        assertRefused(() -> account(AccountStatus.OPEN, null, 0, 0).requirePayee(),
                 LedgerError.CUSTOMER_ID_MISSING);
-        assertThat(account(AccountStatus.BLOCKED, new CustomerId("C2"), 0, 0).isOnUsPayee()).isFalse();
-        assertThat(account(AccountStatus.CLOSED, new CustomerId("C2"), 0, 0).isOnUsPayee()).isFalse();
-        assertThat(account(AccountStatus.OPEN, null, 0, 0).isOnUsPayee()).isFalse();
+        assertThat(account(AccountStatus.BLOCKED, new CustomerId("C2"), 0, 0).isPayee()).isFalse();
+        assertThat(account(AccountStatus.CLOSED, new CustomerId("C2"), 0, 0).isPayee()).isFalse();
+        assertThat(account(AccountStatus.OPEN, null, 0, 0).isPayee()).isFalse();
     }
 
     @Test
@@ -94,7 +94,7 @@ class AccountHoldTest {
         return new Account(UUID.randomUUID(), new IbanGenerator("10010010").generate(9), AccountKind.CUSTOMER,
                 customerId, Holder.of(HolderType.PERSON, "Anna Schmidt", null, null, null), status,
                 status == AccountStatus.BLOCKED ? List.of(BlockReason.OPERATOR) : List.of(), Account.EUR, booked,
-                held, 2, 1, Instant.EPOCH, status == AccountStatus.CLOSED ? Instant.EPOCH : null);
+                held, 0, 2, 1, Instant.EPOCH, status == AccountStatus.CLOSED ? Instant.EPOCH : null);
     }
 
     private static void assertRefused(org.assertj.core.api.ThrowableAssert.ThrowingCallable call, LedgerError error) {

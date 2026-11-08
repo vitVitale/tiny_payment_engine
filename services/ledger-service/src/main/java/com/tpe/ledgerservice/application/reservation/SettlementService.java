@@ -104,13 +104,13 @@ public class SettlementService {
             throw new LedgerException(LedgerError.ACCOUNT_NOT_CUSTOMER, "a technical account");
         }
         // a refusal commits with its stored 422: nothing is written before this check
-        payee.requireOnUsPayee();
+        payee.requirePayee();
         // locked before the postings' foreign keys take FOR KEY SHARE on these rows, which would block an on-us
         // settlement in the other direction from its FOR UPDATE while it blocks ours
         List<Account> locked = accounts.lockForUpdate(Set.of(hold.accountId(), payee.accountId()));
         Account lockedPayer = byId(locked, hold.accountId()).releaseHold(hold.amountMinor());
         Account lockedPayee = byId(locked, payee.accountId());
-        if (!lockedPayee.isOnUsPayee()) {
+        if (!lockedPayee.isPayee()) {
             // blocked or closed since the check above: the next attempt refuses it before any write
             throw new OptimisticConflict("payee " + payee.accountId() + " changed since it was read");
         }

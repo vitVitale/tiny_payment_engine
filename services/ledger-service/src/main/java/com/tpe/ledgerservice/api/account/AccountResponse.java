@@ -47,8 +47,7 @@ record AccountResponse(
                 account.activeBlockReasons(),
                 account.bookedMinor(),
                 account.availableMinor(),
-                // Σ ACTIVE pending credits; the ledger creates none yet (pending credits, 12 §3.1, come later)
-                0,
+                account.pendingCreditsMinor(),
                 account.currency(),
                 account.openedAt(),
                 account.closedAt());
