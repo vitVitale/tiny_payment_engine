@@ -61,6 +61,20 @@ class JournalEntryTest {
     }
 
     @Test
+    void aConfirmedIncomingPaymentDebitsTheCsmSettlementAccountAndCreditsThePayee() {
+        UUID paymentId = UUID.randomUUID();
+
+        JournalEntry entry = JournalEntry.paymentIn(UUID.randomUUID(), CUSTOMER, 5_000, paymentId, "PEER-TX-1", AT);
+
+        assertThat(entry.type()).isEqualTo(EntryType.PAYMENT_IN);
+        assertThat(entry.paymentId()).isEqualTo(paymentId);
+        assertThat(entry.txId()).isEqualTo("PEER-TX-1");
+        assertThat(entry.postings()).containsExactly(
+                new Posting(TechnicalAccounts.CSM_SETTLEMENT_ID, Side.DR, 5_000),
+                new Posting(CUSTOMER, Side.CR, 5_000));
+    }
+
+    @Test
     void anEntryWhosePostingsDoNotBalanceIsRefused() {
         var postings = List.of(new Posting(CUSTOMER, Side.DR, 100), new Posting(OTHER, Side.CR, 99));
 

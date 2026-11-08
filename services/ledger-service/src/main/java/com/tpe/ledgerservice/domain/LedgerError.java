@@ -17,6 +17,12 @@ public enum LedgerError {
     HOLD_RELEASED,
     /** The hold was settled: the money has left; 409. */
     HOLD_SETTLED,
+    /** No pending credit with this id (404). */
+    PENDING_CREDIT_NOT_FOUND,
+    /** The pending credit was cancelled, or tombstoned before it was created (ADR-009); 409. */
+    PENDING_CREDIT_CANCELLED,
+    /** The pending credit was confirmed: the money is booked; 409. */
+    PENDING_CREDIT_CONFIRMED,
     /** A back-office operator adding or lifting a {@code SANCTIONS*} block (§3.2); 403. */
     SANCTIONS_BLOCK_PROTECTED,
     /** The caller may not touch blocks of this reason at all, e.g. risk-service and {@code OPERATOR}; 403. */

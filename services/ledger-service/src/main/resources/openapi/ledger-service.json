@@ -72,7 +72,7 @@
     },
     "/v1/accounts/{accountId}" : {
       "get" : {
-        "operationId" : "get_1",
+        "operationId" : "get_2",
         "parameters" : [ {
           "in" : "path",
           "name" : "accountId",
@@ -310,7 +310,7 @@
     },
     "/v1/holds" : {
       "post" : {
-        "operationId" : "create",
+        "operationId" : "create_1",
         "parameters" : [ {
           "description" : "hold-create:<holdId>; a retry replays the stored response",
           "in" : "header",
@@ -358,7 +358,7 @@
     },
     "/v1/holds/{holdId}" : {
       "get" : {
-        "operationId" : "get",
+        "operationId" : "get_1",
         "parameters" : [ {
           "in" : "path",
           "name" : "holdId",
@@ -521,6 +521,174 @@
         "security" : [ ],
         "tags" : [ "hold-controller" ]
       }
+    },
+    "/v1/pending-credits" : {
+      "post" : {
+        "operationId" : "create",
+        "parameters" : [ {
+          "description" : "pending-credit-create:<paymentId>; a retry replays the stored response",
+          "in" : "header",
+          "name" : "Idempotency-Key",
+          "required" : true,
+          "schema" : {
+            "type" : "string"
+          }
+        } ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/CreatePendingCreditRequest"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "200" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/PendingCreditResponse"
+                }
+              }
+            },
+            "description" : "The existing pending credit of a retry"
+          },
+          "201" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/PendingCreditResponse"
+                }
+              }
+            },
+            "description" : "Created"
+          }
+        },
+        "security" : [ ],
+        "tags" : [ "pending-credit-controller" ]
+      }
+    },
+    "/v1/pending-credits/{pendingCreditId}" : {
+      "get" : {
+        "operationId" : "get",
+        "parameters" : [ {
+          "in" : "path",
+          "name" : "pendingCreditId",
+          "required" : true,
+          "schema" : {
+            "type" : "string",
+            "format" : "uuid"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/PendingCreditResponse"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "security" : [ ],
+        "tags" : [ "pending-credit-controller" ]
+      }
+    },
+    "/v1/pending-credits/{pendingCreditId}/cancel" : {
+      "post" : {
+        "operationId" : "cancel",
+        "parameters" : [ {
+          "in" : "path",
+          "name" : "pendingCreditId",
+          "required" : true,
+          "schema" : {
+            "type" : "string",
+            "format" : "uuid"
+          }
+        }, {
+          "description" : "pending-credit-cancel:<paymentId>; a retry replays the stored response",
+          "in" : "header",
+          "name" : "Idempotency-Key",
+          "required" : true,
+          "schema" : {
+            "type" : "string"
+          }
+        } ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "type" : "object",
+                "additionalProperties" : { }
+              }
+            }
+          }
+        },
+        "responses" : {
+          "200" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/PendingCreditResponse"
+                }
+              }
+            },
+            "description" : "Cancelled"
+          }
+        },
+        "security" : [ ],
+        "tags" : [ "pending-credit-controller" ]
+      }
+    },
+    "/v1/pending-credits/{pendingCreditId}/confirm" : {
+      "post" : {
+        "operationId" : "confirm",
+        "parameters" : [ {
+          "in" : "path",
+          "name" : "pendingCreditId",
+          "required" : true,
+          "schema" : {
+            "type" : "string",
+            "format" : "uuid"
+          }
+        }, {
+          "description" : "pending-credit-confirm:<paymentId>; a retry replays the stored response",
+          "in" : "header",
+          "name" : "Idempotency-Key",
+          "required" : true,
+          "schema" : {
+            "type" : "string"
+          }
+        } ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "type" : "object",
+                "additionalProperties" : { }
+              }
+            }
+          }
+        },
+        "responses" : {
+          "200" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ConfirmationResponse"
+                }
+              }
+            },
+            "description" : "Confirmed"
+          }
+        },
+        "security" : [ ],
+        "tags" : [ "pending-credit-controller" ]
+      }
     }
   },
   "components" : {
@@ -588,6 +756,31 @@
           }
         }
       },
+      "ConfirmationResponse" : {
+        "type" : "object",
+        "properties" : {
+          "accountId" : {
+            "type" : "string",
+            "format" : "uuid"
+          },
+          "confirmedAt" : {
+            "type" : "string",
+            "format" : "date-time"
+          },
+          "journalEntryId" : {
+            "type" : "string",
+            "format" : "uuid"
+          },
+          "pendingCreditId" : {
+            "type" : "string",
+            "format" : "uuid"
+          },
+          "status" : {
+            "type" : "string",
+            "enum" : [ "ACTIVE", "CONFIRMED", "CANCELLED" ]
+          }
+        }
+      },
       "CreateHoldRequest" : {
         "type" : "object",
         "properties" : {
@@ -602,6 +795,28 @@
             "type" : "string"
           },
           "holdId" : {
+            "type" : "string",
+            "format" : "uuid"
+          },
+          "reference" : {
+            "$ref" : "#/components/schemas/Reference"
+          }
+        }
+      },
+      "CreatePendingCreditRequest" : {
+        "type" : "object",
+        "properties" : {
+          "amountMinor" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "creditorIban" : {
+            "type" : "string"
+          },
+          "currency" : {
+            "type" : "string"
+          },
+          "pendingCreditId" : {
             "type" : "string",
             "format" : "uuid"
           },
@@ -777,6 +992,52 @@
           }
         }
       },
+      "PendingCreditResponse" : {
+        "type" : "object",
+        "properties" : {
+          "accountId" : {
+            "type" : "string",
+            "format" : "uuid"
+          },
+          "amountMinor" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "createdAt" : {
+            "type" : "string",
+            "format" : "date-time"
+          },
+          "debtorAgentBic" : {
+            "type" : "string"
+          },
+          "finalisedAt" : {
+            "type" : "string",
+            "format" : "date-time"
+          },
+          "journalEntryId" : {
+            "type" : "string",
+            "format" : "uuid"
+          },
+          "paymentId" : {
+            "type" : "string",
+            "format" : "uuid"
+          },
+          "pendingCreditId" : {
+            "type" : "string",
+            "format" : "uuid"
+          },
+          "status" : {
+            "type" : "string",
+            "enum" : [ "ACTIVE", "CONFIRMED", "CANCELLED" ]
+          },
+          "tombstone" : {
+            "type" : "boolean"
+          },
+          "txId" : {
+            "type" : "string"
+          }
+        }
+      },
       "PostingResponse" : {
         "type" : "object",
         "properties" : {
@@ -812,6 +1073,9 @@
       "Reference" : {
         "type" : "object",
         "properties" : {
+          "debtorAgentBic" : {
+            "type" : "string"
+          },
           "paymentId" : {
             "type" : "string",
             "format" : "uuid"

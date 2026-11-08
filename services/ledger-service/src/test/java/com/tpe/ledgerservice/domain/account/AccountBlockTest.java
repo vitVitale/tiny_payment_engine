@@ -128,6 +128,6 @@ class AccountBlockTest {
     private static Account account(AccountStatus status, List<BlockReason> blocks) {
         return new Account(UUID.randomUUID(), new IbanGenerator("10010010").generate(7), AccountKind.CUSTOMER,
                 new CustomerId("CUST-1"), Holder.of(HolderType.PERSON, "Anna Schmidt", null, null, null), status,
-                blocks, Account.EUR, 0, 0, 4, 3, OPENED, status == AccountStatus.CLOSED ? CLOSED_AT : null);
+                blocks, Account.EUR, 0, 0, 0, 4, 3, OPENED, status == AccountStatus.CLOSED ? CLOSED_AT : null);
     }
 }
