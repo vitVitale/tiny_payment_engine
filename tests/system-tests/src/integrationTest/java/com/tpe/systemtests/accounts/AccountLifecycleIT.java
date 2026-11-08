@@ -17,11 +17,14 @@ import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.condition.EnabledIfSystemProperty;
 
 /**
  * UC-10 end to end (specs/20-testing-strategy.md §4): an account's lifecycle against the running ledger-service, as
  * the vop / risk projections of {@code accounts.events} see it — here the harness's test projection (ADR-007).
  */
+@EnabledIfSystemProperty(named = "tpe.local-stack", matches = "true",
+        disabledReason = "needs the compose stack; run with -Dtpe.local-stack=true")
 class AccountLifecycleIT extends LedgerSystemTest {
 
     private static final long FUNDED_MINOR = 25_000;

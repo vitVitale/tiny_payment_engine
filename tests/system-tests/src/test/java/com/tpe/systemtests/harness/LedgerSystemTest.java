@@ -15,7 +15,6 @@ import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.CopyOnWriteArrayList;
 import org.junit.jupiter.api.AfterEach;
-import org.junit.jupiter.api.condition.EnabledIfSystemProperty;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.json.JsonMapper;
 
@@ -24,9 +23,10 @@ import tools.jackson.databind.json.JsonMapper;
  * --wait postgres kafka oauth2}, run with {@code -Dtpe.local-stack=true}): the service process, the
  * {@code accounts.events} test projection, and after every test the per-test global invariant checks over the
  * accounts the test opened (specs/20-testing-strategy.md §2, §3). Later milestones add their invariants here.
+ *
+ * <p>Every subclass carries {@code @EnabledIfSystemProperty(named = "tpe.local-stack", matches = "true")} itself: the
+ * condition is not {@code @Inherited}, so on this class it would not stop the plain build from starting the harness.
  */
-@EnabledIfSystemProperty(named = "tpe.local-stack", matches = "true",
-        disabledReason = "needs the compose stack; run with -Dtpe.local-stack=true")
 public abstract class LedgerSystemTest {
 
     /** The ledger database as deploy/postgres/init.sql creates it (local credentials only). */
