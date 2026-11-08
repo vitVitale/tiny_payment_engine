@@ -776,6 +776,10 @@
           "iban" : {
             "type" : "string"
           },
+          "kind" : {
+            "type" : "string",
+            "enum" : [ "CUSTOMER", "TECHNICAL" ]
+          },
           "openedAt" : {
             "type" : "string",
             "format" : "date-time"

@@ -4,6 +4,10 @@ spring:
   jackson:
     # optional response fields (closedAt, holder.organisationId, …) are absent, not null
     default-property-inclusion: non_null
+  transaction:
+    # no transaction outlives the snapshot settle time of 60 s, so none can commit a posting below a snapshot
+    # boundary (specs/12-ledger-service.md §6.3)
+    default-timeout: 30s
   flyway:
     placeholders:
       # the IBANs of the seeded technical accounts (V2__technical_accounts.sql)
@@ -29,6 +33,9 @@ tpe:
     idempotency:
       # keys older than this are deleted hourly (specs/12-ledger-service.md §6.1, §7)
       retention: 30d
+    snapshot:
+      # technical-account balance snapshots (specs/12-ledger-service.md §6.3, §7)
+      interval: 15m
     account-tombstones:
       # the daily job deleting accounts closed 13 months ago from accounts.events (specs/12-ledger-service.md §4, §7)
       poll-interval: 1d

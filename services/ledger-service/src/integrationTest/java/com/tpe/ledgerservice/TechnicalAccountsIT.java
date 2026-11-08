@@ -39,11 +39,20 @@ class TechnicalAccountsIT extends LedgerStack {
         assertThat(ibans).allSatisfy(iban -> assertThat(new Iban(iban).bankCode()).isEqualTo("10010010"));
     }
 
-    /** Their balance comes from postings and snapshots (12 §6.3), not from the row the Account API reads. */
+    /**
+     * 12 §3.3: the Account API reads show a technical account with the balance derived from its postings (§6.3), not
+     * its row's {@code booked_minor}, which stays 0.
+     */
     @Test
-    void areRefusedByTheAccountApiReadsWith422AccountNotCustomer() {
+    void areReadByTheAccountApiWithTheirDerivedBalance() {
         String iban = jdbc.sql("SELECT iban FROM accounts WHERE account_id = ?")
                 .param(TechnicalAccounts.FUNDING_ID).query(String.class).single();
+        UUID customer = openCustomer("CUST-TECH-" + UUID.randomUUID().toString().substring(0, 8));
+        assertThat(fund(operator("op-1"), newIdempotencyKey(), customer, eur(2_500)).getStatusCode().value())
+                .isEqualTo(200);
+        long expected = jdbc.sql("""
+                SELECT coalesce(sum(CASE side WHEN 'CR' THEN amount_minor ELSE -amount_minor END), 0)
+                  FROM postings WHERE account_id = ?""").param(TechnicalAccounts.FUNDING_ID).query(Long.class).single();
 
         var byId = http().get().uri("/v1/accounts/{id}", TechnicalAccounts.FUNDING_ID)
                 .header(AUTHORIZATION, operator("op-1"))
@@ -52,10 +61,17 @@ class TechnicalAccountsIT extends LedgerStack {
                 .header(AUTHORIZATION, operator("op-1"))
                 .retrieve().toEntity(JsonNode.class);
 
-        assertThat(byId.getStatusCode().value()).isEqualTo(422);
-        assertThat(byId.getBody().get("code").asString()).isEqualTo("ACCOUNT_NOT_CUSTOMER");
-        assertThat(byIban.getStatusCode().value()).isEqualTo(422);
-        assertThat(byIban.getBody().get("code").asString()).isEqualTo("ACCOUNT_NOT_CUSTOMER");
+        assertThat(byId.getStatusCode().value()).isEqualTo(200);
+        assertThat(byId.getBody().get("kind").asString()).isEqualTo("TECHNICAL");
+        assertThat(byId.getBody().has("customerId")).isFalse();
+        assertThat(byId.getBody().has("holder")).isFalse();
+        assertThat(expected).isNegative();
+        assertThat(byId.getBody().get("bookedBalanceMinor").asLong()).isEqualTo(expected);
+        assertThat(byId.getBody().get("availableBalanceMinor").asLong()).isEqualTo(expected);
+        assertThat(byIban.getStatusCode().value()).isEqualTo(200);
+        assertThat(byIban.getBody().get("accountId").asString()).isEqualTo(TechnicalAccounts.FUNDING_ID.toString());
+        assertThat(jdbc.sql("SELECT booked_minor FROM accounts WHERE account_id = ?")
+                .param(TechnicalAccounts.FUNDING_ID).query(Long.class).single()).isZero();
     }
 
     /** Only customer accounts reach the outbox: an opening publishes its own account, never a technical one. */

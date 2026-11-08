@@ -124,7 +124,7 @@ class AccountController {
     @GetMapping("/{accountId}")
     @PreAuthorize("hasRole('BACKOFFICE_OPERATOR')")
     AccountResponse get(@PathVariable UUID accountId) {
-        return AccountResponse.of(accounts.get(accountId));
+        return AccountResponse.of(accounts.read(accountId));
     }
 
     /**
@@ -149,6 +149,6 @@ class AccountController {
         } catch (DomainValidationException e) {
             throw new ValidationFailedException(List.of(new FieldError("iban", e.code().name())));
         }
-        return AccountResponse.of(accounts.getByIban(parsed));
+        return AccountResponse.of(accounts.readByIban(parsed));
     }
 }

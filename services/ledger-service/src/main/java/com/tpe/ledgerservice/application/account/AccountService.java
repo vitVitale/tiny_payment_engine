@@ -1,6 +1,7 @@
 package com.tpe.ledgerservice.application.account;
 
 import com.tpe.ledgerservice.application.posting.AccountPosting;
+import com.tpe.ledgerservice.application.posting.BalanceSnapshotRepository;
 import com.tpe.ledgerservice.application.posting.JournalRepository;
 import com.tpe.ledgerservice.application.posting.OptimisticConflict;
 import com.tpe.ledgerservice.application.posting.PostingsPage;
@@ -42,16 +43,18 @@ public class AccountService {
 
     private final AccountRepository accounts;
     private final JournalRepository journal;
+    private final BalanceSnapshotRepository snapshots;
     private final AuditLog audit;
     private final OutboxWriter outbox;
     private final IbanGenerator ibans;
     private final UuidV7Generator ids;
     private final Clock clock;
 
-    public AccountService(AccountRepository accounts, JournalRepository journal, AuditLog audit, OutboxWriter outbox,
-            IbanGenerator ibans, UuidV7Generator ids, Clock clock) {
+    public AccountService(AccountRepository accounts, JournalRepository journal, BalanceSnapshotRepository snapshots,
+            AuditLog audit, OutboxWriter outbox, IbanGenerator ibans, UuidV7Generator ids, Clock clock) {
         this.accounts = accounts;
         this.journal = journal;
+        this.snapshots = snapshots;
         this.audit = audit;
         this.outbox = outbox;
         this.ibans = ibans;
@@ -189,10 +192,31 @@ public class AccountService {
         return customer(accounts.findById(accountId).orElseThrow(AccountService::notFound));
     }
 
-    /** @throws LedgerException {@code ACCOUNT_NOT_FOUND}, {@code ACCOUNT_NOT_CUSTOMER} */
+    /**
+     * Any account as the Account API reads it (12 §3.2, §3.3): a technical one with its balance derived from snapshots
+     * and postings (§6.3), as its row is never booked.
+     *
+     * @throws LedgerException {@code ACCOUNT_NOT_FOUND}
+     */
     @Transactional(readOnly = true)
-    public Account getByIban(Iban iban) {
-        return customer(accounts.findByIban(iban).orElseThrow(AccountService::notFound));
+    public Account read(UUID accountId) {
+        return withBalance(accounts.findById(accountId).orElseThrow(AccountService::notFound));
+    }
+
+    /**
+     * {@link #read} by IBAN.
+     *
+     * @throws LedgerException {@code ACCOUNT_NOT_FOUND}
+     */
+    @Transactional(readOnly = true)
+    public Account readByIban(Iban iban) {
+        return withBalance(accounts.findByIban(iban).orElseThrow(AccountService::notFound));
+    }
+
+    private Account withBalance(Account account) {
+        return account.kind() == AccountKind.TECHNICAL
+                ? account.withDerivedBalance(snapshots.derivedBalance(account.accountId()))
+                : account;
     }
 
     /**
@@ -216,10 +240,7 @@ public class AccountService {
         return new PostingsPage(page, page.getLast().postingId());
     }
 
-    /**
-     * The Account API serves customer accounts: a technical account's balance is derived from postings and
-     * snapshots (12 §6.3), not from its row, whose {@code booked_minor} stays 0.
-     */
+    /** The account changes and the entries feed serve customer accounts only; technical ones are only read. */
     private static Account customer(Account account) {
         if (account.kind() != AccountKind.CUSTOMER) {
             throw new LedgerException(LedgerError.ACCOUNT_NOT_CUSTOMER, "a technical account");
