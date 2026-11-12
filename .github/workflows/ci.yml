@@ -81,9 +81,9 @@ jobs:
       - name: Compose logs
         if: failure()
         run: docker compose -f deploy/docker-compose.yml logs
-      - name: ledger-service log
+      - name: Service logs
         if: failure()
-        run: cat tests/system-tests/target/ledger-service-systemtest.log || true
+        run: tail -n +1 tests/system-tests/target/*-systemtest.log || true
 
   # OBS-AC-01 … -04 against the compose observability profile, on main builds (specs/26-observability.md §13)
   observability-stack:

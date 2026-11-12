@@ -100,7 +100,8 @@ tests start ledger-service from its jar in profiles `local,systemtest`, so the s
 ./mvnw -pl services/ledger-service,tests/system-tests -am verify -Dtpe.local-stack=true
 ```
 
-The service's log is `tests/system-tests/target/ledger-service-systemtest.log`.
+Each service the system tests start logs to `tests/system-tests/target/<service>-systemtest.log`; `-Dtpe.<service>.jar`
+points the harness at another jar.
 
 ## Traceability check
 
