@@ -1,0 +1,76 @@
+# VOP-AC-04: the name-matching table of specs/13-vop-service.md §6.2, read by NameMatcherTest. Both names are
+# normalised, then scored (Jaro-Winkler, max of token-sorted and unsorted) and mapped with the default thresholds
+# MATCH >= 0.95 > CLOSE_MATCH >= 0.85 > NO_MATCH. Columns: holder (as stored), input (as requested), expected.
+holder,input,expected
+# diacritics: Müller / Mueller / Muller
+Hans Müller,Hans Müller,MATCH
+Hans Müller,Hans Muller,MATCH
+Hans Müller,Hans Mueller,MATCH
+Hans Mueller,Hans Müller,MATCH
+Hans Mueller,Hans Muller,MATCH
+Jürgen Müller,JURGEN MULLER,MATCH
+François Lefèvre,Francois Lefevre,MATCH
+José Núñez,Jose Nunez,MATCH
+Gerd Strauß,Gerd Strauss,MATCH
+Zoë Ångström,Zoe Angstrom,MATCH
+Yılmaz Öztürk,Yilmaz Ozturk,MATCH
+# case, punctuation, whitespace
+Anna Schmidt,ANNA SCHMIDT,MATCH
+Anna Schmidt,  anna   schmidt ,MATCH
+Anna-Lena Schmidt,Anna Lena Schmidt,MATCH
+Patrick O'Brien,Patrick OBrien,MATCH
+"Schmidt, Anna",Anna Schmidt,MATCH
+# word order
+Anna Schmidt,Schmidt Anna,MATCH
+Anna Maria Schmidt,Schmidt Anna Maria,MATCH
+Max Mustermann,Mustermann Max,MATCH
+Anna Schmidt-Berg,Berg Anna Schmidt,MATCH
+# legal forms
+ACME GmbH,ACME,MATCH
+ACME,ACME GmbH,MATCH
+Acme GmbH,Acme AG,MATCH
+Beispiel e.K.,Beispiel,MATCH
+Rossi S.p.A.,Rossi,MATCH
+Van Dijk B.V.,Van Dijk,MATCH
+Société Générale S.A.,Societe Generale,MATCH
+Max Mustermann GmbH,Max Mustermann,MATCH
+Acme GmbH & Co. KG,Acme,CLOSE_MATCH
+# titles
+Dr. Anna Schmidt,Anna Schmidt,MATCH
+Anna Schmidt,Prof. Dr. Anna Schmidt,MATCH
+Herr Hans Meier,Hans Meier,MATCH
+Mrs Jane Smith,Jane Smith,MATCH
+# typos and near names: the Schmitt typo of 13 §9 against a double-barrelled holder
+Anna Schmidt-Berg,Anna Schmitt,CLOSE_MATCH
+Anna Schmidt-Berg,Anna Schmidt,CLOSE_MATCH
+Anna Schmidt,Anna Schmidt Meier,CLOSE_MATCH
+Anna Lena Schmidt,Anna Schmidt,CLOSE_MATCH
+Katharina Schneider,Katarina Schneider,CLOSE_MATCH
+Christian Fischer,Christine Fischer,CLOSE_MATCH
+Jonathan Weber,Jon Weber,CLOSE_MATCH
+Alexander Hoffmann,Alex Hoffmann,CLOSE_MATCH
+Anna Schmidt,A. Schmidt,CLOSE_MATCH
+Peter Meyer,Peter Maier,CLOSE_MATCH
+Maria Garcia Lopez,Maria Garcia,CLOSE_MATCH
+Globex,Globex International,CLOSE_MATCH
+# one letter off in a longer name scores at or above match-threshold: Jaro-Winkler weighs the shared prefix
+Anna Schmidt,Anna Schmitt,MATCH
+Anna Schmidt,Ann Schmidt,MATCH
+Max Mustermann,Max Musterman,MATCH
+Michael Wagner,Micheal Wagner,MATCH
+Stephanie Becker,Stefanie Becker,MATCH
+Thomas Müller,Tomas Müller,MATCH
+Julia Schulz,Julia Schulze,MATCH
+Jan Kowalski,Jan Kowalsky,MATCH
+# clearly different names
+Anna Schmidt,Peter Wagner,NO_MATCH
+Anna Schmidt,Max Mustermann,NO_MATCH
+ACME GmbH,Globex Corporation,NO_MATCH
+Jürgen Müller,Klaus Becker,NO_MATCH
+Max Mustermann GmbH,Erika Musterfrau,NO_MATCH
+Erika Mustermann,Max Mustermann,NO_MATCH
+Beispiel e.K.,Muster AG,NO_MATCH
+Olga Ivanova,Olga Petrova,NO_MATCH
+# nothing left to compare after normalisation never matches
+GmbH,GmbH,NO_MATCH
+Anna Schmidt,Dr.,NO_MATCH

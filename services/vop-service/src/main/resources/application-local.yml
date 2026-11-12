@@ -14,3 +14,9 @@ spring:
       resourceserver:
         jwt:
           issuer-uri: http://localhost:8099/default
+tpe:
+  vop:
+    # local only: the responder audit pepper is a secret everywhere else (specs/13-vop-service.md §7, ADR-017)
+    audit-peppers:
+      "1": vop-local-audit-pepper
+    active-pepper-version: 1

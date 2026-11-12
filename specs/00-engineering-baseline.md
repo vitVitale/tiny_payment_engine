@@ -297,7 +297,7 @@ Authentication and authorisation are decided in [ADR-012](../architecture/decisi
   committed and never baked into images. Until SEC-03 is in place (from M5) they come from environment variables; in `prod` they never do
   ([ADR-017](../architecture/decisions/ADR-017-secrets-keys-and-encryption-at-rest.md)).
   Exception: the fixed credentials of the local compose stack (§13; database roles, PostgreSQL superuser, mock
-  OAuth2 client secret) are committed and documented. They are not secrets: they work only against that stack, and
+  OAuth2 client secret, the VoP audit pepper of profile `local`) are committed and documented. They are not secrets: they work only against that stack, and
   no other profile may use them.
 
 ### 12.3 Production requirements

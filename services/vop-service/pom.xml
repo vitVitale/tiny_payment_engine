@@ -19,6 +19,12 @@
             <artifactId>contracts</artifactId>
             <version>${project.version}</version>
         </dependency>
+        <!-- Iban, Bic and the bank directory of the responder's participant check (specs/13-vop-service.md §3.2) -->
+        <dependency>
+            <groupId>com.tpe</groupId>
+            <artifactId>payment-domain</artifactId>
+            <version>${project.version}</version>
+        </dependency>
         <!-- the inbox and listener error handling of the accounts.events consumer (specs/13-vop-service.md §4) -->
         <dependency>
             <groupId>com.tpe</groupId>
@@ -54,6 +60,10 @@
             <artifactId>postgresql</artifactId>
             <scope>runtime</scope>
         </dependency>
+        <dependency>
+            <groupId>org.springdoc</groupId>
+            <artifactId>springdoc-openapi-starter-webmvc-api</artifactId>
+        </dependency>
 
         <dependency>
             <groupId>org.springframework.boot</groupId>
@@ -88,6 +98,18 @@
     </dependencies>
 
     <build>
+        <resources>
+            <resource>
+                <directory>src/main/resources</directory>
+            </resource>
+            <!-- the default tpe.bank-directory.location, classpath:bank-directory.yml (specs/01-shared-libraries.md §1.4) -->
+            <resource>
+                <directory>${project.basedir}/../../deploy/config</directory>
+                <includes>
+                    <include>bank-directory.yml</include>
+                </includes>
+            </resource>
+        </resources>
         <plugins>
             <plugin>
                 <groupId>org.springframework.boot</groupId>

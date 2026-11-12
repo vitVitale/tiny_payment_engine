@@ -63,6 +63,21 @@ class InMemoryBankDirectoryTest {
     }
 
     @Test
+    void looksUpAParticipantByItsBicWithOrWithoutTheBranchCode() {
+        assertThat(directory().lookup(PEER_BIC)).contains(PEER);
+        assertThat(directory().lookup(new Bic("PEERDEFF"))).contains(PEER);
+        assertThat(directory().lookup(new Bic("SLOWDEFFXXX"))).contains(UNREACHABLE);
+        assertThat(directory().lookup(OWN_BIC)).contains(OWN);
+    }
+
+    @Test
+    void anUnknownBicIsEmpty() {
+        assertThat(directory().lookup(new Bic("UNKNDEFFXXX"))).isEmpty();
+        // another institution of the same country and location code
+        assertThat(directory().lookup(new Bic("PEEXDEFFXXX"))).isEmpty();
+    }
+
+    @Test
     void exposesTheOwnBic() {
         assertThat(directory().ownBic()).isEqualTo(OWN_BIC);
     }

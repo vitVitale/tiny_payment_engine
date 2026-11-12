@@ -1,6 +1,9 @@
 spring:
   application:
     name: vop-service
+  config:
+    # the bank directory (specs/01-shared-libraries.md §1.4): the participants the responder accepts (13 §3.2)
+    import: ${tpe.bank-directory.location:classpath:bank-directory.yml}
 
 management:
   endpoint:
@@ -14,3 +17,10 @@ tpe:
     enabled: true
   # name normalisation (specs/13-vop-service.md §6.2, §7): tpe.vop.legal-forms and tpe.vop.titles replace the lists of
   # §6.2 (NameNormaliser.DEFAULT_LEGAL_FORMS / DEFAULT_TITLES); tokens are written as in names, e.g. e.K.
+  # vop:
+  #   match-threshold / close-match-threshold: 0.95 / 0.85 (13 §6.2, §7; NameMatcher.DEFAULT_*)
+  #   audit-peppers (version → pepper) and active-pepper-version: required secrets, no default (13 §7, ADR-017)
+
+springdoc:
+  # a stable document to check in (specs/00-engineering-baseline.md §7)
+  writer-with-order-by-keys: true

@@ -75,6 +75,13 @@ directory (`401 UNKNOWN_PARTICIPANT` otherwise); mTLS in production (UC-03 preco
 the client certificate and a differing `requestingPspBic` is refused with `401 UNKNOWN_PARTICIPANT`. Requests above
 the per-PSP limit get `429 RATE_LIMITED` ([ADR-018](../architecture/decisions/ADR-018-rate-limiting.md)).
 
+Authentication comes first for any body that parses as JSON (one that does not is `400 VALIDATION_FAILED`): a request
+whose `requestingPspBic` is missing, not a BIC or not a participant of the directory (compared by institution,
+`BankDirectory.lookup(Bic)`: `PEERDEFF` is `PEERDEFFXXX`) is `401` whatever its other fields hold, and is not audited.
+Then `400 VALIDATION_FAILED` with `errors`: `requestId` (`REQUIRED`, `TOO_LONG` over 64), `iban` (`REQUIRED`,
+`INVALID_IBAN`; paper format accepted), `name` (`REQUIRED`, `TOO_LONG` over 140), `organisationId` (`TOO_LONG` over
+35; blank is none). `actualName` is `null` unless the result is `CLOSE_MATCH`.
+
 ## 4. Messaging
 
 Consumes `accounts.events` ([02 §5](02-messaging-contracts.md#5-accountsevents-ledger--vop-risk)), group `vop-service`:
@@ -110,7 +117,7 @@ CREATE INDEX vop_results_expiry ON vop_results (expires_at);
 
 CREATE TABLE responder_audit (
   id BIGSERIAL PRIMARY KEY, request_id VARCHAR(64) NOT NULL, requesting_psp_bic VARCHAR(11) NOT NULL,
-  iban_hash CHAR(64) NOT NULL, name_hash CHAR(64) NOT NULL,    -- SHA-256 with a secret pepper
+  iban_hash CHAR(64) NOT NULL, name_hash CHAR(64) NOT NULL,    -- HMAC-SHA-256 keyed with a secret pepper, hex
   pepper_version SMALLINT NOT NULL,                             -- which pepper hashed this row (ADR-017)
   result VARCHAR(12) NOT NULL, at TIMESTAMPTZ NOT NULL
 );
@@ -142,10 +149,14 @@ Plus `inbox`.
      unsorted strings and take the max (handles word order).
    - **Map:** score ≥ `match-threshold` (0.95) → `MATCH`; ≥ `close-match-threshold` (0.85) → `CLOSE_MATCH` with
      `actualName` = holder name as stored; otherwise `NO_MATCH`.
-4. Write `responder_audit` (hashed values only) and return. p99 ≤ 1 s; lookups never call ledger-service (UC-03 NFR).
+4. Write `responder_audit` (hashed values only: the IBAN in electronic format, the name as requested) and return.
+   p99 ≤ 1 s; lookups never call ledger-service (UC-03 NFR).
 
 The matcher is a pure function in `domain.matching` with a table-driven test file of ≥ 50 name pairs
-(`src/test/resources/name-matching-cases.csv`, columns: holder, input, expected).
+(`src/test/resources/name-matching-cases.csv`, columns: holder, input, expected). Jaro-Winkler weighs a shared prefix,
+so one wrong letter late in a longer name can still reach `match-threshold` (`Anna Schmidt` / `Anna Schmitt`: 0.967 →
+`MATCH`); the typo row of VOP-AC-04 is `Anna Schmidt-Berg` / `Anna Schmitt` (0.913 → `CLOSE_MATCH`). Steps 1–3 are
+the pure `HolderVerifier`; organisation ids compare trimmed, ignoring case.
 
 ### 6.3 Retention
 
