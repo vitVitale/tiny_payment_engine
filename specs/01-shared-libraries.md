@@ -292,6 +292,8 @@ sweeper, csm-gateway answer deadlines and send retries, notification retries, le
 - Java records for every Kafka message ([02](02-messaging-contracts.md)) and every **internal** REST request /
   response DTO (orchestrator, ledger, risk, vop internal APIs). The customer-facing API of payment-api and the
   scheme-facing VoP responder API are *not* in `contracts` — they are owned by their service.
+  One package per internal API (`com.tpe.contracts.vop`: verification and reference check, 13 §3.1); they carry no
+  `@Contract`, as they are not messages.
 - Records use `payment-domain` value objects with Jackson serialisers registered by `ContractsModule`
   (`Money` → `amountMinor` + `currency`, `Iban` → string, …).
 - `ContractValidator.validate(Message)` checks required fields and value-object validity; consumers call it before

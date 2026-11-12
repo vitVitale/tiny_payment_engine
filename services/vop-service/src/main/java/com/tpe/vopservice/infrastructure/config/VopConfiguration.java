@@ -1,18 +1,29 @@
 package com.tpe.vopservice.infrastructure.config;
 
+import com.tpe.contracts.ContractsModule;
+import com.tpe.paymentdomain.BankDirectory;
+import com.tpe.paymentdomain.UlidGenerator;
+import com.tpe.vopservice.application.metrics.VopRequestMetrics;
+import com.tpe.vopservice.application.references.VopResults;
+import com.tpe.vopservice.application.requesting.CounterpartyVop;
+import com.tpe.vopservice.application.requesting.RequestingService;
+import com.tpe.vopservice.application.responding.RespondingService;
 import com.tpe.vopservice.domain.matching.HolderVerifier;
 import com.tpe.vopservice.domain.matching.NameMatcher;
 import com.tpe.vopservice.domain.matching.NameNormaliser;
+import java.security.SecureRandom;
 import java.time.Clock;
+import java.time.Duration;
 import java.util.List;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
 /**
- * Time, the name normaliser and the name matcher (specs/00-engineering-baseline.md §6, specs/13-vop-service.md §6.2,
- * §7).
+ * Time, JSON of the internal API, the name normaliser and matcher, and the requesting service
+ * (specs/00-engineering-baseline.md §6, specs/13-vop-service.md §3.1, §6.1, §6.2, §7).
  */
 @Configuration(proxyBeanMethods = false)
 @EnableConfigurationProperties({VopConfiguration.Normalisation.class, VopConfiguration.Matching.class})
@@ -21,6 +32,26 @@ class VopConfiguration {
     @Bean
     Clock clock() {
         return Clock.systemUTC();
+    }
+
+    /** The value objects of the {@code contracts} DTOs as strings (01 §4); Spring Boot registers it with Jackson. */
+    @Bean
+    ContractsModule contractsModule() {
+        return new ContractsModule();
+    }
+
+    /** {@code vopReference} = {@code VOP-} + a ULID; its random part from a secure source, as a reference is a key. */
+    @Bean
+    UlidGenerator ulidGenerator(Clock clock) {
+        return new UlidGenerator(clock, new SecureRandom());
+    }
+
+    @Bean
+    RequestingService requestingService(BankDirectory directory, RespondingService responding,
+            CounterpartyVop counterparty, VopResults results, UlidGenerator ulids, VopRequestMetrics metrics,
+            Clock clock, @Value("${tpe.vop.reference-validity}") Duration referenceValidity) {
+        return new RequestingService(directory, responding, counterparty, results, ulids, metrics, clock,
+                referenceValidity);
     }
 
     @Bean

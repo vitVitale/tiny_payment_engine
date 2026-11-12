@@ -75,6 +75,13 @@
             <artifactId>test-support</artifactId>
             <scope>test</scope>
         </dependency>
+        <!-- MutableClock (specs/01-shared-libraries.md §1.3) -->
+        <dependency>
+            <groupId>com.tpe</groupId>
+            <artifactId>payment-domain</artifactId>
+            <type>test-jar</type>
+            <scope>test</scope>
+        </dependency>
         <!-- M-04, consumer vop-service (specs/20-testing-strategy.md §10.1, §10.2) -->
         <dependency>
             <groupId>au.com.dius.pact.consumer</groupId>

@@ -5,6 +5,70 @@
     "version" : "v0"
   },
   "paths" : {
+    "/v1/verifications" : {
+      "post" : {
+        "operationId" : "verify_1",
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/VerificationRequest"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "201" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/VerificationResponse"
+                }
+              }
+            },
+            "description" : "Created"
+          }
+        },
+        "tags" : [ "verification-controller" ]
+      }
+    },
+    "/v1/verifications/{vopReference}/check" : {
+      "post" : {
+        "operationId" : "check",
+        "parameters" : [ {
+          "in" : "path",
+          "name" : "vopReference",
+          "required" : true,
+          "schema" : {
+            "type" : "string"
+          }
+        } ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/ReferenceCheckRequest"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "200" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ReferenceCheckResponse"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "tags" : [ "verification-controller" ]
+      }
+    },
     "/vop/v1/verifications" : {
       "post" : {
         "operationId" : "verify",
@@ -36,6 +100,36 @@
   },
   "components" : {
     "schemas" : {
+      "ReferenceCheckRequest" : {
+        "type" : "object",
+        "properties" : {
+          "debtorIban" : {
+            "type" : "string"
+          },
+          "payeeIban" : {
+            "type" : "string"
+          },
+          "payeeName" : {
+            "type" : "string"
+          }
+        }
+      },
+      "ReferenceCheckResponse" : {
+        "type" : "object",
+        "properties" : {
+          "problem" : {
+            "type" : "string",
+            "enum" : [ "EXPIRED", "MISMATCH", "UNKNOWN" ]
+          },
+          "result" : {
+            "type" : "string",
+            "enum" : [ "MATCH", "CLOSE_MATCH", "NO_MATCH", "NOT_POSSIBLE" ]
+          },
+          "valid" : {
+            "type" : "boolean"
+          }
+        }
+      },
       "SchemeVerificationRequest" : {
         "type" : "object",
         "properties" : {
@@ -68,6 +162,45 @@
           "result" : {
             "type" : "string",
             "enum" : [ "MATCH", "CLOSE_MATCH", "NO_MATCH", "NOT_POSSIBLE" ]
+          }
+        }
+      },
+      "VerificationRequest" : {
+        "type" : "object",
+        "properties" : {
+          "debtorIban" : {
+            "type" : "string"
+          },
+          "payeeIban" : {
+            "type" : "string"
+          },
+          "payeeName" : {
+            "type" : "string"
+          },
+          "payeeOrganisationId" : {
+            "type" : "string"
+          }
+        }
+      },
+      "VerificationResponse" : {
+        "type" : "object",
+        "properties" : {
+          "actualName" : {
+            "type" : "string"
+          },
+          "expiresAt" : {
+            "type" : "string",
+            "format" : "date-time"
+          },
+          "respondedBy" : {
+            "type" : "string"
+          },
+          "result" : {
+            "type" : "string",
+            "enum" : [ "MATCH", "CLOSE_MATCH", "NO_MATCH", "NOT_POSSIBLE" ]
+          },
+          "vopReference" : {
+            "type" : "string"
           }
         }
       }
