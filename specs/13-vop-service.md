@@ -21,10 +21,12 @@ Not responsible for: blocking payments (payment-api decides on the reference che
 | `api.verify` | Payee verification API (internal) |
 | `api.responder` | VoP responder API (scheme endpoint) |
 | `api.accounts` | Account events listener |
+| `application.accounts` | Account-holder projection (the listener's transaction and inbox) |
 | `application.requesting` | Requesting service |
 | `application.responding` | Responding service |
 | `application.references` | VoP reference store |
 | `application.retention` | Retention job |
+| `domain.accounts` | Account holder as projected |
 | `domain.matching` | Name matcher |
 | `domain.routing` | Routing directory (wraps `BankDirectory`) |
 | `infrastructure.peer` | Counterparty VoP client |
@@ -84,11 +86,11 @@ upsert `account_holders` by `accountId` when `revision` is newer. Produces nothi
 CREATE TABLE account_holders (
   account_id   UUID PRIMARY KEY,
   iban         VARCHAR(34) NOT NULL UNIQUE,
-  holder_type  VARCHAR(12) NOT NULL,
+  holder_type  VARCHAR(12) NOT NULL CHECK (holder_type IN ('PERSON', 'ORGANISATION', 'UNKNOWN')),
   holder_name  VARCHAR(70) NOT NULL,
   normalised_name VARCHAR(140) NOT NULL,
   organisation_id VARCHAR(35),
-  status       VARCHAR(10) NOT NULL,
+  status       VARCHAR(10) NOT NULL CHECK (status IN ('OPEN', 'BLOCKED', 'CLOSED', 'UNKNOWN')),
   revision     BIGINT NOT NULL,
   updated_at   TIMESTAMPTZ NOT NULL
 );
@@ -160,6 +162,7 @@ and `actual_name` to `NULL`; delete rows older than 30 days. `responder_audit` k
 | `tpe.vop.result-retention` | `24h` |
 | `tpe.vop.match-threshold` / `close-match-threshold` | `0.95` / `0.85` |
 | `tpe.vop.legal-forms` | list above |
+| `tpe.vop.titles` | list above |
 | `tpe.vop.audit-peppers` | version → pepper, secret ([ADR-017](../architecture/decisions/ADR-017-secrets-keys-and-encryption-at-rest.md)), required |
 | `tpe.vop.active-pepper-version` | required; new `responder_audit` rows use it |
 | `tpe.vop.responder.rate-limit.per-psp` | `50/s` per instance ([ADR-018](../architecture/decisions/ADR-018-rate-limiting.md)) |

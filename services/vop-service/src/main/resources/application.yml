@@ -7,3 +7,10 @@ management:
     health:
       probes:
         enabled: true
+
+tpe:
+  messaging:
+    # the inbox of the accounts.events consumer, group vop-service (specs/13-vop-service.md §4); vop produces nothing
+    enabled: true
+  # name normalisation (specs/13-vop-service.md §6.2, §7): tpe.vop.legal-forms and tpe.vop.titles replace the lists of
+  # §6.2 (NameNormaliser.DEFAULT_LEGAL_FORMS / DEFAULT_TITLES); tokens are written as in names, e.g. e.K.
