@@ -10,6 +10,11 @@ management:
     health:
       probes:
         enabled: true
+  metrics:
+    distribution:
+      slo:
+        # SLO-VOP-02 (own bank 200 ms, other bank 5.2 s) and SLO-VOP-04 (1 s / 2 s) as exact buckets (25 §5.4, §11)
+        tpe.vop.requests: 200ms,1s,2s,5200ms
 
 tpe:
   messaging:
@@ -17,9 +22,15 @@ tpe:
     enabled: true
   # name normalisation (specs/13-vop-service.md §6.2, §7): tpe.vop.legal-forms and tpe.vop.titles replace the lists of
   # §6.2 (NameNormaliser.DEFAULT_LEGAL_FORMS / DEFAULT_TITLES); tokens are written as in names, e.g. e.K.
-  # vop:
-  #   match-threshold / close-match-threshold: 0.95 / 0.85 (13 §6.2, §7; NameMatcher.DEFAULT_*)
-  #   audit-peppers (version → pepper) and active-pepper-version: required secrets, no default (13 §7, ADR-017)
+  # match-threshold / close-match-threshold: 0.95 / 0.85 (13 §6.2, §7; NameMatcher.DEFAULT_*)
+  # audit-peppers (version → pepper) and active-pepper-version: required secrets, no default (13 §7, ADR-017)
+  vop:
+    # how long a vopReference is accepted (13 §6.1, §7, UC-02 postcondition)
+    reference-validity: 30m
+    # names are cleared this long after a result expired; rows are deleted after 30 days (13 §6.3, Q-09)
+    result-retention: 24h
+    retention:
+      poll-interval: 1h
 
 springdoc:
   # a stable document to check in (specs/00-engineering-baseline.md §7)

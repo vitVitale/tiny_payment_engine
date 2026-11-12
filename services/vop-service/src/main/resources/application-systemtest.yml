@@ -1,0 +1,5 @@
+# Profile systemtest (specs/20-testing-strategy.md §2.1): short intervals keep the system tests fast.
+tpe:
+  vop:
+    # E2E-O-17: an expired reference within the scenario (specs/20-testing-strategy.md §2.1)
+    reference-validity: 5s

@@ -25,11 +25,15 @@ Not responsible for: blocking payments (payment-api decides on the reference che
 | `application.requesting` | Requesting service |
 | `application.responding` | Responding service |
 | `application.references` | VoP reference store |
-| `application.retention` | Retention job |
+| `application.retention` | Retention job (the handler) |
+| `application.metrics` | `tpe.vop.requests` port |
 | `domain.accounts` | Account holder as projected |
-| `domain.matching` | Name matcher |
+| `domain.matching` | Name matcher, `HolderVerifier` |
+| `domain.references` | Issued reference and its check |
 | `domain.routing` | Routing directory (wraps `BankDirectory`) |
-| `infrastructure.peer` | Counterparty VoP client |
+| `infrastructure.peer` | Counterparty VoP client (until the remote track: an adapter answering `NOT_POSSIBLE`) |
+| `infrastructure.jobs` | Retention `PollingWorker`, `tpe.vop.retention.overdue` |
+| `infrastructure.metrics` | Micrometer `tpe.vop.requests` |
 | `infrastructure.persistence` | Repositories |
 
 ## 3. REST API
@@ -47,7 +51,13 @@ Not responsible for: blocking payments (payment-api decides on the reference che
 
 `result` ∈ `MATCH`, `CLOSE_MATCH` (then `actualName` is set), `NO_MATCH`, `NOT_POSSIBLE`. Always `201` once the
 request is valid — a responder failure is a `NOT_POSSIBLE` result, not an error (UC-02 3a).
-`422 PAYEE_BANK_UNKNOWN` if the IBAN's bank code is not in the directory.
+`422 PAYEE_BANK_UNKNOWN` if the IBAN's bank code is not in the directory. `400 VALIDATION_FAILED` with `errors`:
+`debtorIban`, `payeeIban` (`REQUIRED`, `INVALID_IBAN`), `payeeName` (`REQUIRED`, `TOO_LONG` over 70, the column),
+`payeeOrganisationId` (`TOO_LONG` over 35; blank is none). `vopReference` is `VOP-` + a ULID. Request and response
+records are `com.tpe.contracts.vop` ([01 §4](01-shared-libraries.md#4-contracts)); no authentication until M5
+([ADR-012](../architecture/decisions/ADR-012-service-and-staff-authentication.md)), `@InternalApi`. No
+`Idempotency-Key` (an exception to 00 §7): the call is read-like, every call issues a new reference, and a retry only
+leaves an unused one behind ([10 §3.4](10-payment-api.md)).
 
 **`POST /v1/verifications/{vopReference}/check`** (UC-01 4)
 
@@ -58,7 +68,8 @@ request is valid — a responder failure is a `NOT_POSSIBLE` result, not an erro
 ```
 
 Comparison is exact on the normalised IBANs and on the payee name after trimming and collapsing whitespace
-(case-sensitive otherwise: the payer must pay to exactly the name that was verified).
+(case-sensitive otherwise: the payer must pay to exactly the name that was verified). An expired reference is
+`EXPIRED` whatever the values; a reference retention deleted is `UNKNOWN`. Same `400` rules as above.
 
 ### 3.2 Scheme endpoint (caller: counterparty PSPs, simulated)
 
@@ -113,7 +124,9 @@ CREATE TABLE vop_results (
   created_at    TIMESTAMPTZ NOT NULL,
   expires_at    TIMESTAMPTZ NOT NULL
 );
-CREATE INDEX vop_results_expiry ON vop_results (expires_at);
+CREATE INDEX vop_results_named_expiry ON vop_results (expires_at)   -- retention: names to clear
+  WHERE payee_name IS NOT NULL OR actual_name IS NOT NULL;
+CREATE INDEX vop_results_created ON vop_results (created_at);       -- retention: rows to delete
 
 CREATE TABLE responder_audit (
   id BIGSERIAL PRIMARY KEY, request_id VARCHAR(64) NOT NULL, requesting_psp_bic VARCHAR(11) NOT NULL,
@@ -132,7 +145,9 @@ Plus `inbox`.
 1. Look up the payee bank in the directory (`422` if unknown).
 2. Own bank → call the responding service locally (no HTTP), `respondedBy = ownBic`.
 3. Other bank → `POST <vopEndpoint>` with timeout `responder-timeout` (5 s); timeout, connect error, `5xx` or invalid
-   response → `NOT_POSSIBLE` (UC-02 3a). No retry (the time budget is the timeout).
+   response → `NOT_POSSIBLE` (UC-02 3a). No retry (the time budget is the timeout). Behind the port
+   `application.requesting.CounterpartyVop`; until the VoP remote track adds the client, its adapter answers
+   `NOT_POSSIBLE` with `cause=LOCAL`.
 4. Store `vop_results` with `expires_at = now + reference-validity` (30 min, UC-02 postcondition); return.
 
 ### 6.2 Responding (UC-03) and name matching
@@ -161,7 +176,8 @@ the pure `HolderVerifier`; organisation ids compare trimmed, ignoring case.
 ### 6.3 Retention
 
 Hourly job (`PollingWorker`): for `vop_results` with `expires_at < now − result-retention` (24 h) set `payee_name`
-and `actual_name` to `NULL`; delete rows older than 30 days. `responder_audit` kept 13 months (hashed only). See
+and `actual_name` to `NULL`; delete rows older than 30 days. An expired reference stays checkable as `EXPIRED`
+until it is deleted. `responder_audit` kept 13 months (hashed only). See
 [Q-09](40-open-questions.md).
 
 ## 7. Configuration
@@ -171,6 +187,7 @@ and `actual_name` to `NULL`; delete rows older than 30 days. `responder_audit` k
 | `tpe.vop.responder-timeout` | `5s` |
 | `tpe.vop.reference-validity` | `30m` |
 | `tpe.vop.result-retention` | `24h` |
+| `tpe.vop.retention.poll-interval` | `1h` |
 | `tpe.vop.match-threshold` / `close-match-threshold` | `0.95` / `0.85` |
 | `tpe.vop.legal-forms` | list above |
 | `tpe.vop.titles` | list above |
@@ -183,7 +200,10 @@ and `actual_name` to `NULL`; delete rows older than 30 days. `responder_audit` k
 - Reference check p99 ≤ 50 ms: it runs inside the 300 ms initiation budget of payment-api.
 - Verification ≤ 5 s by construction (responder timeout); responder p99 ≤ 1 s at 200 requests/s (UC-03).
 - Tier 0: payment-api needs a valid reference for every payment, so a vop-service outage stops initiation.
-- Metrics: `tpe.vop.requests{role,route,result,cause}`, `tpe.vop.retention.overdue`.
+- Metrics: `tpe.vop.requests{role,route,result,cause}` (timer; `REQUESTER` with route `OWN` / `REMOTE`, `RESPONDER`
+  for the scheme endpoint; `cause` is `NONE` for every answer a responder gave, `LOCAL` / `EXTERNAL` for a
+  `NOT_POSSIBLE` of ours / the counterparty's), `tpe.vop.retention.overdue` (rows still named 2 h after their
+  retention passed).
 - Service levels: SLO-VOP-01 … -06 in [25 §5.4](25-service-levels.md#54-vop-service); SLA-03, SLA-07 rest on them.
 
 ## 9. Acceptance criteria
