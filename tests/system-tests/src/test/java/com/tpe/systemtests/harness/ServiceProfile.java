@@ -27,9 +27,14 @@ public final class ServiceProfile {
         this.layers = List.copyOf(layers);
     }
 
-    /** ledger-service in profiles {@code local,systemtest}, as {@link LedgerService} starts it. */
+    /** ledger-service as the harness runs it. */
     public static ServiceProfile ledger() {
-        return of(Path.of("../../services/ledger-service/src/main/resources"), "local", "systemtest");
+        return systemtest(ServiceJar.LEDGER);
+    }
+
+    /** A service of this repository in the profiles {@link ServiceProcess} starts it in ({@code local,systemtest}). */
+    public static ServiceProfile systemtest(ServiceJar service) {
+        return of(service.resources(), ServiceProcess.PROFILES.toArray(String[]::new));
     }
 
     static ServiceProfile of(Path resources, String... profiles) {

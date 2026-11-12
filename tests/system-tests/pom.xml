@@ -83,6 +83,11 @@
             <version>${project.version}</version>
             <scope>test</scope>
         </dependency>
+        <!-- P-10, consumer system-tests (20 §10.1): the harness's ledger client against the Pact mock server -->
+        <dependency>
+            <groupId>au.com.dius.pact.consumer</groupId>
+            <artifactId>junit5</artifactId>
+        </dependency>
     </dependencies>
 
     <build>

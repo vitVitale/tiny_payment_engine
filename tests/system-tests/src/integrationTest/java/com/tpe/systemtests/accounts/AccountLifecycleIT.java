@@ -43,35 +43,32 @@ class AccountLifecycleIT extends LedgerSystemTest {
         String iban = opened.body().get("iban").asString();
         awaitProjected(account, 1, AccountStatus.OPEN);
 
-        assertThat(post(operator, accountPath(account, "funding"), eur(FUNDED_MINOR)).status()).isEqualTo(200);
+        assertThat(ledger().fund(operator, account, FUNDED_MINOR).status()).isEqualTo(200);
 
-        assertThat(post(operator, accountPath(account, "block"), reason(BlockReason.OPERATOR)).status()).isEqualTo(200);
+        assertThat(ledger().block(operator, account, BlockReason.OPERATOR).status()).isEqualTo(200);
         awaitProjected(account, 2, AccountStatus.BLOCKED);
-        assertThat(post(operator, accountPath(account, "unblock"), reason(BlockReason.OPERATOR)).status())
-                .isEqualTo(200);
+        assertThat(ledger().unblock(operator, account, BlockReason.OPERATOR).status()).isEqualTo(200);
         awaitProjected(account, 3, AccountStatus.OPEN);
 
         // a sanctions block, as risk-service sets it: an operator cannot lift it, compliance can (12 §3.2)
-        assertThat(post(riskService, accountPath(account, "block"), reason(BlockReason.SANCTIONS)).status())
-                .isEqualTo(200);
+        assertThat(ledger().block(riskService, account, BlockReason.SANCTIONS).status()).isEqualTo(200);
         awaitProjected(account, 4, AccountStatus.BLOCKED);
-        var liftedByOperator = post(operator, accountPath(account, "unblock"), reason(BlockReason.SANCTIONS));
+        var liftedByOperator = ledger().unblock(operator, account, BlockReason.SANCTIONS);
         assertThat(liftedByOperator.status()).isEqualTo(403);
         assertThat(liftedByOperator.code()).isEqualTo("SANCTIONS_BLOCK_PROTECTED");
         assertThat(accountStatus(account)).isEqualTo("BLOCKED");
-        assertThat(post(compliance, accountPath(account, "unblock"), reason(BlockReason.SANCTIONS)).status())
-                .isEqualTo(200);
+        assertThat(ledger().unblock(compliance, account, BlockReason.SANCTIONS).status()).isEqualTo(200);
         awaitProjected(account, 5, AccountStatus.OPEN);
 
-        var notEmpty = post(operator, accountPath(account, "close"), Map.of());
+        var notEmpty = ledger().close(operator, account);
         assertThat(notEmpty.status()).isEqualTo(422);
         assertThat(notEmpty.code()).isEqualTo("ACCOUNT_NOT_EMPTY");
         assertThat(accountStatus(account)).isEqualTo("OPEN");
 
         payOut(iban, FUNDED_MINOR);
-        assertThat(get(operator, "/v1/accounts/" + account).body().get("bookedBalanceMinor").asLong()).isZero();
+        assertThat(ledger().account(operator, account).body().get("bookedBalanceMinor").asLong()).isZero();
 
-        var closed = post(operator, accountPath(account, "close"), Map.of());
+        var closed = ledger().close(operator, account);
         assertThat(closed.status()).isEqualTo(200);
         assertThat(closed.body().get("status").asString()).isEqualTo("CLOSED");
         awaitProjected(account, 6, AccountStatus.CLOSED);
@@ -106,18 +103,6 @@ class AccountLifecycleIT extends LedgerSystemTest {
     }
 
     private String accountStatus(UUID account) {
-        return get(operator, "/v1/accounts/" + account).body().get("status").asString();
-    }
-
-    private static String accountPath(UUID account, String action) {
-        return "/v1/accounts/" + account + "/" + action;
-    }
-
-    private static Map<String, Object> eur(long amountMinor) {
-        return Map.of("amountMinor", amountMinor, "currency", "EUR");
-    }
-
-    private static Map<String, Object> reason(BlockReason reason) {
-        return Map.of("reason", reason.name());
+        return ledger().account(operator, account).body().get("status").asString();
     }
 }
