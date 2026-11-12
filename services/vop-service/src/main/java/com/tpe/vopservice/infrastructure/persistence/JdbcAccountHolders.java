@@ -1,9 +1,14 @@
 package com.tpe.vopservice.infrastructure.persistence;
 
+import com.tpe.paymentdomain.Iban;
 import com.tpe.vopservice.application.accounts.AccountHolders;
 import com.tpe.vopservice.domain.accounts.AccountHolder;
+import com.tpe.vopservice.domain.accounts.AccountHolder.AccountStatus;
+import com.tpe.vopservice.domain.accounts.AccountHolder.HolderType;
+import com.tpe.vopservice.domain.accounts.ProjectedHolder;
 import java.sql.Timestamp;
 import java.time.Instant;
+import java.util.Optional;
 import java.util.UUID;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Repository;
@@ -49,5 +54,25 @@ class JdbcAccountHolders implements AccountHolders {
     @Override
     public void delete(UUID accountId) {
         jdbc.sql("DELETE FROM account_holders WHERE account_id = ?").param(accountId).update();
+    }
+
+    @Override
+    public Optional<ProjectedHolder> findByIban(Iban iban) {
+        return jdbc.sql("""
+                        SELECT account_id, iban, holder_type, holder_name, normalised_name, organisation_id, status,
+                               revision
+                        FROM account_holders WHERE iban = ?""")
+                .param(iban.value())
+                .query((rs, n) -> new ProjectedHolder(
+                        new AccountHolder(
+                                rs.getObject("account_id", UUID.class),
+                                rs.getString("iban"),
+                                HolderType.valueOf(rs.getString("holder_type")),
+                                rs.getString("holder_name"),
+                                rs.getString("organisation_id"),
+                                AccountStatus.valueOf(rs.getString("status")),
+                                rs.getLong("revision")),
+                        rs.getString("normalised_name")))
+                .optional();
     }
 }

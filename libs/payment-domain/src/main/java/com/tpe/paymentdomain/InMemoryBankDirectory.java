@@ -17,6 +17,7 @@ public final class InMemoryBankDirectory implements BankDirectory {
     private final String ownBankCode;
     private final Bic ownBic;
     private final Map<String, BankEntry> byBankCode;
+    private final Map<Bic, BankEntry> byBic8;
 
     public InMemoryBankDirectory(String ownBankCode, Bic ownBic, List<BankEntry> banks) {
         this.ownBankCode = Objects.requireNonNull(ownBankCode, "ownBankCode");
@@ -38,12 +39,22 @@ public final class InMemoryBankDirectory implements BankDirectory {
                     INVALID_BANK_DIRECTORY, "own BIC " + ownBic.value() + " differs from the own bank's entry");
         }
         this.byBankCode = Map.copyOf(entries);
+        Map<Bic, BankEntry> institutions = new HashMap<>();
+        for (BankEntry bank : banks) {
+            institutions.putIfAbsent(bank.bic().bic8(), bank);
+        }
+        this.byBic8 = Map.copyOf(institutions);
     }
 
     @Override
     public Optional<BankEntry> lookup(Iban iban) {
         return Optional.ofNullable(byBankCode.get(iban.bankCode()))
                 .filter(bank -> bank.bic().countryCode().equals(iban.countryCode()));
+    }
+
+    @Override
+    public Optional<BankEntry> lookup(Bic bic) {
+        return Optional.ofNullable(byBic8.get(bic.bic8()));
     }
 
     @Override

@@ -1,14 +1,17 @@
 package com.tpe.vopservice;
 
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.boot.test.web.server.LocalServerPort;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
+import org.springframework.web.client.RestClient;
 import org.testcontainers.kafka.KafkaContainer;
 import org.testcontainers.postgresql.PostgreSQLContainer;
 
 /**
  * The service on a random port against PostgreSQL and Kafka of the compose stack's versions (deploy/docker-compose.yml),
- * started once per JVM; every subclass shares one Spring context.
+ * started once per JVM; every subclass shares one Spring context. The responder audit gets a test pepper; the bank
+ * directory is the default, deploy/config/bank-directory.yml. {@link #http()} never throws on an error status.
  */
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
 public abstract class VopStack {
@@ -16,10 +19,17 @@ public abstract class VopStack {
     protected static final PostgreSQLContainer POSTGRES = new PostgreSQLContainer("postgres:17.6-alpine");
     protected static final KafkaContainer KAFKA = new KafkaContainer("apache/kafka:4.1.0");
 
+    /** {@code tpe.vop.active-pepper-version} and its pepper; version 1 is a retired one. */
+    protected static final int ACTIVE_PEPPER_VERSION = 2;
+    protected static final String ACTIVE_PEPPER = "component-test-pepper-v2";
+
     static {
         POSTGRES.start();
         KAFKA.start();
     }
+
+    @LocalServerPort
+    int port;
 
     @DynamicPropertySource
     static void stack(DynamicPropertyRegistry registry) {
@@ -27,5 +37,15 @@ public abstract class VopStack {
         registry.add("spring.datasource.username", POSTGRES::getUsername);
         registry.add("spring.datasource.password", POSTGRES::getPassword);
         registry.add("spring.kafka.bootstrap-servers", KAFKA::getBootstrapServers);
+        registry.add("tpe.vop.audit-peppers.1", () -> "component-test-pepper-v1");
+        registry.add("tpe.vop.audit-peppers.2", () -> ACTIVE_PEPPER);
+        registry.add("tpe.vop.active-pepper-version", () -> ACTIVE_PEPPER_VERSION);
+    }
+
+    protected RestClient http() {
+        return RestClient.builder()
+                .baseUrl("http://localhost:" + port)
+                .defaultStatusHandler(status -> true, (request, response) -> {})
+                .build();
     }
 }

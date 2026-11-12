@@ -1,0 +1,76 @@
+{
+  "openapi" : "3.1.0",
+  "info" : {
+    "title" : "OpenAPI definition",
+    "version" : "v0"
+  },
+  "paths" : {
+    "/vop/v1/verifications" : {
+      "post" : {
+        "operationId" : "verify",
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/SchemeVerificationRequest"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "200" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/SchemeVerificationResponse"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "tags" : [ "responder-controller" ]
+      }
+    }
+  },
+  "components" : {
+    "schemas" : {
+      "SchemeVerificationRequest" : {
+        "type" : "object",
+        "properties" : {
+          "iban" : {
+            "type" : "string"
+          },
+          "name" : {
+            "type" : "string"
+          },
+          "organisationId" : {
+            "type" : "string"
+          },
+          "requestId" : {
+            "type" : "string"
+          },
+          "requestingPspBic" : {
+            "type" : "string"
+          }
+        }
+      },
+      "SchemeVerificationResponse" : {
+        "type" : "object",
+        "properties" : {
+          "actualName" : {
+            "type" : "string"
+          },
+          "requestId" : {
+            "type" : "string"
+          },
+          "result" : {
+            "type" : "string",
+            "enum" : [ "MATCH", "CLOSE_MATCH", "NO_MATCH", "NOT_POSSIBLE" ]
+          }
+        }
+      }
+    }
+  }
+}

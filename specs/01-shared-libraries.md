@@ -65,7 +65,8 @@ tpe:
         vopEndpoint: "http://csm-simulator:8090/vop/v1/verifications"
 ```
 
-Operations: `lookup(Iban) → Optional<BankEntry>`, `isOwn(Iban)`, `ownBic()`. A bank matches an IBAN by the bank code
+Operations: `lookup(Iban) → Optional<BankEntry>`, `lookup(Bic) → Optional<BankEntry>` (by institution, `Bic.bic8()`:
+the participants vop-service's responder accepts), `isOwn(Iban)`, `ownBic()`. A bank matches an IBAN by the bank code
 inside it and by country: bank codes are national (a `PL` IBAN can carry the 8 digits of a `DE` bank code), so the
 IBAN's country must equal the country of the bank's BIC (characters 5–6). Used by
 payment-api (reachability validation), payment-orchestrator (on-us detection, creditor agent BIC) and vop-service
