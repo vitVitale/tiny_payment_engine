@@ -1,7 +1,9 @@
 package com.tpe.riskservice.application.assessment;
 
 import com.tpe.riskservice.domain.rules.PaymentToAssess;
+import com.tpe.riskservice.domain.rules.RiskContext;
 import com.tpe.riskservice.domain.rules.RuleEngine;
+import com.tpe.riskservice.domain.rules.RuleSet;
 import com.tpe.riskservice.domain.rules.Verdict;
 import java.time.Clock;
 import java.time.Instant;
@@ -12,7 +14,8 @@ import org.springframework.stereotype.Service;
 
 /**
  * Fraud assessment of a payment (specs/14-risk-service.md §3.1, §6.1): idempotent by {@code assessmentId}, the rules
- * run in memory on the parameters of the {@link RuleBook}; the only I/O is the local database (no outbound calls).
+ * run in memory on the parameters of the {@link RuleBook} and the payer's history, read beforehand in one query when a
+ * rule that runs needs it; the only I/O is the local database (no outbound calls).
  * Two concurrent first requests for one id both decide, one stores, and both answer the stored row.
  */
 @Service
@@ -37,8 +40,12 @@ public class AssessmentService {
     public StoredAssessment assess(String assessmentId, UUID paymentId, PaymentToAssess payment) {
         AssessmentMetrics.Timing timing = metrics.start();
         StoredAssessment stored = assessments.find(assessmentId).orElseGet(() -> {
-            Verdict verdict = engine.decide(payment, rules.current());
+            RuleSet configs = rules.current();
             Instant now = clock.instant().truncatedTo(ChronoUnit.MILLIS);
+            RiskContext context = engine.lookback(payment, configs)
+                    .map(lookback -> assessments.history(payment.debtorIban(), payment.creditorIban(), now, lookback))
+                    .orElse(RiskContext.NOT_LOADED);
+            Verdict verdict = engine.decide(payment, configs, context);
             StoredAssessment decided = new StoredAssessment(assessmentId, paymentId, payment.direction(),
                     payment.debtorIban(), payment.creditorIban(), payment.amount(), verdict, now);
             return assessments.insertIfAbsent(decided) ? decided : stored(assessmentId);

@@ -22,7 +22,6 @@ import tools.jackson.databind.JsonNode;
  */
 class AssessmentIT extends RiskStack {
 
-    private static final String DEBTOR = "DE36100100100000000001";
     private static final String CREDITOR = "DE07200200200123456789";
 
     @Autowired
@@ -85,7 +84,10 @@ class AssessmentIT extends RiskStack {
     void theAssessmentIsStoredWithItsDecisionAndHits() {
         UUID payment = UUID.randomUUID();
 
-        ResponseEntity<JsonNode> response = assess(request(payment, "INCOMING", 6_000_000));
+        String debtor = Ibans.fresh();
+        Map<String, Object> request = request(payment, "INCOMING", 6_000_000);
+        request.put("debtor", Map.of("name", "Anna Schmidt", "iban", debtor));
+        ResponseEntity<JsonNode> response = assess(request);
 
         Map<String, Object> row = jdbc.sql("""
                         SELECT direction, debtor_iban, creditor_iban, amount_minor, decision, reason_code,
@@ -93,7 +95,7 @@ class AssessmentIT extends RiskStack {
                         FROM assessments WHERE assessment_id = ?""")
                 .param(payment + ":INCOMING").query().singleRow();
         assertThat(row.get("direction")).isEqualTo("INCOMING");
-        assertThat(row.get("debtor_iban")).isEqualTo(DEBTOR);
+        assertThat(row.get("debtor_iban")).isEqualTo(debtor);
         assertThat(row.get("creditor_iban")).isEqualTo(CREDITOR);
         assertThat(row.get("amount_minor")).isEqualTo(6_000_000L);
         assertThat(row.get("decision")).isEqualTo("DENY");
@@ -104,7 +106,7 @@ class AssessmentIT extends RiskStack {
     }
 
     @Test
-    void anOutgoingRequestWithoutVopResultIs400() {
+    void RSK_AC_11_anOutgoingRequestWithoutVopResultIs400() {
         Map<String, Object> body = request(UUID.randomUUID(), "OUTGOING", 100_00);
         body.remove("vopResult");
 
@@ -183,7 +185,8 @@ class AssessmentIT extends RiskStack {
         body.put("txId", "TX" + payment.toString().replace("-", "").substring(0, 30));
         body.put("amountMinor", amountMinor);
         body.put("currency", "EUR");
-        body.put("debtor", Map.of("name", "Anna Schmidt", "iban", DEBTOR));
+        // a payer of its own: the velocity rules count the payer's earlier payments
+        body.put("debtor", Map.of("name", "Anna Schmidt", "iban", Ibans.fresh()));
         body.put("creditor", Map.of("name", "Max Mustermann", "iban", CREDITOR));
         body.put("debtorAgentBic", "TPEBDEFFXXX");
         body.put("creditorAgentBic", "PEERDEFFXXX");

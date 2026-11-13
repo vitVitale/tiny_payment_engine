@@ -4,8 +4,11 @@ import com.tpe.contracts.ContractsModule;
 import com.tpe.riskservice.application.assessment.RuleBook;
 import com.tpe.riskservice.application.assessment.RuleConfigs;
 import com.tpe.riskservice.domain.rules.AmountLimitRule;
+import com.tpe.riskservice.domain.rules.NewPayeeHighAmountRule;
 import com.tpe.riskservice.domain.rules.NonEuSanctionsRule;
 import com.tpe.riskservice.domain.rules.RuleEngine;
+import com.tpe.riskservice.domain.rules.VelocityAmountRule;
+import com.tpe.riskservice.domain.rules.VelocityCountRule;
 import java.time.Clock;
 import java.time.Duration;
 import java.util.List;
@@ -34,7 +37,8 @@ class RiskConfiguration {
     /** The rules implemented so far; the other seeded configurations wait for theirs (§6.1). */
     @Bean
     RuleEngine ruleEngine() {
-        return new RuleEngine(List.of(new AmountLimitRule(), new NonEuSanctionsRule()));
+        return new RuleEngine(List.of(new AmountLimitRule(), new VelocityCountRule(), new VelocityAmountRule(),
+                new NewPayeeHighAmountRule(), new NonEuSanctionsRule()));
     }
 
     @Bean

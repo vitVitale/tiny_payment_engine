@@ -6,10 +6,16 @@ import com.tpe.paymentdomain.ReasonCode;
 import com.tpe.riskservice.application.assessment.Assessments;
 import com.tpe.riskservice.application.assessment.StoredAssessment;
 import com.tpe.riskservice.domain.rules.Decision;
+import com.tpe.riskservice.domain.rules.PastPayment;
 import com.tpe.riskservice.domain.rules.PaymentDirection;
+import com.tpe.riskservice.domain.rules.RiskContext;
 import com.tpe.riskservice.domain.rules.RuleHit;
 import com.tpe.riskservice.domain.rules.Verdict;
+import java.sql.ResultSet;
 import java.sql.Timestamp;
+import java.time.Duration;
+import java.time.Instant;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Currency;
 import java.util.List;
@@ -72,6 +78,39 @@ class JdbcAssessments implements Assessments {
                 .param("ruleHits", json.writeValueAsString(verdict.ruleHits()))
                 .param("assessedAt", Timestamp.from(assessment.assessedAt()))
                 .update() == 1;
+    }
+
+    /**
+     * One statement: the debtor's {@code ALLOW OUTGOING} rows in the window by {@code assessments_debtor_time}, left
+     * joined to a single row saying whether the debtor paid the creditor before ({@code assessments_debtor_payee});
+     * without rows in the window it answers that single row alone.
+     */
+    @Override
+    public RiskContext history(Iban debtor, Iban creditor, Instant now, Duration lookback) {
+        return jdbc.sql("""
+                        SELECT p.paid_before, a.assessed_at, a.amount_minor
+                        FROM (SELECT EXISTS (SELECT 1 FROM assessments
+                                             WHERE debtor_iban = :debtor AND creditor_iban = :creditor
+                                               AND direction = 'OUTGOING' AND decision = 'ALLOW') AS paid_before) p
+                        LEFT JOIN assessments a
+                               ON a.debtor_iban = :debtor AND a.direction = 'OUTGOING' AND a.decision = 'ALLOW'
+                              AND a.assessed_at > :since AND a.assessed_at <= :now""")
+                .param("debtor", debtor.value())
+                .param("creditor", creditor.value())
+                .param("since", Timestamp.from(now.minus(lookback)))
+                .param("now", Timestamp.from(now))
+                .query((ResultSet rs) -> {
+                    List<PastPayment> payments = new ArrayList<>();
+                    boolean paidBefore = false;
+                    while (rs.next()) {
+                        paidBefore = rs.getBoolean("paid_before");
+                        Timestamp at = rs.getTimestamp("assessed_at");
+                        if (at != null) {
+                            payments.add(new PastPayment(at.toInstant(), rs.getLong("amount_minor")));
+                        }
+                    }
+                    return RiskContext.loaded(now, lookback, payments, paidBefore);
+                });
     }
 
     private List<RuleHit> hits(String text) {

@@ -165,12 +165,12 @@ Plus `inbox`.
 
 ### 6.1 Fraud rules (MVP rule set)
 
-Rules are Java classes implementing `Rule { RuleResult evaluate(PaymentToAssess, RuleParameters) }` (the velocity
-rules add a `RiskContext`); parameters come from the `rules` table, cached in memory and refreshed every 30 s.
-`RiskContext` provides velocity aggregates read from `assessments` (indexed range query, single round trip) and the
-holder projection. The first load runs at startup; the refresh runs in the background (checked every second against
-`refresh-interval` on the service's clock), never on the assessment path; a failed reload keeps the rules in memory
-and shows in `tpe.risk.rules.age`. Before any load has succeeded an assessment is `503 RULES_UNAVAILABLE` (with
+Rules are Java classes implementing `Rule { RuleResult evaluate(PaymentToAssess, RuleParameters, RiskContext) }`
+(a rule that reads the payer's history declares how far back it looks); parameters come from the `rules` table,
+cached in memory and refreshed every 30 s. `RiskContext` provides velocity aggregates read from `assessments`
+(indexed range query, single round trip) and the holder projection. The first load runs at startup; the refresh runs in
+the background (checked every second against `refresh-interval` on the service's clock), never on the assessment
+path; a failed reload keeps the rules in memory and shows in `tpe.risk.rules.age`. Before any load has succeeded an assessment is `503 RULES_UNAVAILABLE` (with
 `Retry-After`), and the payment is rejected (§8, fail closed). A rule runs if its row exists, is
 `enabled` and its `direction` covers the payment's; a row whose rule is not implemented yet is ignored. Seeded
 parameters (amounts in minor units, durations ISO 8601): `AMOUNT_LIMIT {maxAmountMinor}`, `VELOCITY_COUNT_1H
@@ -188,7 +188,12 @@ sanctions track imports non-EU lists, `NON_EU_SANCTIONS` never hits.
 | `NON_EU_SANCTIONS` | both | counterparty name matched against current non-EU lists (UN) with score ≥ 0.97 | DENY, `RR04` |
 
 Decision: any `DENY` hit → `DENY` (reason `RR04` if a sanctions rule hit, else `FR01`); else any `REVIEW` → `REVIEW`
-(`FR01`); else `ALLOW`. Only `ALLOW` assessments count towards velocity aggregates.
+(`FR01`); else `ALLOW`. Only `ALLOW` `OUTGOING` assessments count towards the velocity aggregates and make a payee
+known: a denied or reviewed payment moved no money. The velocity limits include the payment being assessed (the 21st
+payment of a debtor IBAN within the hour is denied) over the window `(now − window, now]`; "first payment to this
+creditor IBAN" means the first from this debtor IBAN, at any time. Before the rules run, the assessment reads the
+longest window any of its rules needs in one statement (the debtor's rows by `(debtor_iban, assessed_at)`, the payee
+check by a partial index on `(debtor_iban, creditor_iban)`); an assessment whose rules need no history reads none.
 
 EU-list screening is **never** done per payment (UC-09 NFR).
 
