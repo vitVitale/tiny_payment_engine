@@ -1,0 +1,222 @@
+{
+  "openapi" : "3.1.0",
+  "info" : {
+    "title" : "OpenAPI definition",
+    "version" : "v0"
+  },
+  "paths" : {
+    "/v1/payments" : {
+      "post" : {
+        "operationId" : "submit",
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/SubmitPayment"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "200" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/PaymentAccepted"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "tags" : [ "payment-command-controller" ]
+      }
+    },
+    "/v1/payments/{paymentId}" : {
+      "get" : {
+        "operationId" : "get",
+        "parameters" : [ {
+          "in" : "path",
+          "name" : "paymentId",
+          "required" : true,
+          "schema" : {
+            "type" : "string",
+            "format" : "uuid"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/PaymentView"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "tags" : [ "payment-command-controller" ]
+      }
+    }
+  },
+  "components" : {
+    "schemas" : {
+      "Creditor" : {
+        "type" : "object",
+        "properties" : {
+          "bic" : {
+            "type" : "string"
+          },
+          "iban" : {
+            "type" : "string"
+          },
+          "name" : {
+            "type" : "string"
+          }
+        }
+      },
+      "Debtor" : {
+        "type" : "object",
+        "properties" : {
+          "iban" : {
+            "type" : "string"
+          },
+          "name" : {
+            "type" : "string"
+          }
+        }
+      },
+      "Holder" : {
+        "type" : "object",
+        "properties" : {
+          "iban" : {
+            "type" : "string"
+          },
+          "name" : {
+            "type" : "string"
+          }
+        }
+      },
+      "PaymentAccepted" : {
+        "type" : "object",
+        "properties" : {
+          "acceptedAt" : {
+            "type" : "string",
+            "format" : "date-time"
+          },
+          "paymentId" : {
+            "type" : "string"
+          },
+          "state" : {
+            "type" : "string",
+            "enum" : [ "RECEIVED", "RISK_CHECKED", "FUNDS_RESERVED", "SENT_TO_CSM", "ACCEPT_REQUESTED", "ACCEPTED", "INVESTIGATING", "SETTLED", "REJECTED" ]
+          },
+          "txId" : {
+            "type" : "string"
+          }
+        }
+      },
+      "PaymentView" : {
+        "type" : "object",
+        "properties" : {
+          "acceptedAt" : {
+            "type" : "string",
+            "format" : "date-time"
+          },
+          "amountMinor" : {
+            "type" : "integer",
+            "format" : "int64",
+            "description" : "Amount in euro cents",
+            "minimum" : 1
+          },
+          "creditor" : {
+            "$ref" : "#/components/schemas/Holder"
+          },
+          "currency" : {
+            "type" : "string",
+            "enum" : [ "EUR" ]
+          },
+          "debtor" : {
+            "$ref" : "#/components/schemas/Holder"
+          },
+          "direction" : {
+            "type" : "string",
+            "enum" : [ "OUTGOING", "INCOMING", "UNKNOWN" ]
+          },
+          "endToEndId" : {
+            "type" : "string"
+          },
+          "finalisedAt" : {
+            "type" : "string",
+            "format" : "date-time"
+          },
+          "onUs" : {
+            "type" : "boolean"
+          },
+          "paymentId" : {
+            "type" : "string"
+          },
+          "reasonCode" : {
+            "type" : "string"
+          },
+          "remittanceInformation" : {
+            "type" : "string"
+          },
+          "state" : {
+            "type" : "string",
+            "enum" : [ "RECEIVED", "RISK_CHECKED", "FUNDS_RESERVED", "SENT_TO_CSM", "ACCEPT_REQUESTED", "ACCEPTED", "INVESTIGATING", "SETTLED", "REJECTED" ]
+          },
+          "txId" : {
+            "type" : "string"
+          },
+          "uetr" : {
+            "type" : "string"
+          }
+        }
+      },
+      "SubmitPayment" : {
+        "type" : "object",
+        "properties" : {
+          "amountMinor" : {
+            "type" : "integer",
+            "format" : "int64",
+            "description" : "Amount in euro cents",
+            "minimum" : 1
+          },
+          "clientId" : {
+            "type" : "string"
+          },
+          "commandId" : {
+            "type" : "string",
+            "format" : "uuid"
+          },
+          "creditor" : {
+            "$ref" : "#/components/schemas/Creditor"
+          },
+          "currency" : {
+            "type" : "string",
+            "enum" : [ "EUR" ]
+          },
+          "debtor" : {
+            "$ref" : "#/components/schemas/Debtor"
+          },
+          "endToEndId" : {
+            "type" : "string"
+          },
+          "remittanceInformation" : {
+            "type" : "string"
+          },
+          "vopReference" : {
+            "type" : "string"
+          },
+          "vopResult" : {
+            "type" : "string",
+            "enum" : [ "MATCH", "CLOSE_MATCH", "NO_MATCH", "NOT_POSSIBLE" ]
+          }
+        }
+      }
+    }
+  }
+}

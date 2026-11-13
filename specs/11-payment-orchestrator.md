@@ -28,6 +28,7 @@ Not responsible for: idempotency of the customer request (payment-api), ISO XML 
 | `api.csm` | CSM event listener |
 | `application.outgoing` | Outgoing payment saga |
 | `application.incoming` | Incoming payment saga |
+| `application.payments` | Payment repository port, payment lookup |
 | `application.runner` | Saga runner (§6.3) |
 | `application.timers` | Deadline scheduler handlers |
 | `application.cases` | Exception case service |
@@ -72,8 +73,15 @@ assessment.
 Processing (one transaction): insert payment (`direction = OUTGOING`, `state = RECEIVED`, `accepted_at = clock.now()`,
 `send_by = accepted_at + send-by-offset`, `deadline_at = accepted_at + deadline-offset`, `on_us` from
 `BankDirectory.isOwn(creditor.iban)`, `creditor_agent_bic` from directory if not given, `pending_action =
-ASSESS_RISK`), insert `OUTGOING_DEADLINE` timer at `deadline_at`, insert transition record. Unique violation on
-`command_id` → re-read and return `200`. After commit the saga runner starts the action (§6.3). p99 ≤ 50 ms.
+ASSESS_RISK`, `next_action_at = accepted_at`, `trace_context` = the submit's span, ADR-014), insert
+`OUTGOING_DEADLINE` timer at `deadline_at`, insert transition record (`null → RECEIVED`, cause `SUBMITTED`). Unique
+violation on `command_id` → re-read and return `200`. After commit the saga runner starts the action (§6.3). p99 ≤
+50 ms.
+
+`request_hash` is the hex SHA-256 of the path, a newline and the canonical JSON of the request as read (properties
+sorted at every level, no whitespace), as ledger-service computes it ([12 §6.1](12-ledger-service.md)): a retry that
+differs only in property order is the same request. The request and response records are in `contracts`
+(`com.tpe.contracts.payment`).
 
 **`GET /v1/payments/{paymentId}`**
 
@@ -126,7 +134,8 @@ the key.
 CREATE TABLE payments (
   payment_id        UUID PRIMARY KEY,
   direction         VARCHAR(8)  NOT NULL CHECK (direction IN ('OUTGOING','INCOMING')),
-  state             VARCHAR(20) NOT NULL,
+  state             VARCHAR(20) NOT NULL CHECK (state IN ('RECEIVED','RISK_CHECKED','FUNDS_RESERVED',
+                      'SENT_TO_CSM','ACCEPT_REQUESTED','ACCEPTED','INVESTIGATING','SETTLED','REJECTED')),
   reason_code       VARCHAR(4),
   on_us             BOOLEAN NOT NULL DEFAULT false,
   command_id        UUID UNIQUE,                 -- outgoing only
@@ -158,7 +167,9 @@ CREATE TABLE payments (
   csm_outcome       VARCHAR(10) CHECK (csm_outcome IN ('SETTLED','REJECTED','NOT_SENT')),
   csm_outcome_at    TIMESTAMPTZ,
   booking_entry_id  UUID,
-  pending_action    VARCHAR(30),
+  pending_action    VARCHAR(30) CHECK (pending_action IN ('ASSESS_RISK','CREATE_HOLD','SEND','ASSESS_PAYEE_RISK',
+                      'SETTLE_ON_US','SETTLE_HOLD','RELEASE_HOLD','CREATE_PENDING_CREDIT','CONFIRM_CREDIT',
+                      'CANCEL_CREDIT')),
   next_action_at    TIMESTAMPTZ,
   action_attempts   INT NOT NULL DEFAULT 0,
   investigation_started_at TIMESTAMPTZ,          -- start of the current investigation; reset by RETRY_INVESTIGATION
@@ -175,7 +186,11 @@ CREATE INDEX payments_due_action ON payments (next_action_at) WHERE pending_acti
 
 CREATE TABLE payment_transitions (
   id BIGSERIAL PRIMARY KEY, payment_id UUID NOT NULL REFERENCES payments,
-  from_state VARCHAR(20), to_state VARCHAR(20) NOT NULL, reason_code VARCHAR(4),
+  from_state VARCHAR(20) CHECK (from_state IN ('RECEIVED','RISK_CHECKED','FUNDS_RESERVED',
+    'SENT_TO_CSM','ACCEPT_REQUESTED','ACCEPTED','INVESTIGATING','SETTLED','REJECTED')),
+  to_state VARCHAR(20) NOT NULL CHECK (to_state IN ('RECEIVED','RISK_CHECKED','FUNDS_RESERVED',
+    'SENT_TO_CSM','ACCEPT_REQUESTED','ACCEPTED','INVESTIGATING','SETTLED','REJECTED')),
+  reason_code VARCHAR(4),
   cause VARCHAR(50) NOT NULL,          -- e.g. RISK_ALLOW, CSM_SETTLED, DEADLINE, OPERATOR
   actor VARCHAR(100) NOT NULL DEFAULT 'system', at TIMESTAMPTZ NOT NULL
 );
@@ -193,7 +208,9 @@ CREATE INDEX payment_timers_due ON payment_timers (due_at) WHERE status = 'SCHED
 
 CREATE TABLE exception_cases (
   case_id    UUID PRIMARY KEY, payment_id UUID REFERENCES payments,
-  type       VARCHAR(40) NOT NULL, status VARCHAR(10) NOT NULL CHECK (status IN ('OPEN','RESOLVED')),
+  type       VARCHAR(40) NOT NULL CHECK (type IN ('UNRESOLVED_INVESTIGATION','CONTRADICTING_CSM_OUTCOME',
+               'LEDGER_ACTION_STUCK','DLT_MESSAGE')),
+  status VARCHAR(10) NOT NULL CHECK (status IN ('OPEN','RESOLVED')),
   details    JSONB NOT NULL, opened_at TIMESTAMPTZ NOT NULL,
   resolution VARCHAR(30), resolved_by VARCHAR(100), resolved_at TIMESTAMPTZ, comment VARCHAR(1000)
 );
