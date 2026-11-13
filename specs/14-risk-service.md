@@ -89,7 +89,9 @@ Body for confirm / dismiss: `{ "comment": "…" }`. Actor = JWT `sub`.
 
 ## 4. Messaging
 
-Consumes `accounts.events` (group `risk-service`): upsert `account_holders` by `accountId` if `revision` newer. A `null` value (tombstone, [ADR-007](../architecture/decisions/ADR-007-account-events-as-compacted-snapshots.md)) deletes the row.
+Consumes `accounts.events` (group `risk-service`): upsert `account_holders` by `accountId` if `revision` newer, each
+message once through the `messaging` inbox (dedup key the `eventId`). A `null` value (tombstone,
+[ADR-007](../architecture/decisions/ADR-007-account-events-as-compacted-snapshots.md)) deletes the row.
 `AccountOpened` for a new holder also triggers a single-customer screening against the current list (so a listed
 person cannot open an account and transact before the next daily run).
 
@@ -188,12 +190,16 @@ sanctions track imports non-EU lists, `NON_EU_SANCTIONS` never hits.
 | `NON_EU_SANCTIONS` | both | counterparty name matched against current non-EU lists (UN) with score ≥ 0.97 | DENY, `RR04` |
 
 Decision: any `DENY` hit → `DENY` (reason `RR04` if a sanctions rule hit, else `FR01`); else any `REVIEW` → `REVIEW`
-(`FR01`); else `ALLOW`. Only `ALLOW` `OUTGOING` assessments count towards the velocity aggregates and make a payee
-known: a denied or reviewed payment moved no money. The velocity limits include the payment being assessed (the 21st
-payment of a debtor IBAN within the hour is denied) over the window `(now − window, now]`; "first payment to this
-creditor IBAN" means the first from this debtor IBAN, at any time. Before the rules run, the assessment reads the
-longest window any of its rules needs in one statement (the debtor's rows by `(debtor_iban, assessed_at)`, the payee
-check by a partial index on `(debtor_iban, creditor_iban)`); an assessment whose rules need no history reads none.
+(`FR01`); else `ALLOW`. The aggregates are of our customer's account in the payment: the debtor IBAN of an `OUTGOING`
+payment, the creditor IBAN of an `INCOMING` one, in the payment's direction. Only `ALLOW` assessments count towards
+them and make a payee known: a denied or reviewed payment moved no money. The limits include the payment being
+assessed (the 21st payment of a debtor IBAN within the hour is denied, as is the 11th incoming payment of a new
+account within 24 h) over the window `(now − window, now]`; "first payment to this creditor IBAN" means the first from
+this debtor IBAN, at any time. `MULE_NEW_ACCOUNT` takes the account's age from `account_holders.opened_at`; an account
+the projection does not know never trips it (ledger-service refuses the payment instead). Before the rules run, the
+assessment reads the longest window any of its rules needs in one statement (the customer's rows by
+`(debtor_iban, assessed_at)` or `(creditor_iban, assessed_at)`, the payee check by a partial index on
+`(debtor_iban, creditor_iban)`, the holder by IBAN); an assessment whose rules need no history reads none.
 
 EU-list screening is **never** done per payment (UC-09 NFR).
 

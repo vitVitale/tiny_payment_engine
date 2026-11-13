@@ -53,6 +53,6 @@ class VelocityAmountRuleTest {
 
     private static RiskContext history(Duration age, long amountMinor) {
         return RiskContext.loaded(NOW, Duration.ofHours(24), List.of(new PastPayment(NOW.minus(age), amountMinor)),
-                true);
+                true, null);
     }
 }

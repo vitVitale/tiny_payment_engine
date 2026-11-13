@@ -55,6 +55,6 @@ class VelocityCountRuleTest {
         for (int i = 0; i < count; i++) {
             payments.add(new PastPayment(NOW.minus(age), 10_00));
         }
-        return RiskContext.loaded(NOW, Duration.ofHours(1), payments, true);
+        return RiskContext.loaded(NOW, Duration.ofHours(1), payments, true, null);
     }
 }

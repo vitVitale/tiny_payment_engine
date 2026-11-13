@@ -116,7 +116,7 @@ class RuleEngineTest {
     @Test
     void theRulesGetTheContext() {
         RiskContext context = RiskContext.loaded(Instant.parse("2026-11-12T08:00:00Z"), Duration.ZERO, List.of(),
-                true);
+                true, null);
         Rule paidBefore = new Rule() {
             @Override
             public String id() {

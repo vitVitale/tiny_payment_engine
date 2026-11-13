@@ -8,6 +8,7 @@ import com.tpe.riskservice.application.assessment.StoredAssessment;
 import com.tpe.riskservice.domain.rules.Decision;
 import com.tpe.riskservice.domain.rules.PastPayment;
 import com.tpe.riskservice.domain.rules.PaymentDirection;
+import com.tpe.riskservice.domain.rules.PaymentToAssess;
 import com.tpe.riskservice.domain.rules.RiskContext;
 import com.tpe.riskservice.domain.rules.RuleHit;
 import com.tpe.riskservice.domain.rules.Verdict;
@@ -81,35 +82,57 @@ class JdbcAssessments implements Assessments {
     }
 
     /**
-     * One statement: the debtor's {@code ALLOW OUTGOING} rows in the window by {@code assessments_debtor_time}, left
-     * joined to a single row saying whether the debtor paid the creditor before ({@code assessments_debtor_payee});
-     * without rows in the window it answers that single row alone.
+     * The outgoing history in one statement: the debtor's {@code ALLOW OUTGOING} rows in the window by
+     * {@code assessments_debtor_time}, left joined to a single row saying whether the debtor paid the creditor before
+     * ({@code assessments_debtor_payee}) and when the debtor's account was opened; without rows in the window it
+     * answers that single row alone.
      */
+    private static final String OUTGOING_HISTORY = """
+            SELECT p.paid_before, h.opened_at, a.assessed_at, a.amount_minor
+            FROM (SELECT EXISTS (SELECT 1 FROM assessments
+                                 WHERE debtor_iban = :customer AND creditor_iban = :counterparty
+                                   AND direction = 'OUTGOING' AND decision = 'ALLOW') AS paid_before) p
+            LEFT JOIN account_holders h ON h.iban = :customer
+            LEFT JOIN assessments a
+                   ON a.debtor_iban = :customer AND a.direction = 'OUTGOING' AND a.decision = 'ALLOW'
+                  AND a.assessed_at > :since AND a.assessed_at <= :now""";
+
+    /**
+     * The incoming history in one statement: the creditor's {@code ALLOW INCOMING} rows in the window by
+     * {@code assessments_creditor_time}, left joined to a single row with when the creditor's account was opened.
+     */
+    private static final String INCOMING_HISTORY = """
+            SELECT p.paid_before, h.opened_at, a.assessed_at, a.amount_minor
+            FROM (SELECT FALSE AS paid_before) p
+            LEFT JOIN account_holders h ON h.iban = :customer
+            LEFT JOIN assessments a
+                   ON a.creditor_iban = :customer AND a.direction = 'INCOMING' AND a.decision = 'ALLOW'
+                  AND a.assessed_at > :since AND a.assessed_at <= :now""";
+
     @Override
-    public RiskContext history(Iban debtor, Iban creditor, Instant now, Duration lookback) {
-        return jdbc.sql("""
-                        SELECT p.paid_before, a.assessed_at, a.amount_minor
-                        FROM (SELECT EXISTS (SELECT 1 FROM assessments
-                                             WHERE debtor_iban = :debtor AND creditor_iban = :creditor
-                                               AND direction = 'OUTGOING' AND decision = 'ALLOW') AS paid_before) p
-                        LEFT JOIN assessments a
-                               ON a.debtor_iban = :debtor AND a.direction = 'OUTGOING' AND a.decision = 'ALLOW'
-                              AND a.assessed_at > :since AND a.assessed_at <= :now""")
-                .param("debtor", debtor.value())
-                .param("creditor", creditor.value())
+    public RiskContext history(PaymentToAssess payment, Instant now, Duration lookback) {
+        boolean outgoing = payment.direction() == PaymentDirection.OUTGOING;
+        Iban customer = outgoing ? payment.debtorIban() : payment.creditorIban();
+        Iban counterparty = outgoing ? payment.creditorIban() : payment.debtorIban();
+        return jdbc.sql(outgoing ? OUTGOING_HISTORY : INCOMING_HISTORY)
+                .param("customer", customer.value())
+                .param("counterparty", counterparty.value())
                 .param("since", Timestamp.from(now.minus(lookback)))
                 .param("now", Timestamp.from(now))
                 .query((ResultSet rs) -> {
                     List<PastPayment> payments = new ArrayList<>();
                     boolean paidBefore = false;
+                    Instant openedAt = null;
                     while (rs.next()) {
                         paidBefore = rs.getBoolean("paid_before");
+                        Timestamp opened = rs.getTimestamp("opened_at");
+                        openedAt = opened == null ? null : opened.toInstant();
                         Timestamp at = rs.getTimestamp("assessed_at");
                         if (at != null) {
                             payments.add(new PastPayment(at.toInstant(), rs.getLong("amount_minor")));
                         }
                     }
-                    return RiskContext.loaded(now, lookback, payments, paidBefore);
+                    return RiskContext.loaded(now, lookback, payments, paidBefore, openedAt);
                 });
     }
 

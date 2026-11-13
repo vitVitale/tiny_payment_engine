@@ -59,7 +59,8 @@ Exit: LED-AC-01 … -18 green; E2E-A-01 (projections stubbed by a test consumer)
 | vop local | projection, responder, matcher, reference store, check endpoint, retention | M | VoP |
 
 Exit: E2E-O-02, -03, -04, -05, -15, -16, -17, -18, -19 green; pacts P-01, P-02, P-03, P-04 (create / settle-on-us /
-release hold), P-10 (calls used so far) and M-04 (vop-service) verified ([20 §10.1](20-testing-strategy.md#101-integration-inventory)).
+release hold), P-10 (calls used so far) and M-04 (vop-service, and risk-service, whose holder projection lands with
+`MULE_NEW_ACCOUNT`) verified ([20 §10.1](20-testing-strategy.md#101-integration-inventory)).
 
 ## M3 — Outgoing via CSM (UC-04, UC-05)
 
@@ -88,7 +89,7 @@ Exit: E2E-I-01 … -10, -12, -13 green; GW-AC-12 race test; CH-04 green; pacts P
 | Track | Epics | Exit |
 |---|---|---|
 | VoP remote | counterparty client, routing, simulator VoP endpoints | E2E-V-01 … -03; pact P-08 against simulator and own responder |
-| Sanctions | list import (simulator provider), screening job, matcher, cases + API, ledger blocks, non-EU per-payment rule | E2E-O-06, E2E-I-11, E2E-S-01 … -03; RSK-AC-05 … -10; pacts P-05, P-09, M-04 (risk-service) |
+| Sanctions | list import (simulator provider), screening job, matcher, cases + API, ledger blocks, non-EU per-payment rule | E2E-O-06, E2E-I-11, E2E-S-01 … -03; RSK-AC-05 … -10; pacts P-05, P-09 |
 | Notifications | subscriptions, listener, builder (JSON, `camt.054`), dispatcher, retries, admin API | E2E-N-01, -02; NTF-AC-01 … -09; pact M-03; INV-13 switched on for all green scenarios |
 
 ## M5 — Hardening

@@ -11,12 +11,13 @@ import org.springframework.context.annotation.Primary;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.web.client.RestClient;
+import org.testcontainers.kafka.KafkaContainer;
 import org.testcontainers.postgresql.PostgreSQLContainer;
 
 /**
- * The service on a random port against PostgreSQL of the compose stack's version (deploy/docker-compose.yml), started
- * once per JVM; every subclass shares one Spring context. The service's time is {@link #CLOCK}. {@link #http()} never
- * throws on an error status.
+ * The service on a random port against PostgreSQL and Kafka of the compose stack's versions
+ * (deploy/docker-compose.yml), started once per JVM; every subclass shares one Spring context. The service's time is
+ * {@link #CLOCK}. {@link #http()} never throws on an error status.
  */
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
 @Import(RiskStack.TestClock.class)
@@ -26,9 +27,11 @@ public abstract class RiskStack {
     protected static final MutableClock CLOCK = new MutableClock(Instant.parse("2026-11-12T08:00:00.123Z"));
 
     protected static final PostgreSQLContainer POSTGRES = new PostgreSQLContainer("postgres:17.6-alpine");
+    protected static final KafkaContainer KAFKA = new KafkaContainer("apache/kafka:4.1.0");
 
     static {
         POSTGRES.start();
+        KAFKA.start();
     }
 
     @TestConfiguration(proxyBeanMethods = false)
@@ -49,6 +52,7 @@ public abstract class RiskStack {
         registry.add("spring.datasource.url", POSTGRES::getJdbcUrl);
         registry.add("spring.datasource.username", POSTGRES::getUsername);
         registry.add("spring.datasource.password", POSTGRES::getPassword);
+        registry.add("spring.kafka.bootstrap-servers", KAFKA::getBootstrapServers);
     }
 
     protected RestClient http() {
