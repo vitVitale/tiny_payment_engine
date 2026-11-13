@@ -5,9 +5,12 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import com.tpe.paymentdomain.Money;
 import com.tpe.paymentdomain.ReasonCode;
+import java.time.Duration;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import org.junit.jupiter.api.Test;
 
 /**
@@ -26,14 +29,14 @@ class RuleEngineTest {
 
     @Test
     void noHitIsAllowWithoutAReason() {
-        Verdict verdict = engine.decide(OUTGOING, rules(config("QUIET", RuleAction.DENY)));
+        Verdict verdict = decide(OUTGOING, rules(config("QUIET", RuleAction.DENY)));
 
         assertThat(verdict).isEqualTo(new Verdict(Decision.ALLOW, null, List.of()));
     }
 
     @Test
     void aReviewHitIsReviewWithFr01() {
-        Verdict verdict = engine.decide(OUTGOING, rules(config("FRAUD_A", RuleAction.REVIEW)));
+        Verdict verdict = decide(OUTGOING, rules(config("FRAUD_A", RuleAction.REVIEW)));
 
         assertThat(verdict).isEqualTo(
                 new Verdict(Decision.REVIEW, ReasonCode.FR01, List.of(new RuleHit("FRAUD_A", 0.5))));
@@ -41,7 +44,7 @@ class RuleEngineTest {
 
     @Test
     void denyBeatsReview() {
-        Verdict verdict = engine.decide(OUTGOING,
+        Verdict verdict = decide(OUTGOING,
                 rules(config("FRAUD_A", RuleAction.REVIEW), config("FRAUD_B", RuleAction.DENY)));
 
         assertThat(verdict.decision()).isEqualTo(Decision.DENY);
@@ -51,7 +54,7 @@ class RuleEngineTest {
 
     @Test
     void aSanctionsDenyGivesRr04OverFr01() {
-        Verdict verdict = engine.decide(OUTGOING, rules(config("FRAUD_B", RuleAction.DENY),
+        Verdict verdict = decide(OUTGOING, rules(config("FRAUD_B", RuleAction.DENY),
                 config("SANCTIONS", RuleAction.DENY), config("FRAUD_A", RuleAction.REVIEW)));
 
         assertThat(verdict.decision()).isEqualTo(Decision.DENY);
@@ -61,7 +64,7 @@ class RuleEngineTest {
 
     @Test
     void aSanctionsRuleConfiguredToReviewIsAReviewWithFr01() {
-        Verdict verdict = engine.decide(OUTGOING, rules(config("SANCTIONS", RuleAction.REVIEW)));
+        Verdict verdict = decide(OUTGOING, rules(config("SANCTIONS", RuleAction.REVIEW)));
 
         assertThat(verdict.decision()).isEqualTo(Decision.REVIEW);
         assertThat(verdict.reasonCode()).isEqualTo(ReasonCode.FR01);
@@ -73,16 +76,16 @@ class RuleEngineTest {
         var outgoingOnly = new RuleConfig("FRAUD_A", true, RuleDirection.OUTGOING, RuleParameters.NONE,
                 RuleAction.DENY);
 
-        assertThat(engine.decide(OUTGOING, rules(disabled)).decision()).isEqualTo(Decision.ALLOW);
+        assertThat(decide(OUTGOING, rules(disabled)).decision()).isEqualTo(Decision.ALLOW);
         // no configuration at all: the rule does not run
-        assertThat(engine.decide(OUTGOING, rules()).decision()).isEqualTo(Decision.ALLOW);
-        assertThat(engine.decide(OUTGOING, rules(outgoingOnly)).decision()).isEqualTo(Decision.DENY);
-        assertThat(engine.decide(INCOMING, rules(outgoingOnly)).decision()).isEqualTo(Decision.ALLOW);
+        assertThat(decide(OUTGOING, rules()).decision()).isEqualTo(Decision.ALLOW);
+        assertThat(decide(OUTGOING, rules(outgoingOnly)).decision()).isEqualTo(Decision.DENY);
+        assertThat(decide(INCOMING, rules(outgoingOnly)).decision()).isEqualTo(Decision.ALLOW);
     }
 
     @Test
     void aConfigurationWithoutARuleIsIgnored() {
-        assertThat(engine.decide(OUTGOING, rules(config("VELOCITY_COUNT_1H", RuleAction.DENY))).decision())
+        assertThat(decide(OUTGOING, rules(config("MULE_NEW_ACCOUNT", RuleAction.DENY))).decision())
                 .isEqualTo(Decision.ALLOW);
     }
 
@@ -96,7 +99,7 @@ class RuleEngineTest {
             }
 
             @Override
-            public RuleResult evaluate(PaymentToAssess payment, RuleParameters parameters) {
+            public RuleResult evaluate(PaymentToAssess payment, RuleParameters parameters, RiskContext context) {
                 seen.add(parameters);
                 return RuleResult.NO_HIT;
             }
@@ -104,9 +107,81 @@ class RuleEngineTest {
         var parameters = new RuleParameters(Map.of("threshold", 3));
 
         new RuleEngine(List.of(spy)).decide(OUTGOING,
-                rules(new RuleConfig("SPY", true, RuleDirection.BOTH, parameters, RuleAction.DENY)));
+                rules(new RuleConfig("SPY", true, RuleDirection.BOTH, parameters, RuleAction.DENY)),
+                RiskContext.NOT_LOADED);
 
         assertThat(seen).containsExactly(parameters);
+    }
+
+    @Test
+    void theRulesGetTheContext() {
+        RiskContext context = RiskContext.loaded(Instant.parse("2026-11-12T08:00:00Z"), Duration.ZERO, List.of(),
+                true);
+        Rule paidBefore = new Rule() {
+            @Override
+            public String id() {
+                return "PAID_BEFORE";
+            }
+
+            @Override
+            public RuleResult evaluate(PaymentToAssess payment, RuleParameters parameters, RiskContext context) {
+                return context.payeePaidBefore() ? RuleResult.hit(1.0) : RuleResult.NO_HIT;
+            }
+        };
+
+        Verdict verdict = new RuleEngine(List.of(paidBefore))
+                .decide(OUTGOING, rules(config("PAID_BEFORE", RuleAction.DENY)), context);
+
+        assertThat(verdict.decision()).isEqualTo(Decision.DENY);
+    }
+
+    @Test
+    void theLookBackIsTheLongestOfTheRulesThatRun() {
+        var history = new RuleEngine(List.of(looking("HOUR", Duration.ofHours(1)), looking("DAY", Duration.ofDays(1)),
+                looking("NOW", Duration.ZERO), fixed("QUIET", false, RuleResult.NO_HIT)));
+        var dayDisabled = new RuleConfig("DAY", false, RuleDirection.BOTH, RuleParameters.NONE, RuleAction.DENY);
+        var dayIncoming = new RuleConfig("DAY", true, RuleDirection.INCOMING, RuleParameters.NONE, RuleAction.DENY);
+
+        assertThat(history.lookback(OUTGOING, rules(config("HOUR", RuleAction.DENY), config("DAY", RuleAction.DENY),
+                config("NOW", RuleAction.REVIEW)))).contains(Duration.ofDays(1));
+        assertThat(history.lookback(OUTGOING, rules(config("HOUR", RuleAction.DENY), dayDisabled)))
+                .contains(Duration.ofHours(1));
+        assertThat(history.lookback(OUTGOING, rules(config("NOW", RuleAction.DENY), dayIncoming)))
+                .contains(Duration.ZERO);
+    }
+
+    @Test
+    void noLookBackWhenNoRuleThatRunsNeedsTheHistory() {
+        var history = new RuleEngine(List.of(looking("DAY", Duration.ofDays(1)), fixed("QUIET", false,
+                RuleResult.NO_HIT)));
+        var dayOutgoing = new RuleConfig("DAY", true, RuleDirection.OUTGOING, RuleParameters.NONE, RuleAction.DENY);
+
+        assertThat(history.lookback(INCOMING, rules(dayOutgoing, config("QUIET", RuleAction.DENY)))).isEmpty();
+        assertThat(history.lookback(OUTGOING, rules())).isEmpty();
+    }
+
+    private Verdict decide(PaymentToAssess payment, RuleSet configs) {
+        return engine.decide(payment, configs, RiskContext.NOT_LOADED);
+    }
+
+    /** A rule that reads the payer's history {@code lookback} far back, and never hits. */
+    private static Rule looking(String id, Duration lookback) {
+        return new Rule() {
+            @Override
+            public String id() {
+                return id;
+            }
+
+            @Override
+            public Optional<Duration> lookback(RuleParameters parameters) {
+                return Optional.of(lookback);
+            }
+
+            @Override
+            public RuleResult evaluate(PaymentToAssess payment, RuleParameters parameters, RiskContext context) {
+                return RuleResult.NO_HIT;
+            }
+        };
     }
 
     private static RuleSet rules(RuleConfig... configs) {
@@ -131,7 +206,7 @@ class RuleEngineTest {
             }
 
             @Override
-            public RuleResult evaluate(PaymentToAssess payment, RuleParameters parameters) {
+            public RuleResult evaluate(PaymentToAssess payment, RuleParameters parameters, RiskContext context) {
                 return result;
             }
         };

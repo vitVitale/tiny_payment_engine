@@ -21,7 +21,7 @@ public final class NonEuSanctionsRule implements Rule {
     }
 
     @Override
-    public RuleResult evaluate(PaymentToAssess payment, RuleParameters parameters) {
+    public RuleResult evaluate(PaymentToAssess payment, RuleParameters parameters, RiskContext context) {
         return RuleResult.NO_HIT;
     }
 }

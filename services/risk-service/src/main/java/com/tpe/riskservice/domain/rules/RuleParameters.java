@@ -1,6 +1,8 @@
 package com.tpe.riskservice.domain.rules;
 
 import java.math.BigInteger;
+import java.time.Duration;
+import java.time.format.DateTimeParseException;
 import java.util.Map;
 import java.util.Objects;
 
@@ -14,6 +16,22 @@ public record RuleParameters(Map<String, Object> values) {
 
     public RuleParameters {
         values = Map.copyOf(Objects.requireNonNull(values, "values"));
+    }
+
+    /** The non-negative ISO 8601 duration {@code name}, e.g. {@code "PT1H"}. */
+    public Duration duration(String name) {
+        if (values.get(name) instanceof String text) {
+            try {
+                Duration duration = Duration.parse(text);
+                if (!duration.isNegative()) {
+                    return duration;
+                }
+            } catch (DateTimeParseException e) {
+                // reported below
+            }
+        }
+        throw new IllegalStateException(
+                "rule parameter " + name + " must be a non-negative ISO 8601 duration, is " + values.get(name));
     }
 
     /** The whole number {@code name}. */

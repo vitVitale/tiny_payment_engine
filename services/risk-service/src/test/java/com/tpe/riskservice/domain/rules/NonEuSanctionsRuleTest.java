@@ -21,7 +21,7 @@ class NonEuSanctionsRuleTest {
     @EnumSource(PaymentDirection.class)
     void neverHitsWithoutImportedLists(PaymentDirection direction) {
         assertThat(rule.evaluate(payment(direction, Money.parse("10.00")),
-                new RuleParameters(Map.of("threshold", 0.97)))).isEqualTo(RuleResult.NO_HIT);
+                new RuleParameters(Map.of("threshold", 0.97)), RiskContext.NOT_LOADED)).isEqualTo(RuleResult.NO_HIT);
     }
 
     @Test

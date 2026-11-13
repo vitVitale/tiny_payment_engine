@@ -14,7 +14,7 @@ public final class AmountLimitRule implements Rule {
     }
 
     @Override
-    public RuleResult evaluate(PaymentToAssess payment, RuleParameters parameters) {
+    public RuleResult evaluate(PaymentToAssess payment, RuleParameters parameters, RiskContext context) {
         return payment.amount().minor() > parameters.longValue("maxAmountMinor")
                 ? RuleResult.hit(1.0)
                 : RuleResult.NO_HIT;

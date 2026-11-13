@@ -1,6 +1,10 @@
 spring:
   application:
     name: risk-service
+  flyway:
+    postgresql:
+      # its lock transaction would block the CONCURRENTLY index builds (specs/00-engineering-baseline.md §9)
+      transactional-lock: false
 
 management:
   endpoint:
