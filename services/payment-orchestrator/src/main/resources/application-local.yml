@@ -14,3 +14,7 @@ spring:
       resourceserver:
         jwt:
           issuer-uri: http://localhost:8099/default
+tpe:
+  clients:
+    risk:
+      base-url: http://localhost:8084

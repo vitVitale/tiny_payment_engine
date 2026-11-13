@@ -9,6 +9,7 @@ import com.tpe.paymentdomain.Uetr;
 import com.tpe.paymentdomain.UlidGenerator;
 import com.tpe.paymentdomain.UuidV7Generator;
 import com.tpe.paymentorchestrator.application.payments.Payments;
+import com.tpe.paymentorchestrator.application.runner.SagaRunner;
 import com.tpe.paymentorchestrator.domain.payment.OutgoingCommand;
 import com.tpe.paymentorchestrator.domain.payment.OutgoingTimings;
 import com.tpe.paymentorchestrator.domain.payment.Payment;
@@ -24,8 +25,9 @@ import org.springframework.transaction.annotation.Transactional;
 
 /**
  * {@code SubmitPayment} (specs/11-payment-orchestrator.md §3.1, UC-01 6): in one transaction the outgoing payment,
- * its {@code OUTGOING_DEADLINE} timer and its first transition. A {@code commandId} that already has a payment answers
- * that payment if the request is the same, and {@link CommandConflictException} if not.
+ * its {@code OUTGOING_DEADLINE} timer and its first transition; after the commit the saga runner starts
+ * {@code ASSESS_RISK} (§6.3). A {@code commandId} that already has a payment answers that payment if the request is
+ * the same, and {@link CommandConflictException} if not.
  */
 public class PaymentSubmission {
 
@@ -41,9 +43,11 @@ public class PaymentSubmission {
     private final UuidV7Generator paymentIds;
     private final UlidGenerator ulids;
     private final Spans spans;
+    private final SagaRunner runner;
 
     public PaymentSubmission(Payments payments, BankDirectory directory, OutgoingTimings timings, Clock clock,
-            UuidV7Generator paymentIds, UlidGenerator ulids, Spans spans) {
+            UuidV7Generator paymentIds, UlidGenerator ulids, Spans spans, SagaRunner runner) {
+        this.runner = runner;
         this.payments = payments;
         this.directory = directory;
         this.timings = timings;
@@ -84,6 +88,7 @@ public class PaymentSubmission {
         }
         payments.scheduleTimer(payment.paymentId(), TimerType.OUTGOING_DEADLINE, payment.deadlineAt(), now);
         payments.recordTransition(payment.paymentId(), null, payment.state(), null, SUBMITTED, now);
+        runner.submitAfterCommit(payment.paymentId(), false);
         // one line per state transition (specs/26-observability.md §4.3); no parties or amounts
         LOG.info("payment {} txId {} -> {} ({}), onUs {}", payment.paymentId().value(), payment.txId().value(),
                 payment.state(), SUBMITTED, payment.onUs());

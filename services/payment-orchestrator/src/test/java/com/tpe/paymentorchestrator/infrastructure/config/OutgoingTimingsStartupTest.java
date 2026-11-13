@@ -5,6 +5,7 @@ import static org.mockito.Mockito.mock;
 
 import com.tpe.paymentdomain.BankDirectory;
 import com.tpe.paymentorchestrator.application.payments.Payments;
+import com.tpe.paymentorchestrator.application.runner.SagaRunner;
 import com.tpe.paymentorchestrator.domain.payment.OutgoingTimings;
 import java.time.Duration;
 import org.junit.jupiter.api.Test;
@@ -16,7 +17,8 @@ class OutgoingTimingsStartupTest {
     private final ApplicationContextRunner context = new ApplicationContextRunner()
             .withUserConfiguration(OrchestratorConfiguration.class)
             .withBean(Payments.class, () -> mock(Payments.class))
-            .withBean(BankDirectory.class, () -> mock(BankDirectory.class));
+            .withBean(BankDirectory.class, () -> mock(BankDirectory.class))
+            .withBean(SagaRunner.class, () -> mock(SagaRunner.class));
 
     @Test
     void theDefaultsStart() {
