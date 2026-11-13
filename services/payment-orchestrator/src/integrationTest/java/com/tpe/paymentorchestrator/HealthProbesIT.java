@@ -8,14 +8,8 @@ import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
-import org.springframework.beans.factory.annotation.Value;
-import org.springframework.boot.test.context.SpringBootTest;
 
-@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
-class HealthProbesIT {
-
-    @Value("${local.server.port}")
-    int port;
+class HealthProbesIT extends OrchestratorStack {
 
     @ParameterizedTest
     @ValueSource(strings = {"/actuator/health/liveness", "/actuator/health/readiness"})

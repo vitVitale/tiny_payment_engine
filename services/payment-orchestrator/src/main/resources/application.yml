@@ -1,9 +1,25 @@
 spring:
   application:
     name: payment-orchestrator
+  config:
+    import: ${tpe.bank-directory.location:classpath:bank-directory.yml}
 
 management:
   endpoint:
     health:
       probes:
         enabled: true
+
+tpe:
+  messaging:
+    # outbox and inbox (specs/11-payment-orchestrator.md §4, §5)
+    enabled: true
+  outgoing:
+    # specs/11-payment-orchestrator.md §7; startup fails unless hold-give-up-margin < send-by-offset < deadline-offset
+    send-by-offset: 10s
+    deadline-offset: 20s
+    hold-give-up-margin: 2s
+
+springdoc:
+  # a stable document to check in (specs/00-engineering-baseline.md §7)
+  writer-with-order-by-keys: true
