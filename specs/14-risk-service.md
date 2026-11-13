@@ -24,13 +24,15 @@ instant-payment decision for `REVIEW` (orchestrator treats it as `DENY`).
 | `api.accounts` | Account events listener |
 | `domain.rules` | Fraud rule engine |
 | `domain.sanctions` | Sanctions matcher |
-| `application.assessment` | assessment service (rules + persistence of assessments) |
+| `application.assessment` | assessment service (rules + persistence of assessments), rule book (rules in memory) |
 | `application.lists` | Sanctions list importer |
 | `application.screening` | Customer screening job |
 | `application.cases` | Case manager |
 | `infrastructure.ledger` | Ledger client |
 | `infrastructure.provider` | Provider client |
 | `infrastructure.persistence` | Repositories |
+| `infrastructure.jobs` | Rule refresh, `tpe.risk.rules.age` |
+| `infrastructure.metrics` | `tpe.risk.assessment.duration` |
 
 ## 3. REST API
 
@@ -61,6 +63,15 @@ instant-payment decision for `REVIEW` (orchestrator treats it as `DENY`).
   orchestrator ([10 §5.3](10-payment-api.md#53-vop-reference-check)). It is absent for `INCOMING` (on-us payee
   assessment included). An `OUTGOING` request without it → `400 VALIDATION_FAILED`.
 - p99 ≤ 50 ms service-side. No outbound I/O except the local DB.
+- Request and response records are `com.tpe.contracts.risk` ([01 §4](01-shared-libraries.md#4-contracts)); the
+  amount is `amountMinor` + `currency` (EUR). `400 VALIDATION_FAILED` with `errors`: `assessmentId` (`REQUIRED`,
+  `INVALID_ASSESSMENT_ID` if not `<paymentId>:<direction>`), `paymentId`, `amountMinor`, `debtor`, `debtor.name`,
+  `debtor.iban`, `creditor`, `creditor.name`, `creditor.iban` (`REQUIRED`; an invalid value object is its code, e.g.
+  `INVALID_IBAN`), `direction` (`REQUIRED`, `INVALID_DIRECTION`), `vopResult` (`REQUIRED` for `OUTGOING`; ignored for
+  `INCOMING`). Idempotency is by `assessmentId`, not by an `Idempotency-Key` header (an exception to 00 §7: the id is
+  derived from the payment, so a retry cannot carry a different one); a replay answers the stored decision whatever
+  its body. `@InternalApi`, no authentication until M5
+  ([ADR-012](../architecture/decisions/ADR-012-service-and-staff-authentication.md)).
 
 ### 3.2 Screening case API (role `COMPLIANCE_OFFICER`)
 
@@ -94,15 +105,20 @@ CREATE TABLE account_holders (
 CREATE INDEX account_holders_customer ON account_holders (customer_id);
 
 CREATE TABLE assessments (
-  assessment_id VARCHAR(60) PRIMARY KEY, payment_id UUID NOT NULL, direction VARCHAR(8) NOT NULL,
-  debtor_iban VARCHAR(34) NOT NULL, creditor_iban VARCHAR(34) NOT NULL, amount_minor BIGINT NOT NULL,
-  decision VARCHAR(6) NOT NULL, reason_code VARCHAR(4), rule_hits JSONB NOT NULL, assessed_at TIMESTAMPTZ NOT NULL
+  assessment_id VARCHAR(60) PRIMARY KEY, payment_id UUID NOT NULL,
+  direction VARCHAR(8) NOT NULL CHECK (direction IN ('OUTGOING','INCOMING')),
+  debtor_iban VARCHAR(34) NOT NULL, creditor_iban VARCHAR(34) NOT NULL,
+  amount_minor BIGINT NOT NULL CHECK (amount_minor > 0),
+  decision VARCHAR(6) NOT NULL CHECK (decision IN ('ALLOW','DENY','REVIEW')),
+  reason_code VARCHAR(4) CHECK (reason_code IN ('FR01','RR04')), rule_hits JSONB NOT NULL,
+  assessed_at TIMESTAMPTZ NOT NULL
 );
 CREATE INDEX assessments_debtor_time ON assessments (debtor_iban, assessed_at);
 CREATE INDEX assessments_creditor_time ON assessments (creditor_iban, assessed_at);
 
 CREATE TABLE rules (                         -- parameters only; logic is code
-  rule_id VARCHAR(40) PRIMARY KEY, enabled BOOLEAN NOT NULL, direction VARCHAR(8) NOT NULL,
+  rule_id VARCHAR(40) PRIMARY KEY, enabled BOOLEAN NOT NULL,
+  direction VARCHAR(8) NOT NULL CHECK (direction IN ('OUTGOING','INCOMING','BOTH')),
   parameters JSONB NOT NULL, action VARCHAR(6) NOT NULL CHECK (action IN ('DENY','REVIEW')),
   updated_at TIMESTAMPTZ NOT NULL, updated_by VARCHAR(100) NOT NULL
 );
@@ -149,9 +165,18 @@ Plus `inbox`.
 
 ### 6.1 Fraud rules (MVP rule set)
 
-Rules are Java classes implementing `Rule { RuleResult evaluate(AssessmentRequest, RiskContext) }`; parameters come
-from the `rules` table, cached in memory and refreshed every 30 s. `RiskContext` provides velocity aggregates
-read from `assessments` (indexed range query, single round trip) and the holder projection.
+Rules are Java classes implementing `Rule { RuleResult evaluate(PaymentToAssess, RuleParameters) }` (the velocity
+rules add a `RiskContext`); parameters come from the `rules` table, cached in memory and refreshed every 30 s.
+`RiskContext` provides velocity aggregates read from `assessments` (indexed range query, single round trip) and the
+holder projection. The first load runs at startup; the refresh runs in the background (checked every second against
+`refresh-interval` on the service's clock), never on the assessment path; a failed reload keeps the rules in memory
+and shows in `tpe.risk.rules.age`. Before any load has succeeded an assessment is `503 RULES_UNAVAILABLE` (with
+`Retry-After`), and the payment is rejected (§8, fail closed). A rule runs if its row exists, is
+`enabled` and its `direction` covers the payment's; a row whose rule is not implemented yet is ignored. Seeded
+parameters (amounts in minor units, durations ISO 8601): `AMOUNT_LIMIT {maxAmountMinor}`, `VELOCITY_COUNT_1H
+{maxCount, window}`, `VELOCITY_AMOUNT_24H {maxAmountMinor, window}`, `NEW_PAYEE_HIGH_AMOUNT {minAmountMinor}`,
+`MULE_NEW_ACCOUNT {maxAccountAge, maxIncomingCount, window}`, `NON_EU_SANCTIONS {threshold, lists}`. Until the
+sanctions track imports non-EU lists, `NON_EU_SANCTIONS` never hits.
 
 | Rule | Direction | Default parameters | Action |
 |---|---|---|---|
