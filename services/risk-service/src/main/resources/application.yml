@@ -1,10 +1,6 @@
 spring:
   application:
     name: risk-service
-  flyway:
-    postgresql:
-      # its lock transaction would block the CONCURRENTLY index builds (specs/00-engineering-baseline.md §9)
-      transactional-lock: false
 
 management:
   endpoint:
@@ -18,6 +14,10 @@ management:
         tpe.risk.assessment.duration: 50ms,250ms
 
 tpe:
+  messaging:
+    # the inbox of the accounts.events consumer, group risk-service (specs/14-risk-service.md §4); also runs Flyway
+    # with a session lock, so the CONCURRENTLY index builds can run (specs/00-engineering-baseline.md §9)
+    enabled: true
   risk:
     rules:
       # the rules table is read into memory and reloaded this often (specs/14-risk-service.md §6.1, §7; SLO-RSK-03)

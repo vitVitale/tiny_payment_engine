@@ -2,25 +2,33 @@ package com.tpe.riskservice;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.tpe.riskservice.application.accounts.AccountHolderProjection;
+import com.tpe.riskservice.domain.accounts.AccountHolder;
 import java.time.Duration;
+import java.time.Instant;
 import java.util.Map;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
 import tools.jackson.databind.JsonNode;
 
 /**
- * The seeded velocity and new-payee rules over the payer's stored assessments (specs/14-risk-service.md §6.1, UC-04
- * 2b): {@code VELOCITY_COUNT_1H} (> 20 per debtor IBAN in 1 h), {@code VELOCITY_AMOUNT_24H} (> 100 000.00 EUR per
- * debtor IBAN in 24 h) and {@code NEW_PAYEE_HIGH_AMOUNT} (first payment to the creditor IBAN, > 5 000.00 EUR, not a
- * VoP {@code MATCH}); only {@code ALLOW} assessments count. Every test has payers of its own.
+ * The seeded rules over our customer's stored assessments and account (specs/14-risk-service.md §6.1, UC-04 2b):
+ * {@code VELOCITY_COUNT_1H} (> 20 per debtor IBAN in 1 h), {@code VELOCITY_AMOUNT_24H} (> 100 000.00 EUR per debtor
+ * IBAN in 24 h), {@code NEW_PAYEE_HIGH_AMOUNT} (first payment to the creditor IBAN, > 5 000.00 EUR, not a VoP
+ * {@code MATCH}) and {@code MULE_NEW_ACCOUNT} (incoming to an account opened < 7 days ago, > 10 in 24 h); only
+ * {@code ALLOW} assessments count. Every test has customers of its own.
  */
 class FraudRulesIT extends RiskStack {
 
+    @Autowired
+    AccountHolderProjection projection;
+
     @Test
-    void theTwentiethPaymentOfAPayerWithinAnHourIsAllowedTheTwentyFirstDenied() {
+    void RSK_AC_01_theTwentiethPaymentOfAPayerWithinAnHourIsAllowedTheTwentyFirstDenied() {
         String debtor = Ibans.fresh();
         for (int i = 0; i < 20; i++) {
             assertThat(decision(assess(outgoing(debtor, Ibans.fresh(), 100_00, "MATCH")))).isEqualTo("ALLOW");
@@ -39,7 +47,7 @@ class FraudRulesIT extends RiskStack {
     }
 
     @Test
-    void reachingOneHundredThousandEuroWithin24HoursIsAllowedGoingAboveDenied() {
+    void RSK_AC_01_reachingOneHundredThousandEuroWithin24HoursIsAllowedGoingAboveDenied() {
         String debtor = Ibans.fresh();
         assertThat(decision(assess(outgoing(debtor, Ibans.fresh(), 5_000_000, "MATCH")))).isEqualTo("ALLOW");
         CLOCK.advance(Duration.ofHours(23));
@@ -117,6 +125,59 @@ class FraudRulesIT extends RiskStack {
 
         // the payer's 21st payment within the hour, to a new payee above 5 000.00 EUR, without a VoP result
         assertThat(decision(assess(incoming))).isEqualTo("ALLOW");
+    }
+
+    @Test
+    void RSK_AC_01_theEleventhIncomingPaymentWithin24HoursToAnAccountOpenedThisWeekIsDenied() {
+        String creditor = holder(CLOCK.instant().minus(Duration.ofDays(6)));
+        for (int i = 0; i < 10; i++) {
+            assertThat(decision(assess(incoming(Ibans.fresh(), creditor, 100_00)))).isEqualTo("ALLOW");
+        }
+
+        ResponseEntity<JsonNode> eleventh = assess(incoming(Ibans.fresh(), creditor, 100_00));
+
+        assertThat(decision(eleventh)).isEqualTo("DENY");
+        assertThat(eleventh.getBody().get("reasonCode").asString()).isEqualTo("FR01");
+        assertThat(eleventh.getBody().get("ruleHits").toString())
+                .isEqualTo("[{\"ruleId\":\"MULE_NEW_ACCOUNT\",\"score\":1.0}]");
+        // the denied one did not count, and a day later the window is empty again
+        CLOCK.advance(Duration.ofHours(24));
+        assertThat(decision(assess(incoming(Ibans.fresh(), creditor, 100_00)))).isEqualTo("ALLOW");
+    }
+
+    @Test
+    void RSK_AC_01_anAccountOpenedSevenDaysAgoTakesAnyNumberOfIncomingPayments() {
+        String creditor = holder(CLOCK.instant().minus(Duration.ofDays(7)));
+
+        for (int i = 0; i < 11; i++) {
+            assertThat(decision(assess(incoming(Ibans.fresh(), creditor, 100_00)))).isEqualTo("ALLOW");
+        }
+    }
+
+    @Test
+    void anUnknownCreditorAccountNeverTripsTheMuleRule() {
+        String unknown = Ibans.fresh();
+
+        for (int i = 0; i < 11; i++) {
+            assertThat(decision(assess(incoming(Ibans.fresh(), unknown, 100_00)))).isEqualTo("ALLOW");
+        }
+    }
+
+    /** An OPEN person's account opened at {@code openedAt}, in the projection; its IBAN. */
+    private String holder(Instant openedAt) {
+        String iban = Ibans.fresh();
+        projection.apply(UUID.randomUUID(), new AccountHolder(UUID.randomUUID(), "CUST-" + iban, iban,
+                AccountHolder.HolderType.PERSON, "Max Mustermann", null, "DE", null,
+                AccountHolder.AccountStatus.OPEN, openedAt, 1));
+        return iban;
+    }
+
+    private static Map<String, Object> incoming(String debtor, String creditor, long amountMinor) {
+        Map<String, Object> body = AssessmentIT.request(UUID.randomUUID(), "INCOMING", amountMinor);
+        body.put("debtor", Map.of("name", "Anna Schmidt", "iban", debtor));
+        body.put("creditor", Map.of("name", "Max Mustermann", "iban", creditor));
+        body.remove("vopResult");
+        return body;
     }
 
     private static Map<String, Object> outgoing(String debtor, String creditor, long amountMinor, String vopResult) {

@@ -4,6 +4,7 @@ import com.tpe.contracts.ContractsModule;
 import com.tpe.riskservice.application.assessment.RuleBook;
 import com.tpe.riskservice.application.assessment.RuleConfigs;
 import com.tpe.riskservice.domain.rules.AmountLimitRule;
+import com.tpe.riskservice.domain.rules.MuleNewAccountRule;
 import com.tpe.riskservice.domain.rules.NewPayeeHighAmountRule;
 import com.tpe.riskservice.domain.rules.NonEuSanctionsRule;
 import com.tpe.riskservice.domain.rules.RuleEngine;
@@ -38,7 +39,7 @@ class RiskConfiguration {
     @Bean
     RuleEngine ruleEngine() {
         return new RuleEngine(List.of(new AmountLimitRule(), new VelocityCountRule(), new VelocityAmountRule(),
-                new NewPayeeHighAmountRule(), new NonEuSanctionsRule()));
+                new NewPayeeHighAmountRule(), new MuleNewAccountRule(), new NonEuSanctionsRule()));
     }
 
     @Bean

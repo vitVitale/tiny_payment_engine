@@ -43,7 +43,7 @@ public class AssessmentService {
             RuleSet configs = rules.current();
             Instant now = clock.instant().truncatedTo(ChronoUnit.MILLIS);
             RiskContext context = engine.lookback(payment, configs)
-                    .map(lookback -> assessments.history(payment.debtorIban(), payment.creditorIban(), now, lookback))
+                    .map(lookback -> assessments.history(payment, now, lookback))
                     .orElse(RiskContext.NOT_LOADED);
             Verdict verdict = engine.decide(payment, configs, context);
             StoredAssessment decided = new StoredAssessment(assessmentId, paymentId, payment.direction(),

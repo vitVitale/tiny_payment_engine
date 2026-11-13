@@ -71,6 +71,6 @@ class NewPayeeHighAmountRuleTest {
     }
 
     private static RiskContext paidBefore(boolean paid) {
-        return RiskContext.loaded(NOW, Duration.ZERO, List.of(), paid);
+        return RiskContext.loaded(NOW, Duration.ZERO, List.of(), paid, null);
     }
 }
