@@ -54,6 +54,9 @@
         <springdoc.version>3.0.3</springdoc.version>
         <!-- consumer-driven contract tests; specs/20-testing-strategy.md §10 -->
         <pact.version>4.7.5</pact.version>
+        <!-- REST neighbours in component tests: faults and deadline-derived timeouts (20 §1, §10.4); the standalone
+             jar shades its Jetty, which would otherwise clash with Boot's -->
+        <wiremock.version>3.13.1</wiremock.version>
         <!-- where the build collects every module's pacts (20 §10.3) -->
         <pact.collected.dir>${maven.multiModuleProjectDirectory}/target/pacts</pact.collected.dir>
         <!-- the pacts of each release, committed by the release job; the backward check verifies the newest -->
@@ -93,6 +96,11 @@
                 <groupId>net.ttddyy.observation</groupId>
                 <artifactId>datasource-micrometer-spring-boot</artifactId>
                 <version>${datasource-micrometer.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>org.wiremock</groupId>
+                <artifactId>wiremock-standalone</artifactId>
+                <version>${wiremock.version}</version>
             </dependency>
             <dependency>
                 <groupId>org.springdoc</groupId>

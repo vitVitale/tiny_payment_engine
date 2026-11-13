@@ -1,6 +1,12 @@
 package com.tpe.paymentorchestrator;
 
+import com.github.tomakehurst.wiremock.WireMockServer;
+import com.github.tomakehurst.wiremock.core.WireMockConfiguration;
+import com.github.tomakehurst.wiremock.stubbing.StubMapping;
 import com.tpe.paymentdomain.MutableClock;
+import java.io.IOException;
+import java.io.UncheckedIOException;
+import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.context.TestConfiguration;
@@ -16,8 +22,9 @@ import org.testcontainers.postgresql.PostgreSQLContainer;
 
 /**
  * The service on a random port against PostgreSQL and Kafka of the compose stack's versions
- * (deploy/docker-compose.yml), started once per JVM; every subclass shares one Spring context. The service's time is
- * {@link #CLOCK}. {@link #http()} never throws on an error status.
+ * (deploy/docker-compose.yml) and WireMock as risk-service, started once per JVM; every subclass shares one Spring
+ * context. The service's time is {@link #CLOCK}. {@link #http()} never throws on an error status. risk-service
+ * answers what {@link #riskAnswers} loaded last.
  */
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
 @Import(OrchestratorStack.TestClock.class)
@@ -29,9 +36,26 @@ public abstract class OrchestratorStack {
     protected static final PostgreSQLContainer POSTGRES = new PostgreSQLContainer("postgres:17.6-alpine");
     protected static final KafkaContainer KAFKA = new KafkaContainer("apache/kafka:4.1.0");
 
+    /** risk-service (specs/20-testing-strategy.md §1, §10.4). */
+    protected static final WireMockServer RISK = new WireMockServer(WireMockConfiguration.options().dynamicPort());
+
     static {
         POSTGRES.start();
         KAFKA.start();
+        RISK.start();
+    }
+
+    /**
+     * risk-service answers every assessment as the mapping {@code wiremock/risk-service/<name>.json} says; the mappings
+     * are checked against P-03 by {@code RiskStubConformanceIT}.
+     */
+    protected static void riskAnswers(String name) {
+        try (var mapping = OrchestratorStack.class.getResourceAsStream("/wiremock/risk-service/" + name + ".json")) {
+            RISK.resetMappings();
+            RISK.addStubMapping(StubMapping.buildFrom(new String(mapping.readAllBytes(), StandardCharsets.UTF_8)));
+        } catch (IOException e) {
+            throw new UncheckedIOException(e);
+        }
     }
 
     @TestConfiguration(proxyBeanMethods = false)
@@ -53,6 +77,7 @@ public abstract class OrchestratorStack {
         registry.add("spring.datasource.username", POSTGRES::getUsername);
         registry.add("spring.datasource.password", POSTGRES::getPassword);
         registry.add("spring.kafka.bootstrap-servers", KAFKA::getBootstrapServers);
+        registry.add("tpe.clients.risk.base-url", RISK::baseUrl);
         // spans are made, so the submit's trace is stored (ADR-014), but there is no collector to send them to
         registry.add("management.tracing.export.enabled", () -> "false");
     }

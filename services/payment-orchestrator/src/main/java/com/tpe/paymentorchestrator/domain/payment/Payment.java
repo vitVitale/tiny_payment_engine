@@ -73,6 +73,29 @@ public record Payment(
                 timings.deadline(acceptedAt), PendingAction.ASSESS_RISK, null, traceContext);
     }
 
+    /** Risk allowed the outgoing payment (§6.2 {@code ASSESS_RISK}): {@code RISK_CHECKED}, next {@code CREATE_HOLD}. */
+    public Payment riskChecked() {
+        return moveTo(PaymentState.RISK_CHECKED, null, PendingAction.CREATE_HOLD, null);
+    }
+
+    /**
+     * {@code REJECTED} with {@code reason}, finalised at {@code at}.
+     *
+     * @param compensation the action that undoes what the payment already holds ({@code RELEASE_HOLD},
+     *     {@code CANCEL_CREDIT}); {@code null} if nothing needs undoing
+     */
+    public Payment rejected(StatusReason reason, PendingAction compensation, Instant at) {
+        return moveTo(PaymentState.REJECTED, Objects.requireNonNull(reason, "reason"), compensation,
+                Objects.requireNonNull(at, "at"));
+    }
+
+    private Payment moveTo(PaymentState to, StatusReason reason, PendingAction next, Instant finalised) {
+        PaymentStateMachine.require(direction, state, to);
+        return new Payment(paymentId, direction, to, reason, onUs, commandId, clientId, requestHash, txId, uetr,
+                endToEndId, amount, debtor, creditor, remittance, vopReference, vopResult, acceptedAt, sendBy,
+                deadlineAt, next, finalised, traceContext);
+    }
+
     /** Leaves out the parties and the remittance text, which are personal data (specs/26-observability.md §4.4). */
     @Override
     public String toString() {

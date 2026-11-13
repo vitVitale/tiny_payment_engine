@@ -19,6 +19,20 @@ tpe:
     send-by-offset: 10s
     deadline-offset: 20s
     hold-give-up-margin: 2s
+  runner:
+    # specs/11-payment-orchestrator.md §6.3, §7
+    lease: 5s
+    max-backoff: 30s
+    max-concurrency: 256
+    # what a remote call leaves before its deadline (send_by, answer_deadline)
+    safety-margin: 100ms
+  clients:
+    risk:
+      base-url: http://risk-service:8084
+      timeout:
+        # UC-04 2c, UC-06 3
+        outgoing: 500ms
+        incoming: 300ms
 
 springdoc:
   # a stable document to check in (specs/00-engineering-baseline.md §7)

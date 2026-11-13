@@ -13,6 +13,7 @@ import com.tpe.paymentdomain.StatusReason;
 import com.tpe.paymentdomain.TxId;
 import com.tpe.paymentdomain.Uetr;
 import com.tpe.paymentorchestrator.application.payments.Payments;
+import com.tpe.paymentorchestrator.application.payments.ActionClaim;
 import com.tpe.paymentorchestrator.domain.payment.PayeeVerification;
 import com.tpe.paymentorchestrator.domain.payment.Payment;
 import com.tpe.paymentorchestrator.domain.payment.PaymentDirection;
@@ -26,6 +27,7 @@ import java.sql.Timestamp;
 import java.time.Instant;
 import java.util.Currency;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Repository;
@@ -131,6 +133,65 @@ class JdbcPayments implements Payments {
                 .param(type.name())
                 .param(timestamp(dueAt))
                 .param(timestamp(now))
+                .update();
+    }
+
+    @Override
+    public Optional<ActionClaim> claim(PaymentId paymentId, Set<PendingAction> actions, Instant now,
+            Instant leaseUntil) {
+        if (actions.isEmpty()) {
+            return Optional.empty();
+        }
+        return jdbc.sql("""
+                        UPDATE payments
+                        SET next_action_at = :leaseUntil, action_attempts = action_attempts + 1,
+                            version = version + 1, updated_at = :now
+                        WHERE payment_id = :paymentId AND pending_action IN (:actions) AND next_action_at <= :now
+                        RETURNING state, pending_action, action_attempts, version""")
+                .param("leaseUntil", timestamp(leaseUntil))
+                .param("now", timestamp(now))
+                .param("paymentId", paymentId.value())
+                .param("actions", actions.stream().map(Enum::name).toList())
+                .query((rs, n) -> new ActionClaim(paymentId, PaymentState.valueOf(rs.getString("state")),
+                        PendingAction.valueOf(rs.getString("pending_action")), rs.getInt("action_attempts"),
+                        rs.getLong("version")))
+                .optional();
+    }
+
+    @Override
+    public boolean applyStep(ActionClaim claim, Payment next, boolean finalEventEmitted, Instant now) {
+        return jdbc.sql("""
+                        UPDATE payments
+                        SET state = :state, reason_code = :reasonCode, pending_action = :pendingAction,
+                            next_action_at = :nextActionAt, action_attempts = 0, finalised_at = :finalisedAt,
+                            final_event_emitted = final_event_emitted OR :finalEventEmitted,
+                            version = version + 1, updated_at = :now
+                        WHERE payment_id = :paymentId AND state = :claimedState AND pending_action = :claimedAction
+                          AND version = :version""")
+                .param("state", next.state().name())
+                .param("reasonCode", next.reasonCode() == null ? null : next.reasonCode().code())
+                .param("pendingAction", next.pendingAction() == null ? null : next.pendingAction().name())
+                .param("nextActionAt", next.pendingAction() == null ? null : timestamp(now))
+                .param("finalisedAt", timestamp(next.finalisedAt()))
+                .param("finalEventEmitted", finalEventEmitted)
+                .param("now", timestamp(now))
+                .param("paymentId", claim.paymentId().value())
+                .param("claimedState", claim.state().name())
+                .param("claimedAction", claim.action().name())
+                .param("version", claim.version())
+                .update() == 1;
+    }
+
+    @Override
+    public void retryAt(ActionClaim claim, Instant at, Instant now) {
+        jdbc.sql("""
+                        UPDATE payments SET next_action_at = :at, version = version + 1, updated_at = :now
+                        WHERE payment_id = :paymentId AND pending_action = :action AND version = :version""")
+                .param("at", timestamp(at))
+                .param("now", timestamp(now))
+                .param("paymentId", claim.paymentId().value())
+                .param("action", claim.action().name())
+                .param("version", claim.version())
                 .update();
     }
 

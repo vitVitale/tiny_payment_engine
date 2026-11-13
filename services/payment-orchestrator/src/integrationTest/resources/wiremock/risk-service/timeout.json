@@ -1,0 +1,13 @@
+{
+  "request": {
+    "method": "POST",
+    "url": "/v1/risk/assessments"
+  },
+  "response": {
+    "status": 200,
+    "fixedDelayMilliseconds": 1500
+  },
+  "metadata": {
+    "pact": "fault"
+  }
+}

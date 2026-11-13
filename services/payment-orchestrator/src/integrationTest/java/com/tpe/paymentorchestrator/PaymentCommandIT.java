@@ -10,6 +10,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.MediaType;
@@ -20,7 +21,7 @@ import tools.jackson.databind.json.JsonMapper;
 
 /**
  * {@code POST /v1/payments} and {@code GET /v1/payments/{paymentId}} (specs/11-payment-orchestrator.md §3.1, §5,
- * UC-01 6). No action runs yet: a submitted payment stays {@code RECEIVED}.
+ * UC-01 6). risk-service is down and the clock does not move, so a submitted payment stays {@code RECEIVED}.
  */
 class PaymentCommandIT extends OrchestratorStack {
 
@@ -28,6 +29,12 @@ class PaymentCommandIT extends OrchestratorStack {
 
     @Autowired
     JdbcClient jdbc;
+
+    /** risk-service answers 503: the runner's first attempt fails, and the payment waits for its retry. */
+    @BeforeEach
+    void riskIsDown() {
+        riskAnswers("unavailable");
+    }
 
     @Test
     void ORC_AC_01_submittingTheSameCommandTwiceReturnsTheSamePaymentAndCreatesOne() {
@@ -89,7 +96,7 @@ class PaymentCommandIT extends OrchestratorStack {
         assertThat(accepted.get("acceptedAt").asString()).isEqualTo(now.toString());
         assertThat(jdbc.sql("""
                         SELECT on_us, creditor_agent_bic, send_by = ?, deadline_at = ?, pending_action,
-                               next_action_at = accepted_at
+                               next_action_at IS NOT NULL
                         FROM payments WHERE payment_id = ?""")
                 .param(Timestamp.from(now.plus(Duration.ofSeconds(10))))
                 .param(Timestamp.from(now.plus(Duration.ofSeconds(20))))

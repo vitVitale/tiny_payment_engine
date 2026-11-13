@@ -7,6 +7,7 @@ import com.tpe.paymentdomain.UlidGenerator;
 import com.tpe.paymentdomain.UuidV7Generator;
 import com.tpe.paymentorchestrator.application.outgoing.PaymentSubmission;
 import com.tpe.paymentorchestrator.application.payments.Payments;
+import com.tpe.paymentorchestrator.application.runner.SagaRunner;
 import com.tpe.paymentorchestrator.domain.payment.OutgoingTimings;
 import java.security.SecureRandom;
 import java.time.Clock;
@@ -56,9 +57,10 @@ class OrchestratorConfiguration {
 
     @Bean
     PaymentSubmission paymentSubmission(Payments payments, BankDirectory directory, OutgoingTimings timings,
-            Clock clock, UuidV7Generator paymentIds, UlidGenerator ulids, ObjectProvider<Spans> spans) {
+            Clock clock, UuidV7Generator paymentIds, UlidGenerator ulids, ObjectProvider<Spans> spans,
+            SagaRunner runner) {
         return new PaymentSubmission(payments, directory, timings, clock, paymentIds, ulids,
-                spans.getIfAvailable(Spans::noop));
+                spans.getIfAvailable(Spans::noop), runner);
     }
 
     /** {@code tpe.outgoing.*} (§7). */

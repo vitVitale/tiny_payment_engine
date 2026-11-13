@@ -50,6 +50,8 @@ public final class TpeMeters {
         meters.put("tpe.payment.stage.duration", Set.of("direction", "stage"));
         meters.put("tpe.payment.rejected", Set.of("direction", "reason", "cause"));
         meters.put("tpe.payment.duration", Set.of("direction", "outcome"));
+        // specs/11-payment-orchestrator.md §8
+        meters.put("tpe.saga.action.duration", Set.of("action", "result"));
         meters.put("tpe.csm.stage.duration", Set.of("stage"));
         meters.put("tpe.csm.answer.margin", Set.of());
         // 25 §5 SLO-GW-03, -05

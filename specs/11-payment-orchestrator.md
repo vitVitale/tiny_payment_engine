@@ -278,6 +278,8 @@ Rules:
   WHERE payment_id = :id AND pending_action = :action AND next_action_at <= now()` — 0 rows → someone else has it.
 - **Sweeper:** a `PollingWorker` (100 ms) picks payments with `pending_action IS NOT NULL AND next_action_at <=
   now()` (expired lease or scheduled retry) and hands them to the runner. This recovers actions lost in a crash.
+  It picks only the actions the runner has an implementation for, so an action of a later milestone waits instead
+  of being handed over every 100 ms. "Now" in the claim and the sweep is the service's clock.
 - On technical failure the runner sets `next_action_at = now() + backoff(action_attempts)` (100 ms, 200 ms, 400 ms
   … capped at `max-backoff`) unless the table above says to give up.
 - Every remote call's read timeout is `min(configured timeout, deadline − now − safety-margin)` where the deadline is
@@ -349,8 +351,9 @@ Listener transaction: validate → inbox → load payment by `(direction, debtor
 | `tpe.runner.lease` | `5s` | |
 | `tpe.runner.max-backoff` | `30s` | |
 | `tpe.runner.max-concurrency` | `256` | |
+| `tpe.runner.safety-margin` | `100ms` | what a remote call leaves before its deadline (§6.3) |
 | `tpe.runner.stuck-after` | `10m` | `LEDGER_ACTION_STUCK` |
-| `tpe.clients.risk.timeout` | `500ms` outgoing / `300ms` incoming | |
+| `tpe.clients.risk.timeout.outgoing`, `.incoming` | `500ms` / `300ms` | |
 | `tpe.clients.ledger.timeout` | `1s` | |
 | `tpe.clients.*.base-url` | compose hosts | |
 
