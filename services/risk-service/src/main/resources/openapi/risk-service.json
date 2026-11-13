@@ -1,0 +1,140 @@
+{
+  "openapi" : "3.1.0",
+  "info" : {
+    "title" : "OpenAPI definition",
+    "version" : "v0"
+  },
+  "paths" : {
+    "/v1/risk/assessments" : {
+      "post" : {
+        "operationId" : "assess",
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/AssessmentRequest"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "200" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/AssessmentResponse"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "tags" : [ "assessment-controller" ]
+      }
+    }
+  },
+  "components" : {
+    "schemas" : {
+      "AssessmentRequest" : {
+        "type" : "object",
+        "properties" : {
+          "amountMinor" : {
+            "type" : "integer",
+            "format" : "int64",
+            "description" : "Amount in euro cents",
+            "minimum" : 1
+          },
+          "assessmentId" : {
+            "type" : "string"
+          },
+          "creditor" : {
+            "$ref" : "#/components/schemas/Party"
+          },
+          "creditorAgentBic" : {
+            "type" : "string"
+          },
+          "currency" : {
+            "type" : "string",
+            "enum" : [ "EUR" ]
+          },
+          "debtor" : {
+            "$ref" : "#/components/schemas/Party"
+          },
+          "debtorAgentBic" : {
+            "type" : "string"
+          },
+          "direction" : {
+            "type" : "string",
+            "enum" : [ "OUTGOING", "INCOMING", "UNKNOWN" ]
+          },
+          "paymentId" : {
+            "type" : "string"
+          },
+          "remittanceInformation" : {
+            "type" : "string"
+          },
+          "txId" : {
+            "type" : "string"
+          },
+          "vopResult" : {
+            "type" : "string",
+            "enum" : [ "MATCH", "CLOSE_MATCH", "NO_MATCH", "NOT_POSSIBLE" ]
+          }
+        }
+      },
+      "AssessmentResponse" : {
+        "type" : "object",
+        "properties" : {
+          "assessedAt" : {
+            "type" : "string",
+            "format" : "date-time"
+          },
+          "assessmentId" : {
+            "type" : "string"
+          },
+          "decision" : {
+            "type" : "string",
+            "enum" : [ "ALLOW", "DENY", "REVIEW" ]
+          },
+          "reasonCode" : {
+            "type" : "string"
+          },
+          "ruleHits" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/RuleHit"
+            }
+          }
+        }
+      },
+      "Party" : {
+        "type" : "object",
+        "properties" : {
+          "accountId" : {
+            "type" : "string",
+            "format" : "uuid"
+          },
+          "iban" : {
+            "type" : "string"
+          },
+          "name" : {
+            "type" : "string"
+          }
+        }
+      },
+      "RuleHit" : {
+        "type" : "object",
+        "properties" : {
+          "ruleId" : {
+            "type" : "string"
+          },
+          "score" : {
+            "type" : "number",
+            "format" : "double"
+          }
+        }
+      }
+    }
+  }
+}

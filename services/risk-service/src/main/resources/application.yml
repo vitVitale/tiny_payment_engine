@@ -7,3 +7,18 @@ management:
     health:
       probes:
         enabled: true
+  metrics:
+    distribution:
+      slo:
+        # SLO-RSK-02: 50 ms / 250 ms service-side as exact buckets (25 §5.5, §11)
+        tpe.risk.assessment.duration: 50ms,250ms
+
+tpe:
+  risk:
+    rules:
+      # the rules table is read into memory and reloaded this often (specs/14-risk-service.md §6.1, §7; SLO-RSK-03)
+      refresh-interval: 30s
+
+springdoc:
+  # a stable document to check in (specs/00-engineering-baseline.md §7)
+  writer-with-order-by-keys: true
