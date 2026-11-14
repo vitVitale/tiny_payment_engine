@@ -97,16 +97,23 @@ Status mapping: `RECEIVED`, `RISK_CHECKED`, `FUNDS_RESERVED`, `SENT_TO_CSM`, `IN
 ### 3.3 `GET /v1/payments/{paymentId}/pain.002`
 
 Same authorisation; returns `application/xml` `pain.002.001.10` with `GrpSts`/`TxSts` from the mapping above,
-`OrgnlEndToEndId`, `OrgnlUETR`, `StsRsnInf/Rsn/Cd` when rejected.
+`OrgnlEndToEndId`, `OrgnlUETR`, `AccptncDtTm`, `StsRsnInf/Rsn/Cd` when rejected. `MsgId` is a new `TPEM` + ULID per
+report. The required `OrgnlMsgId` and `OrgnlPmtInfId` are the payment's `TxId`, as the orchestrator keeps no original
+message id (a JSON payment has none); `OrgnlMsgNmId` is `pain.001.001.09`.
 
 ### 3.4 `POST /v1/payee-verifications` — VoP (UC-02)
 
 Scope `vop:verify`. Body `{ "debtorIban", "payeeIban", "payeeName", "payeeOrganisationId"? }`. `debtorIban` must
-be owned (`403`). IBAN checksum validated here (`400 INVALID_IBAN`, UC-02 1a); then forwarded to vop-service
-`POST /v1/verifications`. Response from vop-service is returned unchanged:
+be owned (`403`). The fields are checked here as vop-service checks them, so it never sees a request it refuses:
+IBANs required and valid (an IBAN failing its checksum is `400 VALIDATION_FAILED` with the field code `INVALID_IBAN`,
+UC-02 1a), `payeeName` required and at most 70 characters, `payeeOrganisationId` at most 35 (blank is none). Then
+forwarded to vop-service `POST /v1/verifications`. Its `201` is returned unchanged: the fields of the response
+record (`com.tpe.contracts.vop`), instants written with milliseconds as every instant of this API; its
+`422 PAYEE_BANK_UNKNOWN` is passed on:
 
 ```json
-{ "vopReference": "VOP-…", "result": "CLOSE_MATCH", "actualName": "Max Mustermann GmbH", "expiresAt": "…" }
+{ "vopReference": "VOP-…", "result": "CLOSE_MATCH", "actualName": "Max Mustermann GmbH", "expiresAt": "…",
+  "respondedBy": "PEERDEFFXXX" }
 ```
 
 Not idempotent by key (read-like; every call creates a new reference). Timeout 5.5 s; vop-service itself enforces
@@ -128,6 +135,7 @@ the 5 s responder timeout and returns `NOT_POSSIBLE`, so payment-api only sees a
 | 422 | `IDEMPOTENCY_KEY_REUSED` | UC-01 2b |
 | 422 | `VOP_REQUIRED` | UC-01 4a (missing, unknown, expired or mismatching reference) |
 | 422 | `CREDITOR_AGENT_NOT_REACHABLE` | creditor bank not in directory or not SCT Inst reachable |
+| 422 | `PAYEE_BANK_UNKNOWN` | payee verification: vop-service's directory has no bank for the payee IBAN |
 | 429 | `RATE_LIMITED` | over a per-client or per-subject limit, with `Retry-After` ([00 §12.3](00-engineering-baseline.md#123-production-requirements) SEC-04, limits in [Q-33](40-open-questions.md#q-33-rate-limits)) |
 | 503 | `ORCHESTRATOR_UNAVAILABLE`, `VOP_UNAVAILABLE` | with `Retry-After` |
 | 500 | `INTERNAL_ERROR` | a downstream service answered outside its contract (a bug on one side, logged) |
@@ -217,7 +225,7 @@ the client.
 | `tpe.api.idempotency.retention` | `24h` |
 | `tpe.api.idempotency.in-progress-takeover` | `10s` |
 | `tpe.clients.orchestrator.base-url`, `.timeout`, `.status-timeout` | `http://payment-orchestrator:8081`, `1s`, `300ms` |
-| `tpe.clients.vop.base-url`, `.check-timeout` | `http://vop-service:8083` (`https://` in `prod`, [ADR-016](../architecture/decisions/ADR-016-tls-inside-the-cluster.md)), `300ms` |
+| `tpe.clients.vop.base-url`, `.check-timeout`, `.verify-timeout` | `http://vop-service:8083` (`https://` in `prod`, [ADR-016](../architecture/decisions/ADR-016-tls-inside-the-cluster.md)), `300ms`, `5.5s` |
 | `tpe.api.rate-limit.clients.<client_id>` | per channel, set at onboarding ([ADR-018](../architecture/decisions/ADR-018-rate-limiting.md)) |
 | `tpe.api.rate-limit.payments-per-subject` | `30/1m` |
 | `tpe.api.rate-limit.verifications-per-subject` | `20/10m`, `100/1d` |

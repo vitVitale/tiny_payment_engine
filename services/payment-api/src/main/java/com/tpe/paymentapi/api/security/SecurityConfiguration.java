@@ -30,6 +30,8 @@ import tools.jackson.databind.json.JsonMapper;
 public class SecurityConfiguration {
 
     public static final String PAYMENTS_WRITE = "SCOPE_payments:write";
+    public static final String PAYMENTS_READ = "SCOPE_payments:read";
+    public static final String VOP_VERIFY = "SCOPE_vop:verify";
 
     @Bean
     SecurityFilterChain securityFilterChain(HttpSecurity http, JsonMapper json) throws Exception {
@@ -40,6 +42,9 @@ public class SecurityConfiguration {
                         .requestMatchers("/actuator/health/**", "/actuator/prometheus").permitAll()
                         .requestMatchers(HttpMethod.GET, "/v3/api-docs", "/v3/api-docs.yaml").permitAll()
                         .requestMatchers(HttpMethod.POST, "/v1/payments").hasAuthority(PAYMENTS_WRITE)
+                        .requestMatchers(HttpMethod.GET, "/v1/payments/*", "/v1/payments/*/pain.002")
+                        .hasAuthority(PAYMENTS_READ)
+                        .requestMatchers(HttpMethod.POST, "/v1/payee-verifications").hasAuthority(VOP_VERIFY)
                         .anyRequest().authenticated())
                 .oauth2ResourceServer(resourceServer -> resourceServer
                         .jwt(Customizer.withDefaults())

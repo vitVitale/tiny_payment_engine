@@ -1,0 +1,19 @@
+{
+  "request": {
+    "method": "POST",
+    "url": "/v1/verifications"
+  },
+  "response": {
+    "status": 201,
+    "headers": {
+      "Content-Type": "application/json"
+    },
+    "jsonBody": {
+      "vopReference": "VOP-01JABCDEFGHJKMNPQRSTVWXYZ0",
+      "result": "CLOSE_MATCH",
+      "actualName": "Anna Schmidt-Berg",
+      "expiresAt": "2026-11-14T10:30:00Z",
+      "respondedBy": "TPEBDEFFXXX"
+    }
+  }
+}

@@ -6,6 +6,7 @@ import com.tpe.paymentapi.api.payment.IdempotencyKeyException;
 import com.tpe.paymentapi.api.security.DebtorAccountNotOwnedException;
 import com.tpe.paymentapi.api.security.InvalidTokenClaimsException;
 import com.tpe.paymentapi.application.idempotency.IdempotencyKeyInProgressException;
+import com.tpe.paymentapi.application.status.PaymentNotFoundException;
 import com.tpe.paymentapi.application.submission.IdempotencyKeyReusedException;
 import com.tpe.paymentapi.application.submission.OrchestratorUnavailableException;
 import com.tpe.paymentapi.application.submission.UnexpectedAnswerException;
@@ -13,6 +14,7 @@ import com.tpe.paymentapi.application.submission.VopRequiredException;
 import com.tpe.paymentapi.application.submission.VopUnavailableException;
 import com.tpe.paymentapi.application.validation.CreditorAgentNotReachableException;
 import com.tpe.paymentapi.application.validation.ValidationFailedException;
+import com.tpe.paymentapi.application.verification.PayeeBankUnknownException;
 import java.util.List;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -70,8 +72,19 @@ class ApiProblems extends ResponseEntityExceptionHandler {
     }
 
     @ExceptionHandler
+    ProblemDetail payeeBankUnknown(PayeeBankUnknownException e) {
+        return problem(HttpStatus.UNPROCESSABLE_CONTENT, "PAYEE_BANK_UNKNOWN", "The payee's bank is not known");
+    }
+
+    @ExceptionHandler
     ProblemDetail vopRequired(VopRequiredException e) {
         return problem(HttpStatus.UNPROCESSABLE_CONTENT, "VOP_REQUIRED", e.problem());
+    }
+
+    /** Unknown, incoming or not the caller's, alike (UC-07 1a). */
+    @ExceptionHandler
+    ProblemDetail paymentNotFound(PaymentNotFoundException e) {
+        return problem(HttpStatus.NOT_FOUND, "PAYMENT_NOT_FOUND", "No such payment");
     }
 
     @ExceptionHandler
@@ -90,14 +103,13 @@ class ApiProblems extends ResponseEntityExceptionHandler {
 
     @ExceptionHandler
     ResponseEntity<ProblemDetail> orchestratorUnavailable(OrchestratorUnavailableException e) {
-        return unavailable("ORCHESTRATOR_UNAVAILABLE", "The payment could not be submitted; retry with the same "
-                + "Idempotency-Key");
+        return unavailable("ORCHESTRATOR_UNAVAILABLE", "payment-orchestrator did not answer; retry after "
+                + "Retry-After");
     }
 
     @ExceptionHandler
     ResponseEntity<ProblemDetail> vopUnavailable(VopUnavailableException e) {
-        return unavailable("VOP_UNAVAILABLE", "The VoP reference could not be checked; retry with the same "
-                + "Idempotency-Key");
+        return unavailable("VOP_UNAVAILABLE", "vop-service did not answer; retry after Retry-After");
     }
 
     /** A bug on one side, logged where it was found. */

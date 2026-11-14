@@ -25,6 +25,12 @@
             <artifactId>payment-domain</artifactId>
             <version>${project.version}</version>
         </dependency>
+        <!-- pain.002 (specs/10-payment-api.md §3.3, specs/01-shared-libraries.md §2) -->
+        <dependency>
+            <groupId>com.tpe</groupId>
+            <artifactId>iso20022-model</artifactId>
+            <version>${project.version}</version>
+        </dependency>
         <!-- a channel's traceparent becomes a span link (ADR-014, specs/26-observability.md §5.3) -->
         <dependency>
             <groupId>com.tpe</groupId>

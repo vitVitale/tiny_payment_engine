@@ -3,9 +3,12 @@ package com.tpe.paymentapi.application.idempotency;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import com.tpe.contracts.Direction;
 import com.tpe.contracts.payment.PaymentAccepted;
 import com.tpe.contracts.payment.PaymentState;
+import com.tpe.contracts.payment.PaymentView;
 import com.tpe.contracts.payment.SubmitPayment;
+import com.tpe.paymentapi.application.status.PaymentStatuses;
 import com.tpe.paymentapi.application.submission.Failure;
 import com.tpe.paymentapi.application.submission.IdempotencyKeyReusedException;
 import com.tpe.paymentapi.application.submission.Orchestrator;
@@ -43,8 +46,8 @@ class IdempotencyGuardTest {
     private final MemoryKeys keys = new MemoryKeys();
     private final StatusOrchestrator orchestrator = new StatusOrchestrator();
     private final SimpleMeterRegistry meters = new SimpleMeterRegistry();
-    private final IdempotencyGuard guard = new IdempotencyGuard(keys, orchestrator, clock, Duration.ofHours(24),
-            Duration.ofSeconds(10), meters);
+    private final IdempotencyGuard guard = new IdempotencyGuard(keys, new PaymentStatuses(orchestrator), clock,
+            Duration.ofHours(24), Duration.ofSeconds(10), meters);
     private final AtomicInteger submits = new AtomicInteger();
 
     @Test
@@ -61,7 +64,7 @@ class IdempotencyGuardTest {
     @Test
     void theSameRequestAgainReplaysThePaymentWithItsCurrentState() {
         guard.initiate(REQUEST, this::submit);
-        orchestrator.reads.add(new Orchestrator.Found(PaymentState.SETTLED, ACCEPTED.txId()));
+        orchestrator.reads.add(found(PaymentState.SETTLED));
 
         PaymentAccepted replayed = guard.initiate(REQUEST, this::submit);
 
@@ -86,7 +89,7 @@ class IdempotencyGuardTest {
     void aStatusReadIsRetriedOnce() {
         guard.initiate(REQUEST, this::submit);
         orchestrator.reads.add(new Orchestrator.Unavailable(Failure.GATEWAY, "503"));
-        orchestrator.reads.add(new Orchestrator.Found(PaymentState.SENT_TO_CSM, ACCEPTED.txId()));
+        orchestrator.reads.add(found(PaymentState.SENT_TO_CSM));
 
         assertThat(guard.initiate(REQUEST, this::submit).state()).isEqualTo(PaymentState.SENT_TO_CSM);
     }
@@ -217,6 +220,11 @@ class IdempotencyGuardTest {
 
         assertThat(keys.rows.get("key-1").requestHash()).isEqualTo("hash-2");
         assertThat(keys.rows.get("key-1").status()).isEqualTo(IdempotencyKeys.Status.IN_PROGRESS);
+    }
+
+    private static Orchestrator.Found found(PaymentState state) {
+        return new Orchestrator.Found(new PaymentView(ACCEPTED.paymentId(), Direction.OUTGOING, false, state, null,
+                ACCEPTED.txId(), null, null, null, null, null, null, ACCEPTED.acceptedAt(), null));
     }
 
     private PaymentAccepted submit() {

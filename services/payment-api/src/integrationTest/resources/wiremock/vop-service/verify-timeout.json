@@ -1,0 +1,13 @@
+{
+  "request": {
+    "method": "POST",
+    "url": "/v1/verifications"
+  },
+  "response": {
+    "status": 201,
+    "fixedDelayMilliseconds": 1500
+  },
+  "metadata": {
+    "pact": "fault"
+  }
+}

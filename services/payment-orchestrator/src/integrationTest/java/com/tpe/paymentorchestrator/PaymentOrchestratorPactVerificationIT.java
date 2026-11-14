@@ -12,8 +12,10 @@ import java.util.UUID;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.TestTemplate;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
+import org.springframework.jdbc.core.simple.JdbcClient;
 import tools.jackson.databind.JsonNode;
 
 /**
@@ -26,8 +28,13 @@ import tools.jackson.databind.JsonNode;
 @PactVerification
 class PaymentOrchestratorPactVerificationIT extends OrchestratorStack {
 
+    @Autowired
+    private JdbcClient jdbc;
+
+    /** risk-service answers 503, so a submitted payment stays where a state puts it. */
     @BeforeEach
     void target(PactVerificationContext context) {
+        riskAnswers("unavailable");
         context.setTarget(new HttpTestTarget("localhost", port));
     }
 
@@ -60,10 +67,24 @@ class PaymentOrchestratorPactVerificationIT extends OrchestratorStack {
         return Map.of("commandId", commandId);
     }
 
-    /** The interaction's payment, submitted through the API as payment-api did; the state gives its id. */
-    @State("an outgoing payment exists")
-    Map<String, Object> anOutgoingPaymentExists(Map<String, Object> parameters) {
-        return Map.of("paymentId", submit(UUID.randomUUID().toString(), request(parameters)));
+    /**
+     * The interaction's payment, submitted through the API as payment-api did, then put into the state the
+     * interaction names (with its {@code reasonCode}) as if the saga had got there: no action left, the outcome's time
+     * a second after acceptance for a final state. The version moves, so a runner that held the payment drops it.
+     */
+    @State("an outgoing payment is in a state")
+    Map<String, Object> anOutgoingPaymentIsInAState(Map<String, Object> parameters) {
+        String paymentId = submit(UUID.randomUUID().toString(), request(parameters));
+        String state = (String) parameters.get("state");
+        boolean isFinal = state.equals("SETTLED") || state.equals("REJECTED");
+        jdbc.sql("""
+                UPDATE payments SET state = ?, reason_code = ?, pending_action = NULL, next_action_at = NULL,
+                       finalised_at = CASE WHEN ? THEN accepted_at + interval '1 second' END,
+                       final_event_emitted = ?, version = version + 1
+                 WHERE payment_id = ?::uuid""")
+                .params(state, parameters.get("reasonCode"), isFinal, isFinal, paymentId)
+                .update();
+        return Map.of("paymentId", paymentId);
     }
 
     @State("no payment exists for the paymentId")
