@@ -2,10 +2,13 @@ package com.tpe.paymentapi.infrastructure.config;
 
 import com.tpe.contracts.ContractsModule;
 import com.tpe.iso20022model.IsoCodec;
+import com.tpe.iso20022model.XsdValidator;
 import com.tpe.paymentapi.application.idempotency.IdempotencyGuard;
 import com.tpe.paymentapi.application.idempotency.IdempotencyKeys;
 import com.tpe.paymentapi.application.idempotency.IdempotencyRetention;
+import com.tpe.paymentapi.application.mapping.Pain001Reader;
 import com.tpe.paymentapi.application.mapping.PaymentStatusReport;
+import com.tpe.paymentapi.application.rejection.FileRejections;
 import com.tpe.paymentapi.application.status.PaymentStatuses;
 import com.tpe.paymentapi.application.submission.Orchestrator;
 import com.tpe.paymentapi.application.submission.PaymentSubmission;
@@ -14,6 +17,7 @@ import com.tpe.paymentapi.application.validation.PaymentValidator;
 import com.tpe.paymentapi.application.verification.PayeeVerification;
 import com.tpe.paymentapi.infrastructure.orchestrator.HttpOrchestrator;
 import com.tpe.paymentapi.infrastructure.persistence.JdbcIdempotencyKeys;
+import com.tpe.paymentapi.infrastructure.persistence.JdbcPaymentRejections;
 import com.tpe.paymentapi.infrastructure.vop.HttpPayeeVerifications;
 import com.tpe.paymentapi.infrastructure.vop.HttpReferenceChecks;
 import com.tpe.paymentdomain.BankDirectory;
@@ -38,7 +42,8 @@ import tools.jackson.databind.json.JsonMapper;
 
 /**
  * The payment initiation path (specs/10-payment-api.md §3.1, §4, §5.1, §6): the idempotency guard, its key store and
- * their retention, the validator, the submission service and its clients, each with connect timeout 200 ms and its
+ * their retention, the {@code pain.001} reader and the FF01 rejections of XML clients, the validator, the submission
+ * service and its clients, each with connect timeout 200 ms and its
  * read timeout (specs/00-engineering-baseline.md §8). The
  * clients come from Spring Boot's {@link RestClient.Builder}: the service's JSON and the observation that sends
  * {@code traceparent} on.
@@ -49,6 +54,8 @@ import tools.jackson.databind.json.JsonMapper;
 class PaymentApiConfiguration {
 
     static final Duration CONNECT_TIMEOUT = Duration.ofMillis(200);
+    /** How long an FF01 rejection document is kept (specs/10-payment-api.md §3.5). */
+    static final Duration REJECTION_RETENTION = Duration.ofHours(24);
 
     /** The value objects of the {@code contracts} DTOs as strings (01 §4); Spring Boot registers it with Jackson. */
     @Bean
@@ -78,8 +85,23 @@ class PaymentApiConfiguration {
     }
 
     @Bean
-    PaymentStatusReport paymentStatusReport(Clock clock) {
-        return new PaymentStatusReport(new IsoCodec(), new UlidGenerator(clock, new SecureRandom()), clock);
+    IsoCodec isoCodec() {
+        return new IsoCodec();
+    }
+
+    @Bean
+    PaymentStatusReport paymentStatusReport(IsoCodec codec, Clock clock) {
+        return new PaymentStatusReport(codec, new UlidGenerator(clock, new SecureRandom()), clock);
+    }
+
+    @Bean
+    Pain001Reader pain001Reader(IsoCodec codec, Clock clock) {
+        return new Pain001Reader(new XsdValidator(), codec, clock);
+    }
+
+    @Bean
+    FileRejections fileRejections(JdbcClient jdbc, PaymentStatusReport report, Clock clock) {
+        return new FileRejections(new JdbcPaymentRejections(jdbc), report, clock, REJECTION_RETENTION);
     }
 
     @Bean

@@ -52,6 +52,34 @@ paths:
       summary: Verify a payee before paying (UC-02)
       tags:
       - payee-verification-controller
+  /v1/payment-rejections/{rejectionId}/pain.002:
+    get:
+      operationId: rejectionPain002
+      parameters:
+      - in: path
+        name: rejectionId
+        required: true
+        schema:
+          type: string
+      responses:
+        "200":
+          content:
+            application/xml:
+              schema:
+                type: string
+          description: pain.002.001.10 with GrpSts RJCT and reason FF01
+        "404":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ProblemDetail"
+          description: "REJECTION_NOT_FOUND: unknown, expired, or not the caller's"
+      security:
+      - bearer:
+        - payments:read
+      summary: The pain.002.001.10 RJCT FF01 of a rejected pain.001 (UC-01 3a)
+      tags:
+      - payment-rejection-controller
   /v1/payments:
     post:
       operationId: initiate
@@ -65,11 +93,22 @@ paths:
           maxLength: 64
           minLength: 1
           pattern: "^[A-Za-z0-9_-]{1,64}$"
+      - description: "With application/xml: the vopReference of the payee verification\
+          \ (POST /v1/payee-verifications); without it the payment is VOP_REQUIRED"
+        in: header
+        name: VoP-Reference
+        required: false
+        schema:
+          type: string
       requestBody:
         content:
           application/json:
             schema:
               $ref: "#/components/schemas/PaymentInstruction"
+          application/xml:
+            schema:
+              type: string
+              description: pain.001.001.09 with one PmtInf and one CdtTrfTxInf
         required: true
       responses:
         "202":
@@ -77,14 +116,18 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/PaymentResponse"
-          description: Accepted; Location is the payment's status. The same key and
-            body again answer the same payment with its current status
+          description: "Accepted; Location is the payment's status. The same key and\
+            \ body (an XML document: comments aside) again answer the same payment\
+            \ with its current status"
         "400":
           content:
             application/problem+json:
               schema:
                 $ref: "#/components/schemas/ProblemDetail"
-          description: "VALIDATION_FAILED with errors[], IDEMPOTENCY_KEY_MISSING,\
+          description: "VALIDATION_FAILED with errors[] (for XML with the rejectionId\
+            \ of a pain.002 RJCT FF01 at /v1/payment-rejections/{rejectionId}/pain.002;\
+            \ a DOCTYPE included), UNSUPPORTED_MEDIA_TYPE_VARIANT (XML: not one PmtInf\
+            \ with one CdtTrfTxInf, another version, not INST, not today), IDEMPOTENCY_KEY_MISSING,\
             \ IDEMPOTENCY_KEY_INVALID"
         "401":
           content:
@@ -121,7 +164,7 @@ paths:
       security:
       - bearer:
         - payments:write
-      summary: Initiate an SCT Inst payment (UC-01)
+      summary: "Initiate an SCT Inst payment, as JSON or as pain.001.001.09 (UC-01)"
       tags:
       - payment-controller
   /v1/payments/{paymentId}:

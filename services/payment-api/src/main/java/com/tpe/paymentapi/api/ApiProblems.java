@@ -3,9 +3,12 @@ package com.tpe.paymentapi.api;
 import static com.tpe.paymentapi.api.Problems.problem;
 
 import com.tpe.paymentapi.api.payment.IdempotencyKeyException;
+import com.tpe.paymentapi.api.payment.XmlRejectedException;
 import com.tpe.paymentapi.api.security.DebtorAccountNotOwnedException;
 import com.tpe.paymentapi.api.security.InvalidTokenClaimsException;
 import com.tpe.paymentapi.application.idempotency.IdempotencyKeyInProgressException;
+import com.tpe.paymentapi.application.mapping.Pain001Reader;
+import com.tpe.paymentapi.application.rejection.RejectionNotFoundException;
 import com.tpe.paymentapi.application.status.PaymentNotFoundException;
 import com.tpe.paymentapi.application.submission.IdempotencyKeyReusedException;
 import com.tpe.paymentapi.application.submission.OrchestratorUnavailableException;
@@ -47,6 +50,27 @@ class ApiProblems extends ResponseEntityExceptionHandler {
         ProblemDetail problem = problem(HttpStatus.BAD_REQUEST, VALIDATION_FAILED, "Request validation failed");
         problem.setProperty("errors", e.errors());
         return problem;
+    }
+
+    /** As {@link #validationFailed}, with the {@code rejectionId} of the document's {@code pain.002 RJCT FF01}. */
+    @ExceptionHandler
+    ProblemDetail xmlRejected(XmlRejectedException e) {
+        ProblemDetail problem = problem(HttpStatus.BAD_REQUEST, VALIDATION_FAILED, "Request validation failed; "
+                + "the pain.002 of the rejection is at /v1/payment-rejections/{rejectionId}/pain.002");
+        problem.setProperty("errors", e.errors());
+        problem.setProperty("rejectionId", e.rejectionId().toString());
+        return problem;
+    }
+
+    @ExceptionHandler
+    ProblemDetail unsupportedVariant(Pain001Reader.UnsupportedVariantException e) {
+        return problem(HttpStatus.BAD_REQUEST, "UNSUPPORTED_MEDIA_TYPE_VARIANT", e.getMessage());
+    }
+
+    /** Unknown, expired or another client's, alike. */
+    @ExceptionHandler
+    ProblemDetail rejectionNotFound(RejectionNotFoundException e) {
+        return problem(HttpStatus.NOT_FOUND, "REJECTION_NOT_FOUND", "No such rejection");
     }
 
     @ExceptionHandler

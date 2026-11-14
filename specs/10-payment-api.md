@@ -126,11 +126,12 @@ the 5 s responder timeout and returns `NOT_POSSIBLE`, so payment-api only sees a
 |---|---|---|
 | 400 | `VALIDATION_FAILED` | field errors in `errors[]` (codes below) |
 | 400 | `IDEMPOTENCY_KEY_MISSING` / `IDEMPOTENCY_KEY_INVALID` | header absent / malformed |
-| 400 | `UNSUPPORTED_MEDIA_TYPE_VARIANT` | XML with more than one transaction, wrong `pain.001` version |
+| 400 | `UNSUPPORTED_MEDIA_TYPE_VARIANT` | XML with more than one transaction, wrong `pain.001` version, a local instrument other than `INST`, `ReqdExctnDt` not today |
 | 401 | `UNAUTHORIZED` | no valid Bearer token; with `WWW-Authenticate` (RFC 6750) |
 | 403 | `FORBIDDEN` | the token lacks the endpoint's scope (`WWW-Authenticate` `insufficient_scope`) or a `client_id` |
 | 403 | `DEBTOR_ACCOUNT_NOT_OWNED` | UC-01 1a |
 | 404 | `PAYMENT_NOT_FOUND` | UC-07 1a |
+| 404 | `REJECTION_NOT_FOUND` | `GET /v1/payment-rejections/{rejectionId}/pain.002`: unknown, expired or another client's |
 | 409 | `IDEMPOTENCY_KEY_IN_PROGRESS` | same key currently being processed |
 | 422 | `IDEMPOTENCY_KEY_REUSED` | UC-01 2b |
 | 422 | `VOP_REQUIRED` | UC-01 4a (missing, unknown, expired or mismatching reference) |
@@ -145,7 +146,12 @@ Field error codes: `INVALID_IBAN`, `INVALID_BIC`, `INVALID_AMOUNT` (≤ 0, > 2 d
 `SAME_DEBTOR_AND_CREDITOR`.
 
 For XML clients a failed validation additionally offers a `pain.002` with `RJCT FF01` at
-`GET /v1/payment-rejections/{rejectionId}/pain.002`, where `rejectionId` is returned in the problem body (stored 24 h).
+`GET /v1/payment-rejections/{rejectionId}/pain.002`, where `rejectionId` is returned in the problem body (stored 24 h). Scope
+`payments:read`; only the client that sent the document reads it. A schema violation (a DOCTYPE included) is an
+`errors[]` entry with the violation's position as `field` and its code (`DOCTYPE_DISALLOWED`, `NOT_WELL_FORMED` or the
+XML Schema rule, e.g. `cvc-pattern-valid`) as `code`; a field rule of §5.2 on a schema-valid document has the JSON
+field path, as for JSON. The `pain.002` rejects the group (`GrpSts RJCT`, `StsRsnInf/Rsn/Cd FF01`) with the
+document's `MsgId` as `OrgnlMsgId`, `NOTPROVIDED` when it cannot be read.
 
 ## 4. Downstream calls
 
@@ -193,7 +199,7 @@ CREATE TABLE payment_rejections (            -- pain.002 FF01 for XML clients
   `IN_PROGRESS` row: they had no side effect, and the client may fix the request and retry with the same key.
   `503` deletes the row too (UC-01 5a).
 - Canonicalisation: JSON parsed and re-serialised with sorted keys; XML hashed after canonical XML (C14N) without
-  comments.
+  comments, followed by the `VoP-Reference` header (it carries what the JSON body's `vopReference` does).
 - Retention `expires_at = created_at + 24h` (UC-01 NFR); hourly cleanup job.
 
 ### 5.2 Validation

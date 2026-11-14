@@ -44,4 +44,23 @@ class RequestHashTest {
         assertThat(HASH.of("PUT", "/v1/payments", body)).isNotEqualTo(hash);
         assertThat(HASH.of("POST", "/v1/other", body)).isNotEqualTo(hash);
     }
+
+    @Test
+    void anXmlBodyIsHashedInItsCanonicalFormWithTheVopReference() throws Exception {
+        String xml = "<?xml version=\"1.0\"?><a  b='1'><!-- note --><c/></a>";
+
+        String expected = HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256")
+                .digest("POST /v1/payments\n<a b=\"1\"><c></c></a>\nVoP-Reference: VOP-1"
+                        .getBytes(StandardCharsets.UTF_8)));
+        assertThat(HASH.ofXml("POST", "/v1/payments", xml, "VOP-1")).isEqualTo(expected);
+    }
+
+    @Test
+    void xmlThatDiffersOnlyInCommentsIsTheSameRequestButAnotherReferenceIsNot() {
+        String hash = HASH.ofXml("POST", "/v1/payments", "<a><c/></a>", "VOP-1");
+
+        assertThat(HASH.ofXml("POST", "/v1/payments", "<a><!-- retry --><c/></a>", "VOP-1")).isEqualTo(hash);
+        assertThat(HASH.ofXml("POST", "/v1/payments", "<a><c/></a>", "VOP-2")).isNotEqualTo(hash);
+        assertThat(HASH.ofXml("POST", "/v1/payments", "<a><c/></a>", null)).isNotEqualTo(hash);
+    }
 }

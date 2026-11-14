@@ -29,7 +29,7 @@ import tools.jackson.databind.node.ObjectNode;
 /**
  * The service on a random port against PostgreSQL of the compose stack's version (deploy/docker-compose.yml), with
  * WireMock as payment-orchestrator and vop-service, started once per JVM; every subclass shares one Spring context.
- * Every test starts with no idempotency keys, no WireMock mappings or requests, and the service's time at
+ * Every test starts with no idempotency keys or rejections, no WireMock mappings or requests, and the service's time at
  * {@link #START} ({@link #CLOCK}). Tokens are
  * {@link Tokens}'; the bank directory is the default, deploy/config/bank-directory.yml. The orchestrator answers what
  * {@link #orchestratorAnswers} loaded last, vop-service what {@link #vopAnswers} did. {@link #http()} never throws on
@@ -83,6 +83,7 @@ public abstract class PaymentApiStack {
     @BeforeEach
     void noKeysAtTheStart() {
         jdbc.sql("DELETE FROM idempotency_keys").update();
+        jdbc.sql("DELETE FROM payment_rejections").update();
         CLOCK.set(START);
         ORCHESTRATOR.resetAll();
         VOP.resetAll();

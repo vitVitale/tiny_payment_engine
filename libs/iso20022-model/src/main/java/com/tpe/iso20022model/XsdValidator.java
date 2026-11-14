@@ -96,6 +96,31 @@ public final class XsdValidator {
         return validateAgainst(schema, xml);
     }
 
+    /**
+     * All violations of {@code xml} as a document of {@code version} only, e.g. {@code pain.001.001.09}: a document
+     * of any other namespace, a supported one included, is {@link #UNSUPPORTED_NAMESPACE}.
+     *
+     * @throws IllegalArgumentException for a {@code version} that is not supported
+     */
+    public List<Violation> validate(String xml, String version) {
+        Objects.requireNonNull(xml, "xml");
+        Schema schema = schemasByNamespace.get(NAMESPACE_PREFIX + version);
+        if (schema == null) {
+            throw new IllegalArgumentException("unsupported version " + version);
+        }
+        RootElement root;
+        try {
+            root = RootElement.of(xml);
+        } catch (SAXParseException e) {
+            return List.of(violation(e));
+        }
+        if (!root.namespace().equals(NAMESPACE_PREFIX + version)) {
+            return List.of(new Violation(root.line(), root.column(), UNSUPPORTED_NAMESPACE,
+                    "document namespace '" + root.namespace() + "' is not " + version));
+        }
+        return validateAgainst(schema, xml);
+    }
+
     /** All violations of {@code xml} against {@code schema}, whatever its root namespace. */
     static List<Violation> validateAgainst(Schema schema, String xml) {
         List<Violation> violations = new ArrayList<>();

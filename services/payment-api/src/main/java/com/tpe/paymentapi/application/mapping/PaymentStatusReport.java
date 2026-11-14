@@ -11,6 +11,7 @@ import com.tpe.iso20022model.pain002v10.PaymentTransaction105;
 import com.tpe.iso20022model.pain002v10.StatusReason6Choice;
 import com.tpe.iso20022model.pain002v10.StatusReasonInformation12;
 import com.tpe.paymentdomain.MsgId;
+import com.tpe.paymentdomain.ReasonCode;
 import com.tpe.paymentdomain.UlidGenerator;
 import java.time.Clock;
 import java.time.Instant;
@@ -59,10 +60,6 @@ public class PaymentStatusReport {
     String of(PaymentView payment, MsgId msgId, Instant createdAt) {
         String status = CustomerStatus.of(payment.state()).name();
 
-        GroupHeader86 header = new GroupHeader86();
-        header.setMsgId(msgId.value());
-        header.setCreDtTm(dateTime(createdAt));
-
         OriginalGroupHeader17 group = new OriginalGroupHeader17();
         group.setOrgnlMsgId(payment.txId().value());
         group.setOrgnlMsgNmId(ORIGINAL_MESSAGE);
@@ -86,12 +83,49 @@ public class PaymentStatusReport {
         instruction.getTxInfAndSts().add(transaction);
 
         CustomerPaymentStatusReportV10 report = new CustomerPaymentStatusReportV10();
-        report.setGrpHdr(header);
+        report.setGrpHdr(header(msgId, createdAt));
         report.setOrgnlGrpInfAndSts(group);
         report.getOrgnlPmtInfAndSts().add(instruction);
         Document document = new Document();
         document.setCstmrPmtStsRpt(report);
         return codec.marshal(document);
+    }
+
+    /**
+     * The {@code RJCT FF01} of a {@code pain.001} that failed validation (specs/10-payment-api.md §3.5, UC-01 3a), as
+     * of now, with a new {@code MsgId}: the group is rejected, no payment was created, so there is no transaction.
+     *
+     * @param originalMessageId the document's {@code GrpHdr/MsgId}, {@code NOTPROVIDED} when it cannot be read
+     */
+    public String fileRejection(String originalMessageId) {
+        return fileRejection(originalMessageId, MsgId.generate(ulids), clock.instant());
+    }
+
+    String fileRejection(String originalMessageId, MsgId msgId, Instant createdAt) {
+        StatusReason6Choice reason = new StatusReason6Choice();
+        reason.setCd(ReasonCode.FF01.code());
+        StatusReasonInformation12 information = new StatusReasonInformation12();
+        information.setRsn(reason);
+
+        OriginalGroupHeader17 group = new OriginalGroupHeader17();
+        group.setOrgnlMsgId(originalMessageId);
+        group.setOrgnlMsgNmId(ORIGINAL_MESSAGE);
+        group.setGrpSts(CustomerStatus.RJCT.name());
+        group.getStsRsnInf().add(information);
+
+        CustomerPaymentStatusReportV10 report = new CustomerPaymentStatusReportV10();
+        report.setGrpHdr(header(msgId, createdAt));
+        report.setOrgnlGrpInfAndSts(group);
+        Document document = new Document();
+        document.setCstmrPmtStsRpt(report);
+        return codec.marshal(document);
+    }
+
+    private GroupHeader86 header(MsgId msgId, Instant createdAt) {
+        GroupHeader86 header = new GroupHeader86();
+        header.setMsgId(msgId.value());
+        header.setCreDtTm(dateTime(createdAt));
+        return header;
     }
 
     /** UTC with exactly three fraction digits (specs/00-engineering-baseline.md §6), as the golden files have it. */
