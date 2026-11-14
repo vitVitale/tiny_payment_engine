@@ -6,11 +6,13 @@ import static org.awaitility.Awaitility.await;
 import com.tpe.invariantchecker.EventInvariants;
 import com.tpe.invariantchecker.PaymentInvariants;
 import com.tpe.invariantchecker.Violation;
+import com.tpe.paymentdomain.CommandId;
 import java.net.URI;
 import java.sql.SQLException;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -61,7 +63,7 @@ public abstract class PaymentSystemTest extends LedgerSystemTest {
     }
 
     /** The payments this test initiated: the scope of its invariant checks. */
-    private final List<UUID> payments = new CopyOnWriteArrayList<>();
+    private final CopyOnWriteArrayList<UUID> payments = new CopyOnWriteArrayList<>();
 
     /**
      * After the test, at quiescence (20 §3): INV-3, -7, -8, -9, -11. Quiescence comes by the payments' deadlines: a
@@ -112,6 +114,11 @@ public abstract class PaymentSystemTest extends LedgerSystemTest {
     /** payment-api, for the customer channel's calls (POST with a fresh {@code Idempotency-Key}). */
     protected static JsonHttp paymentApi() {
         return PAYMENT_API;
+    }
+
+    /** payment-orchestrator, for its metrics and for a proxy in front of it. */
+    protected static URI orchestratorService() {
+        return ORCHESTRATOR;
     }
 
     /** vop-service, for its metrics. */
@@ -166,12 +173,21 @@ public abstract class PaymentSystemTest extends LedgerSystemTest {
 
     /** {@code payer} pays {@code amount} EUR (a decimal string) to {@code payeeIban} with the VoP reference. */
     protected Response pay(Party payer, String payeeIban, String payeeName, String amount, String vopReference) {
-        return initiate(payer.token(), Map.of(
+        return initiate(payer.token(), payment(payer, payeeIban, payeeName, amount, vopReference));
+    }
+
+    /** The JSON body of {@code POST /v1/payments} (10 §3.1) for {@link #pay}. */
+    protected static Map<String, Object> payment(Party payer, String payeeIban, String payeeName, String amount,
+            String vopReference) {
+        var body = new HashMap<String, Object>(Map.of(
                 "endToEndId", "SYSTEST-" + Long.toHexString(System.nanoTime()),
                 "debtor", Map.of("name", payer.name(), "iban", payer.iban()),
                 "creditor", Map.of("name", payeeName, "iban", payeeIban),
-                "amount", Map.of("value", amount, "currency", "EUR"),
-                "vopReference", vopReference));
+                "amount", Map.of("value", amount, "currency", "EUR")));
+        if (vopReference != null) {
+            body.put("vopReference", vopReference);
+        }
+        return body;
     }
 
     /** As {@link #pay}, asserted {@code 202}; the payment's id. */
@@ -239,11 +255,44 @@ public abstract class PaymentSystemTest extends LedgerSystemTest {
 
     /** {@code POST /v1/payments} as JSON; an accepted payment joins the checks. */
     protected Response initiate(String authorization, Map<String, ?> payment) {
-        Response response = PAYMENT_API.post(authorization, "/v1/payments", payment);
+        return initiate(PAYMENT_API, authorization, payment, newIdempotencyKey());
+    }
+
+    /**
+     * {@code POST /v1/payments} to {@code api} (the harness's payment-api, or another instance of it) with
+     * {@code idempotencyKey}; an accepted payment joins the checks.
+     */
+    protected Response initiate(JsonHttp api, String authorization, Map<String, ?> payment, String idempotencyKey) {
+        Response response = api.post(authorization, "/v1/payments", payment, idempotencyKey);
         if (response.status() == 202) {
-            payments.add(UUID.fromString(response.body().get("paymentId").asString()));
+            UUID accepted = UUID.fromString(response.body().get("paymentId").asString());
+            payments.addIfAbsent(accepted);
         }
         return response;
+    }
+
+    /**
+     * The orchestrator's payments of the customer channel's {@code idempotencyKey}: those of its {@code commandId}
+     * (10 §3.1 step 5), whatever payment-api answered.
+     */
+    protected static List<UUID> orchestratorPaymentsOf(String idempotencyKey) throws SQLException {
+        UUID command = CommandId.derive(MockIssuer.CUSTOMER_CHANNEL, idempotencyKey).value();
+        try (var orchestrator = LocalDatabases.payments();
+                var statement = orchestrator.prepareStatement("SELECT payment_id FROM payments WHERE command_id = ?")) {
+            statement.setObject(1, command);
+            var found = new ArrayList<UUID>();
+            try (var rs = statement.executeQuery()) {
+                while (rs.next()) {
+                    found.add(rs.getObject(1, UUID.class));
+                }
+            }
+            return found;
+        }
+    }
+
+    /** A key no other request used, valid for payment-api ({@code [A-Za-z0-9_-]{1,64}}). */
+    protected static String newIdempotencyKey() {
+        return "systest-" + UUID.randomUUID();
     }
 
     /** The payments this test initiated, in order. */

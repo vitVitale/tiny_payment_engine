@@ -35,6 +35,12 @@ public final class Bounds {
                 .plus(orchestrator.duration("tpe.runner.max-backoff").orElseThrow());
     }
 
+    /** Until a VoP reference has expired: vop-service's {@code tpe.vop.reference-validity} and the harness's side. */
+    public static Duration referenceExpiry() {
+        return ServiceProfile.systemtest(ServiceJar.VOP).duration("tpe.vop.reference-validity").orElseThrow()
+                .plus(HARNESS);
+    }
+
     /** {@link #eventDelivery(ServiceProfile)} of ledger-service as the harness runs it. */
     public static Duration eventDelivery() {
         return eventDelivery(ServiceProfile.ledger());

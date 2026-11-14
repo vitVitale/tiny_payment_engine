@@ -55,17 +55,25 @@ public final class ServiceProcess {
      * process whatever properties it gives, so a service's neighbours are started before it.
      */
     public static synchronized ServiceProcess of(ServiceJar service, Map<String, String> properties) {
-        return RUNNING.computeIfAbsent(service.name(), name -> start(service, properties));
+        return of(service.name(), service, properties);
+    }
+
+    /**
+     * As {@link #of(ServiceJar, Map)} for a further process of {@code service}'s jar, known by {@code instance}: its own
+     * port and its own log, {@code target/<instance>-systemtest.log}.
+     */
+    public static synchronized ServiceProcess of(String instance, ServiceJar service, Map<String, String> properties) {
+        return RUNNING.computeIfAbsent(instance, name -> start(name, service, properties));
     }
 
     public URI baseUrl() {
         return baseUrl;
     }
 
-    private static ServiceProcess start(ServiceJar service, Map<String, String> properties) {
+    private static ServiceProcess start(String instance, ServiceJar service, Map<String, String> properties) {
         Path jar = service.locate();
         int port = freePort();
-        Path log = Path.of("target", service.name() + "-systemtest.log");
+        Path log = Path.of("target", instance + "-systemtest.log");
         String java = Path.of(System.getProperty("java.home"), "bin", "java").toString();
         Process process;
         try {
@@ -81,7 +89,7 @@ public final class ServiceProcess {
             throw new IllegalStateException("cannot start " + jar, e);
         }
         Runtime.getRuntime().addShutdownHook(new Thread(process::destroy));
-        var started = new ServiceProcess(service.name(), URI.create("http://localhost:" + port), log);
+        var started = new ServiceProcess(instance, URI.create("http://localhost:" + port), log);
         started.awaitReady(process);
         return started;
     }

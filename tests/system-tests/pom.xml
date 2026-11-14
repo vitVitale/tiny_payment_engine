@@ -77,6 +77,12 @@
             <version>${project.version}</version>
             <scope>test</scope>
         </dependency>
+        <!-- E2E-O-16: Toxiproxy between payment-api and payment-orchestrator (specs/20-testing-strategy.md §4) -->
+        <dependency>
+            <groupId>org.testcontainers</groupId>
+            <artifactId>testcontainers-toxiproxy</artifactId>
+            <scope>test</scope>
+        </dependency>
         <dependency>
             <groupId>com.tpe</groupId>
             <artifactId>invariant-checker</artifactId>

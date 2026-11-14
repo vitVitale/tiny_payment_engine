@@ -36,6 +36,12 @@ class BoundsTest {
         assertThat(Bounds.paymentFinal()).isEqualTo(Duration.ofSeconds(6).plus(Bounds.eventDelivery(orchestrator)));
     }
 
+    /** E2E-O-17: a reference has expired once vop-service's systemtest validity (5 s, 20 §2.1) has passed. */
+    @Test
+    void aReferenceExpiresAfterVopServicesSystemTestValidity() {
+        assertThat(Bounds.referenceExpiry()).isEqualTo(Duration.ofSeconds(5).plusSeconds(2));
+    }
+
     @Test
     void anActionIsOverdueAfterTheOrchestratorsLeaseAndLongestBackoff() {
         assertThat(Bounds.actionOverdue()).isEqualTo(Duration.ofSeconds(35));
