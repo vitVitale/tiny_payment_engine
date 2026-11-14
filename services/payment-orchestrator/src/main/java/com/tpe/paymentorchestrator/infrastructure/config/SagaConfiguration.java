@@ -10,6 +10,8 @@ import com.tpe.paymentorchestrator.application.outgoing.AssessRiskAction;
 import com.tpe.paymentorchestrator.application.outgoing.CreateHoldAction;
 import com.tpe.paymentorchestrator.application.outgoing.ReleaseHoldAction;
 import com.tpe.paymentorchestrator.application.outgoing.SettleOnUsAction;
+import com.tpe.paymentorchestrator.application.payments.DueTimer;
+import com.tpe.paymentorchestrator.application.payments.FinalEvents;
 import com.tpe.paymentorchestrator.application.payments.Payments;
 import com.tpe.paymentorchestrator.application.risk.RiskAssessments;
 import com.tpe.paymentorchestrator.application.runner.RunnerSettings;
@@ -17,7 +19,9 @@ import com.tpe.paymentorchestrator.application.runner.SagaAction;
 import com.tpe.paymentorchestrator.application.runner.SagaRunner;
 import com.tpe.paymentorchestrator.application.runner.SagaTelemetry;
 import com.tpe.paymentorchestrator.application.runner.StepApplier;
+import com.tpe.paymentorchestrator.application.timers.OutgoingDeadlineTimer;
 import com.tpe.paymentorchestrator.domain.payment.OutgoingTimings;
+import com.tpe.paymentorchestrator.domain.payment.TimerType;
 import com.tpe.paymentorchestrator.infrastructure.ledger.HttpLedger;
 import com.tpe.paymentorchestrator.infrastructure.risk.HttpRiskAssessments;
 import com.tpe.paymentorchestrator.infrastructure.telemetry.MicrometerSagaTelemetry;
@@ -38,8 +42,8 @@ import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.web.client.RestClient;
 
 /**
- * The saga runner with its actions, the sweeper and the clients they call (specs/11-payment-orchestrator.md §6.2,
- * §6.3, §7).
+ * The saga runner with its actions, the sweeper, the timers and the clients they call
+ * (specs/11-payment-orchestrator.md §6.2, §6.3, §6.4, §7).
  */
 @Configuration(proxyBeanMethods = false)
 @EnableConfigurationProperties({SagaConfiguration.RunnerProperties.class, SagaConfiguration.RiskProperties.class,
@@ -48,6 +52,9 @@ class SagaConfiguration {
 
     /** The sweeper's poll: actions whose lease expired or whose retry is due (§6.3). */
     private static final Duration SWEEP_INTERVAL = Duration.ofMillis(100);
+
+    /** The timers' poll (§6.4). */
+    private static final Duration TIMER_INTERVAL = Duration.ofMillis(100);
 
     /** Every client's (specs/00-engineering-baseline.md §8). */
     private static final Duration CONNECT_TIMEOUT = Duration.ofMillis(200);
@@ -128,6 +135,32 @@ class SagaConfiguration {
                 (rs, n) -> rs.getObject(1, UUID.class),
                 paymentId -> runner.submitAfterCommit(new PaymentId(paymentId), true),
                 "SELECT min(next_action_at) FROM payments WHERE " + due, clock, registry,
+                spans.getIfAvailable(Spans::noop));
+    }
+
+    @Bean
+    OutgoingDeadlineTimer outgoingDeadlineTimer(Payments payments, FinalEvents finalEvents, SagaRunner runner,
+            SagaTelemetry telemetry, Clock clock) {
+        return new OutgoingDeadlineTimer(payments, finalEvents, runner, telemetry, clock);
+    }
+
+    /**
+     * Fires the due timers the service handles (§6.4), each in the poll's transaction; {@code FOR UPDATE SKIP LOCKED}
+     * spreads them over the instances. The investigation timers of M3 wait until they are handled.
+     */
+    @Bean
+    PollingWorker<DueTimer> timerWorker(OutgoingDeadlineTimer deadline, JdbcTemplate jdbc,
+            PlatformTransactionManager transactions, Clock clock, MeterRegistry registry,
+            ObjectProvider<Spans> spans) {
+        String due = "status = 'SCHEDULED' AND type = '" + TimerType.OUTGOING_DEADLINE.name() + "' AND due_at <= ?";
+        return new PollingWorker<>(new PollingWorker.Settings("payment-timers", 100, TIMER_INTERVAL, 1), jdbc,
+                transactions,
+                "SELECT timer_id, payment_id, type, due_at FROM payment_timers WHERE " + due
+                        + " ORDER BY due_at LIMIT ? FOR UPDATE SKIP LOCKED",
+                (rs, n) -> new DueTimer(rs.getLong(1), new PaymentId(rs.getObject(2, UUID.class)),
+                        TimerType.valueOf(rs.getString(3)), rs.getTimestamp(4).toInstant()),
+                deadline::fire,
+                "SELECT min(due_at) FROM payment_timers WHERE " + due, clock, registry,
                 spans.getIfAvailable(Spans::noop));
     }
 

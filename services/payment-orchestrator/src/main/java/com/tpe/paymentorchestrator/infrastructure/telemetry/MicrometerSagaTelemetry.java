@@ -9,6 +9,7 @@ import com.tpe.paymentorchestrator.application.runner.SagaTelemetry.Result;
 import com.tpe.paymentorchestrator.domain.payment.Payment;
 import com.tpe.paymentorchestrator.domain.payment.PendingAction;
 import com.tpe.paymentorchestrator.domain.payment.RejectionCause;
+import com.tpe.paymentorchestrator.domain.payment.TimerType;
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.Timer;
@@ -48,12 +49,7 @@ public class MicrometerSagaTelemetry implements SagaTelemetry {
         span.tag("tpe.saga.attempt", attempt);
         span.tag("tpe.saga.resumed", resumed);
         Tracer.SpanInScope inScope = spans.inScope(span);
-        PaymentTelemetry.Scope mdc = payments.apply(PaymentTags.of(payment.txId(), payment.debtor().agentBic())
-                .paymentId(payment.paymentId())
-                .uetr(payment.uetr())
-                .direction(PaymentDirection.valueOf(payment.direction().name()))
-                .onUs(payment.onUs())
-                .acceptedAt(payment.acceptedAt()));
+        PaymentTelemetry.Scope mdc = payments.apply(mdcTags(payment));
         Timer.Sample sample = Timer.start(registry);
         return new ActionSpan() {
             @Override
@@ -88,6 +84,16 @@ public class MicrometerSagaTelemetry implements SagaTelemetry {
         }
     }
 
+    /** The payment's MDC keys and attributes (specs/26-observability.md §4.3). */
+    private static PaymentTags mdcTags(Payment payment) {
+        return PaymentTags.of(payment.txId(), payment.debtor().agentBic())
+                .paymentId(payment.paymentId())
+                .uetr(payment.uetr())
+                .direction(PaymentDirection.valueOf(payment.direction().name()))
+                .onUs(payment.onUs())
+                .acceptedAt(payment.acceptedAt());
+    }
+
     @Override
     public void rejected(Payment payment, RejectionCause cause) {
         Counter.builder("tpe.payment.rejected")
@@ -95,6 +101,39 @@ public class MicrometerSagaTelemetry implements SagaTelemetry {
                 .tag("direction", payment.direction().name())
                 .tag("reason", payment.reasonCode().code())
                 .tag("cause", cause.name())
+                .register(registry)
+                .increment();
+    }
+
+    @Override
+    public TimerSpan timerStarted(Payment payment, TimerType type, Duration lateness) {
+        Span span = (payment.traceContext() == null ? spans.newTrace("payment.timer")
+                : spans.childOf("payment.timer", payment.traceContext())).start();
+        span.tag("tpe.timer.type", type.name());
+        span.tag("tpe.timer.lateness_ms", lateness.toMillis());
+        Tracer.SpanInScope inScope = spans.inScope(span);
+        PaymentTelemetry.Scope mdc = payments.apply(mdcTags(payment));
+        return () -> {
+            mdc.close();
+            inScope.close();
+            span.end();
+        };
+    }
+
+    @Override
+    public void timerFired(TimerType type) {
+        Counter.builder("tpe.timer.fired")
+                .description("Payment timers fired")
+                .tag("type", type.name())
+                .register(registry)
+                .increment();
+    }
+
+    @Override
+    public void deadlineRejected(Payment payment) {
+        Counter.builder("tpe.deadline.reject")
+                .description("Outgoing payments the scheme deadline rejected before they reached the CSM")
+                .tag("reason", payment.reasonCode().code())
                 .register(registry)
                 .increment();
     }

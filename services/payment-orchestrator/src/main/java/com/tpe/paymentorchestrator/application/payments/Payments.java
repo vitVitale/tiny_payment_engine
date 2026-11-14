@@ -35,6 +35,23 @@ public interface Payments {
     /** A {@code SCHEDULED} timer. */
     void scheduleTimer(PaymentId paymentId, TimerType type, Instant dueAt, Instant now);
 
+    /** Marks a timer {@code FIRED}: it is not handed over again. */
+    void markTimerFired(long timerId);
+
+    /**
+     * Locks the payment's row for the current transaction ({@code FOR UPDATE}), so a timer decides on what is
+     * committed and nothing changes it before the commit (§6.6).
+     */
+    Optional<LockedPayment> lockForTimer(PaymentId paymentId);
+
+    /**
+     * Stores what a timer made of the locked payment; a new action is due, and pending since, {@code now}. The new
+     * version discards the result of an action claimed at the old one.
+     *
+     * @param finalEventEmitted the transaction writes the payment's final event
+     */
+    void applyTimer(LockedPayment locked, Payment next, boolean finalEventEmitted, Instant now);
+
     /**
      * Claims the payment's pending action if it is one of {@code actions} and due at {@code now}: the action belongs
      * to the caller until {@code leaseUntil} and its attempts count up (specs/11-payment-orchestrator.md §6.3).

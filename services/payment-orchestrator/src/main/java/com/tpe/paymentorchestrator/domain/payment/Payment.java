@@ -4,12 +4,14 @@ import com.tpe.paymentdomain.CommandId;
 import com.tpe.paymentdomain.EndToEndId;
 import com.tpe.paymentdomain.Money;
 import com.tpe.paymentdomain.PaymentId;
+import com.tpe.paymentdomain.ReasonCode;
 import com.tpe.paymentdomain.RemittanceInformation;
 import com.tpe.paymentdomain.StatusReason;
 import com.tpe.paymentdomain.TxId;
 import com.tpe.paymentdomain.Uetr;
 import java.time.Instant;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.UUID;
 
 /**
@@ -129,6 +131,24 @@ public record Payment(
     public Payment rejected(StatusReason reason, PendingAction compensation, Instant at) {
         return moveTo(PaymentState.REJECTED, Objects.requireNonNull(reason, "reason"), compensation,
                 Objects.requireNonNull(at, "at"));
+    }
+
+    /**
+     * The {@code OUTGOING_DEADLINE} timer fired at {@code at} (§6.4): before the payment reaches the CSM, the scheme
+     * deadline rejects it {@code AB03}, releasing the hold it may have ({@code RISK_CHECKED}, {@code FUNDS_RESERVED});
+     * on {@code RECEIVED} nothing exists to undo. An on-us payment holding its funds has no scheme deadline: its
+     * actions retry to a definitive answer.
+     *
+     * @return empty when the deadline changes nothing: final, on-us and held, or past the CSM (M3)
+     */
+    public Optional<Payment> atDeadline(Instant at) {
+        return switch (state) {
+            case RECEIVED -> Optional.of(rejected(ReasonCode.AB03, null, at));
+            case RISK_CHECKED -> Optional.of(rejected(ReasonCode.AB03, PendingAction.RELEASE_HOLD, at));
+            case FUNDS_RESERVED -> onUs ? Optional.empty()
+                    : Optional.of(rejected(ReasonCode.AB03, PendingAction.RELEASE_HOLD, at));
+            default -> Optional.empty();
+        };
     }
 
     /**

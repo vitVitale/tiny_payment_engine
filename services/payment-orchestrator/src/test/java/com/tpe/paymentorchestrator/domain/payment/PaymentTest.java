@@ -131,6 +131,52 @@ class PaymentTest {
                 .isInstanceOf(IllegalStateException.class);
     }
 
+    @Test
+    void aReceivedPaymentPastItsDeadlineIsRejectedAb03WithNothingToUndo() {
+        Instant at = ACCEPTED.plusSeconds(20);
+
+        Payment rejected = submitted().atDeadline(at).orElseThrow();
+
+        assertThat(rejected.state()).isEqualTo(PaymentState.REJECTED);
+        assertThat(rejected.reasonCode()).isEqualTo(ReasonCode.AB03);
+        assertThat(rejected.pendingAction()).isNull();
+        assertThat(rejected.finalisedAt()).isEqualTo(at);
+    }
+
+    @Test
+    void aRiskCheckedPaymentPastItsDeadlineReleasesTheHoldItMayHave() {
+        Payment rejected = submitted(true).riskChecked().atDeadline(ACCEPTED.plusSeconds(20)).orElseThrow();
+
+        assertThat(rejected.reasonCode()).isEqualTo(ReasonCode.AB03);
+        assertThat(rejected.pendingAction()).isEqualTo(PendingAction.RELEASE_HOLD);
+    }
+
+    @Test
+    void aHeldPaymentToAnotherBankPastItsDeadlineReleasesTheHold() {
+        Payment rejected = submitted().riskChecked().fundsReserved(UUID.randomUUID())
+                .atDeadline(ACCEPTED.plusSeconds(20)).orElseThrow();
+
+        assertThat(rejected.reasonCode()).isEqualTo(ReasonCode.AB03);
+        assertThat(rejected.pendingAction()).isEqualTo(PendingAction.RELEASE_HOLD);
+    }
+
+    @Test
+    void aHeldOnUsPaymentHasNoSchemeDeadline() {
+        Payment held = submitted(true).riskChecked().fundsReserved(UUID.randomUUID());
+
+        assertThat(held.atDeadline(ACCEPTED.plusSeconds(20))).isEmpty();
+        assertThat(held.payeeRiskChecked().atDeadline(ACCEPTED.plusSeconds(20))).isEmpty();
+    }
+
+    @Test
+    void aFinalPaymentIsLeftAsItIs() {
+        Instant at = ACCEPTED.plusSeconds(20);
+
+        assertThat(submitted().rejected(ReasonCode.FR01, null, ACCEPTED).atDeadline(at)).isEmpty();
+        assertThat(submitted(true).riskChecked().fundsReserved(UUID.randomUUID()).payeeRiskChecked()
+                .settledOnUs(UUID.randomUUID(), UUID.randomUUID(), ACCEPTED).atDeadline(at)).isEmpty();
+    }
+
     private static Payment submitted() {
         return submitted(false);
     }
