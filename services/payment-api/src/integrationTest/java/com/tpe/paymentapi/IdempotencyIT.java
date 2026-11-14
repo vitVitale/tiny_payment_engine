@@ -140,6 +140,43 @@ class IdempotencyIT extends PaymentApiStack {
         assertThat(submits()).singleElement().satisfies(submit -> assertThat(commandId(submit)).isEqualTo(commandId));
     }
 
+    /**
+     * UC-01 6a after the reference expired: the first submit arrived, its answer did not, and the client retries
+     * after the VoP reference's validity (30 min). The orchestrator holds the payment and will settle it, so the
+     * retry answers that payment, not {@code 422 VOP_REQUIRED EXPIRED}: the key kept the first check's result and
+     * the retry submits the same command again (§5.1).
+     */
+    @Test
+    void aRetryAfterALostResponseAnswersThePaymentOfTheFirstSubmitAfterItsReferenceExpired() {
+        orchestratorAnswers("submit-timeout");
+        ResponseEntity<JsonNode> lost = initiate("key-lost-expired", PaymentInitiationIT.payment());
+        String firstSubmit = submits().getFirst().getBodyAsString();
+        orchestratorAnswers("submit-existing");
+        vopAnswers("check-expired");
+        CLOCK.advance(Duration.ofMinutes(31));
+
+        ResponseEntity<JsonNode> retry = initiate("key-lost-expired", PaymentInitiationIT.payment());
+
+        assertProblem(lost, 503, "ORCHESTRATOR_UNAVAILABLE");
+        assertThat(retry.getStatusCode().value()).as("%s", retry.getBody()).isEqualTo(202);
+        assertThat(retry.getBody().get("paymentId").asString()).isEqualTo("0192f0e4-7b1c-7cc3-a1b2-000000000102");
+        assertThat(VOP.findAll(anyRequestedFor(anyUrl()))).as("no second reference check").isEmpty();
+        assertThat(submits()).singleElement().satisfies(submit ->
+                assertThat(JSON.readTree(submit.getBodyAsString())).isEqualTo(JSON.readTree(firstSubmit)));
+    }
+
+    @Test
+    void anotherBodyUnderAKeyWhoseSubmitMayHaveArrivedIsReused() {
+        orchestratorAnswers("submit-timeout");
+        initiate("key-lost-other", PaymentInitiationIT.payment());
+        orchestratorAnswers("submit-created");
+        Map<String, Object> other = PaymentInitiationIT.payment();
+        other.put("amount", Map.of("value", "123.46", "currency", "EUR"));
+
+        assertProblem(initiate("key-lost-other", other), 422, "IDEMPOTENCY_KEY_REUSED");
+        assertThat(submits()).isEmpty();
+    }
+
     @Test
     void API_AC_10_twoConcurrentRequestsWithANewKeyMakeOnePayment() throws Exception {
         orchestratorAnswersAfter(Duration.ofMillis(500), "submit-created");

@@ -75,8 +75,9 @@ Processing order (UC-01 1–8):
 6. Orchestrator `201` or `200` → store response for the key, return `202` (same body in both cases, UC-01 6a).
    Orchestrator `409 COMMAND_CONFLICT` → `422 IDEMPOTENCY_KEY_REUSED` (the key's `commandId` has a payment for
    another request: UC-01 2b, found by the orchestrator); `422 CREDITOR_AGENT_NOT_REACHABLE` is passed on.
-7. Orchestrator timeout / `5xx` / connect failure → delete the in-progress key, `503 ORCHESTRATOR_UNAVAILABLE`
-   with `Retry-After: 1` (UC-01 5a).
+7. Orchestrator timeout / `5xx` / connect failure → `503 ORCHESTRATOR_UNAVAILABLE` with `Retry-After: 1`
+   (UC-01 5a). A connect failure deletes the in-progress key; after a timeout or a `5xx` the submit may have
+   arrived (UC-01 6a), and the key becomes `SUBMITTED` with the check's result (§5.1).
 
 ### 3.2 `GET /v1/payments/{paymentId}` — status (UC-07)
 
@@ -173,10 +174,11 @@ CREATE TABLE idempotency_keys (
   client_id       VARCHAR(100) NOT NULL,
   idempotency_key VARCHAR(64)  NOT NULL,
   request_hash    CHAR(64)     NOT NULL,   -- SHA-256 of method + path + canonicalised body
-  status          VARCHAR(12)  NOT NULL CHECK (status IN ('IN_PROGRESS','COMPLETED')),
+  status          VARCHAR(12)  NOT NULL CHECK (status IN ('IN_PROGRESS','SUBMITTED','COMPLETED')),
   response_status INT,
   response_body   JSONB,
   payment_id      UUID,
+  vop_result      VARCHAR(12),             -- the reference check's result a submit that may have arrived carried
   created_at      TIMESTAMPTZ NOT NULL,
   expires_at      TIMESTAMPTZ NOT NULL,
   PRIMARY KEY (client_id, idempotency_key)
@@ -194,10 +196,25 @@ CREATE TABLE payment_rejections (            -- pain.002 FF01 for XML clients
     body is returned.
   - `COMPLETED`, different hash → `422 IDEMPOTENCY_KEY_REUSED` (UC-01 2b).
   - `IN_PROGRESS`, younger than 10 s → `409 IDEMPOTENCY_KEY_IN_PROGRESS`; older → treat as abandoned: take it over
-    (update `created_at`) and proceed — safe because the orchestrator deduplicates by `commandId`.
+    (update `created_at`) and proceed — safe because the orchestrator deduplicates by `commandId`. A row with a
+    `vop_result` (a resumed `SUBMITTED` key, abandoned mid-resubmit) is taken over as `SUBMITTED` is resumed: same
+    hash only, the stored result, no new reference check.
+  - `SUBMITTED`, same hash → resume it (`IN_PROGRESS`, update `created_at`, `expires_at` stays): validate, then
+    submit with the stored `vop_result` as `vopResult` **without a new reference check**; the orchestrator
+    deduplicates by `commandId` (UC-01 6a). Two retries at once: one resumes, the other gets `409`.
+  - `SUBMITTED`, different hash → `422 IDEMPOTENCY_KEY_REUSED`.
 - Only the `202` outcome is stored (`COMPLETED`). Validation failures (`400`, `403`, `422`) delete the
   `IN_PROGRESS` row: they had no side effect, and the client may fix the request and retry with the same key.
-  `503` deletes the row too (UC-01 5a).
+  `503` deletes the row too (UC-01 5a), unless the submit may have reached the orchestrator.
+- A submit that times out or gets a `5xx` (after the retries of §4) may have created the payment: the row becomes
+  `SUBMITTED` with that submit's `vop_result`, and stays `SUBMITTED` through every failed retry (`400`, `422`, `503`)
+  until a `202` completes it. Otherwise a retry after the reference expired (`tpe.vop.reference-validity`, 30 min)
+  would be `422 VOP_REQUIRED EXPIRED` while the orchestrator holds the payment and settles it. A connect failure
+  certainly did not arrive and deletes the row.
+  **Trade-off (accepted):** when the first submit never arrived, a retry after the reference expired creates the
+  payment on a reference that was valid at the first attempt (UC-01 4 held then), at most until the key expires
+  (24 h after the first attempt). The alternative, asking the orchestrator for the `commandId`'s payment before the
+  check, needs a new orchestrator endpoint and still misses a first submit in flight.
 - Canonicalisation: JSON parsed and re-serialised with sorted keys; XML hashed after canonical XML (C14N) without
   comments, followed by the `VoP-Reference` header (it carries what the JSON body's `vopReference` does).
 - Retention `expires_at = created_at + 24h` (UC-01 NFR); hourly cleanup job.
@@ -241,7 +258,7 @@ the client.
 
 - `POST /v1/payments` p99 ≤ 300 ms (UC-01); `GET` p99 ≤ 200 ms (UC-07).
 - Stateless apart from the idempotency DB; horizontally scalable.
-- Metrics: `tpe.api.requests{endpoint,status}`, `tpe.api.idempotency{outcome=new|replay|reused|in_progress}`.
+- Metrics: `tpe.api.requests{endpoint,status}`, `tpe.api.idempotency{outcome=new|replay|reused|in_progress|resubmit}`.
 - Request bodies are never logged.
 - Service levels: SLO-API-01 … -05 in [25 §5.1](25-service-levels.md#51-payment-api); the customer-channel SLAs
   SLA-01 … -03 in [25 §4](25-service-levels.md#4-slas) rest on them.

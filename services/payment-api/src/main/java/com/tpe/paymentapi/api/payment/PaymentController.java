@@ -1,6 +1,7 @@
 package com.tpe.paymentapi.api.payment;
 
 import com.tpe.contracts.payment.PaymentAccepted;
+import com.tpe.contracts.vop.VopResult;
 import com.tpe.iso20022model.XsdValidator;
 import com.tpe.paymentapi.api.security.Caller;
 import com.tpe.paymentapi.application.idempotency.IdempotencyGuard;
@@ -116,7 +117,7 @@ class PaymentController {
         caller.requireOwns(instruction.debtor() == null ? null : instruction.debtor().iban());
         IdempotencyKeys.require(idempotencyKey);
         var request = new IdempotentRequest(caller.clientId(), idempotencyKey, hash.of("POST", PAYMENTS, instruction));
-        return accepted(guard.initiate(request, () -> submit(caller, idempotencyKey, instruction)));
+        return accepted(guard.initiate(request, checked -> submit(caller, idempotencyKey, instruction, checked)));
     }
 
     /** Documented with {@link #initiate}: the responses are the same (a 202 here keeps springdoc's default 200 out). */
@@ -156,18 +157,19 @@ class PaymentController {
         var request = new IdempotentRequest(caller.clientId(), idempotencyKey,
                 hash.ofXml("POST", PAYMENTS, xml, vopReference));
         try {
-            return accepted(guard.initiate(request, () -> {
+            return accepted(guard.initiate(request, checked -> {
                 pain001.requireToday(document);
-                return submit(caller, idempotencyKey, instruction);
+                return submit(caller, idempotencyKey, instruction, checked);
             }));
         } catch (ValidationFailedException e) {
             throw rejected(caller, document.messageId(), e.errors());
         }
     }
 
-    private PaymentAccepted submit(Caller caller, String idempotencyKey, PaymentInstruction instruction) {
+    private PaymentAccepted submit(Caller caller, String idempotencyKey, PaymentInstruction instruction,
+            VopResult checked) {
         ValidatedPayment payment = validator.validate(instruction);
-        return submission.submit(caller.clientId(), idempotencyKey, payment);
+        return submission.submit(caller.clientId(), idempotencyKey, payment, checked);
     }
 
     private static ResponseEntity<PaymentResponse> accepted(PaymentAccepted accepted) {
