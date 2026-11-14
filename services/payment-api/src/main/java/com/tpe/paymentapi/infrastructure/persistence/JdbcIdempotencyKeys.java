@@ -2,6 +2,7 @@ package com.tpe.paymentapi.infrastructure.persistence;
 
 import com.tpe.contracts.payment.PaymentAccepted;
 import com.tpe.contracts.payment.PaymentState;
+import com.tpe.contracts.vop.VopResult;
 import com.tpe.paymentapi.application.idempotency.IdempotencyKeys;
 import com.tpe.paymentapi.application.idempotency.IdempotentRequest;
 import com.tpe.paymentapi.application.mapping.CustomerStatus;
@@ -21,7 +22,8 @@ import tools.jackson.databind.node.ObjectNode;
 /**
  * {@code idempotency_keys} in PostgreSQL (specs/10-payment-api.md §5.1), each method one auto-committed statement. A
  * {@code COMPLETED} row keeps the {@code 202}: {@code response_status} and the body as the controller writes it,
- * {@code { paymentId, status, internalState, acceptedAt }}; a stored payment has no {@code txId}.
+ * {@code { paymentId, status, internalState, acceptedAt }}; a stored payment has no {@code txId}. A {@code SUBMITTED}
+ * row keeps the {@code vop_result} its submit carried.
  */
 public class JdbcIdempotencyKeys implements IdempotencyKeys {
 
@@ -48,7 +50,7 @@ public class JdbcIdempotencyKeys implements IdempotencyKeys {
     @Override
     public Optional<Entry> find(String clientId, String key) {
         return jdbc.sql("""
-                SELECT request_hash, status, response_body::text AS body, created_at, expires_at
+                SELECT request_hash, status, response_body::text AS body, created_at, expires_at, vop_result
                   FROM idempotency_keys WHERE client_id = ? AND idempotency_key = ?""")
                 .params(clientId, key)
                 .query(this::entry)
@@ -86,6 +88,25 @@ public class JdbcIdempotencyKeys implements IdempotencyKeys {
     }
 
     @Override
+    public void submitted(IdempotentRequest request, Instant createdAt, VopResult vopResult) {
+        jdbc.sql("""
+                UPDATE idempotency_keys SET status = 'SUBMITTED', vop_result = ?
+                 WHERE client_id = ? AND idempotency_key = ? AND status = 'IN_PROGRESS' AND created_at = ?""")
+                .params(vopResult.name(), request.clientId(), request.key(), utc(createdAt))
+                .update();
+    }
+
+    @Override
+    public boolean resume(IdempotentRequest request, Instant submittedAt, Instant createdAt) {
+        return jdbc.sql("""
+                UPDATE idempotency_keys SET status = 'IN_PROGRESS', created_at = ?
+                 WHERE client_id = ? AND idempotency_key = ? AND request_hash = ? AND status = 'SUBMITTED'
+                   AND created_at = ?""")
+                .params(utc(createdAt), request.clientId(), request.key(), request.requestHash(), utc(submittedAt))
+                .update() == 1;
+    }
+
+    @Override
     public int deleteExpired(Instant now, int limit) {
         return jdbc.sql("""
                 DELETE FROM idempotency_keys WHERE (client_id, idempotency_key) IN (
@@ -96,8 +117,10 @@ public class JdbcIdempotencyKeys implements IdempotencyKeys {
 
     private Entry entry(ResultSet rs, int row) throws SQLException {
         String body = rs.getString("body");
+        String vopResult = rs.getString("vop_result");
         return new Entry(rs.getString("request_hash"), Status.valueOf(rs.getString("status")),
-                body == null ? null : payment(body), instant(rs, "created_at"), instant(rs, "expires_at"));
+                body == null ? null : payment(body), instant(rs, "created_at"), instant(rs, "expires_at"),
+                vopResult == null ? null : VopResult.valueOf(vopResult));
     }
 
     private String body(PaymentAccepted payment) {

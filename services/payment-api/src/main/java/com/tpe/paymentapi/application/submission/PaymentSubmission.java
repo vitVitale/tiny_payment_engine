@@ -15,7 +15,9 @@ import org.slf4j.LoggerFactory;
  * the {@code commandId} and submits the payment to the orchestrator with the check's result as {@code vopResult}.
  * Retries are explicit here (specs/00-engineering-baseline.md §8, 10 §4): the check, a read, once on a connect
  * failure, a timeout or a gateway status; the submit once on a connect failure only. A submit that may have arrived
- * is not repeated here; the client's retry with the same key carries the same {@code commandId} (UC-01 5a, 6a).
+ * is not repeated here; the client's retry with the same key carries the same {@code commandId} (UC-01 5a, 6a). Such
+ * a submit fails with the {@code vopResult} it carried, which the guard keeps for that retry (§5.1): the retry passes
+ * it back as {@code checked} and the reference is not checked again.
  */
 public class PaymentSubmission {
 
@@ -35,14 +37,18 @@ public class PaymentSubmission {
 
     /**
      * @param clientId the token's {@code client_id}
+     * @param checked the result of the reference check of a submit under the key that may have arrived; {@code null}
+     *     to check the reference
      * @throws VopRequiredException the reference is missing or does not cover the payment
      * @throws VopUnavailableException vop-service could not check it
      * @throws IdempotencyKeyReusedException the key's {@code commandId} has a payment for another request
      * @throws CreditorAgentNotReachableException the orchestrator refuses the creditor bank
-     * @throws OrchestratorUnavailableException no answer from the orchestrator
+     * @throws OrchestratorUnavailableException no answer from the orchestrator; with the {@code vopResult} submitted
+     *     unless the submit certainly did not arrive (a connect failure)
      */
-    public PaymentAccepted submit(String clientId, String idempotencyKey, ValidatedPayment payment) {
-        VopResult vopResult = checkReference(payment);
+    public PaymentAccepted submit(String clientId, String idempotencyKey, ValidatedPayment payment,
+            VopResult checked) {
+        VopResult vopResult = checked == null ? checkReference(payment) : checked;
         SubmitPayment command = new SubmitPayment(CommandId.derive(clientId, idempotencyKey).value(), clientId,
                 payment.endToEndId(), new SubmitPayment.Debtor(payment.debtorName(), payment.debtorIban()),
                 new SubmitPayment.Creditor(payment.creditorName(), payment.creditorIban(), payment.creditorBic()),
@@ -60,7 +66,8 @@ public class PaymentSubmission {
             case Orchestrator.Unavailable unavailable -> {
                 LOG.warn("orchestrator unavailable for commandId {}: {} {}", command.commandId(),
                         unavailable.failure(), unavailable.why());
-                throw new OrchestratorUnavailableException(unavailable.why());
+                throw new OrchestratorUnavailableException(unavailable.why(),
+                        unavailable.failure() == Failure.CONNECT ? null : vopResult);
             }
         };
     }

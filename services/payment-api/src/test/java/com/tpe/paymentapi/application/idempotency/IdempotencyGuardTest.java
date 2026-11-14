@@ -8,6 +8,7 @@ import com.tpe.contracts.payment.PaymentAccepted;
 import com.tpe.contracts.payment.PaymentState;
 import com.tpe.contracts.payment.PaymentView;
 import com.tpe.contracts.payment.SubmitPayment;
+import com.tpe.contracts.vop.VopResult;
 import com.tpe.paymentapi.application.status.PaymentStatuses;
 import com.tpe.paymentapi.application.submission.Failure;
 import com.tpe.paymentapi.application.submission.IdempotencyKeyReusedException;
@@ -49,6 +50,8 @@ class IdempotencyGuardTest {
     private final IdempotencyGuard guard = new IdempotencyGuard(keys, new PaymentStatuses(orchestrator), clock,
             Duration.ofHours(24), Duration.ofSeconds(10), meters);
     private final AtomicInteger submits = new AtomicInteger();
+    /** Per submit: whether it checked the reference or was given the stored result. */
+    private final List<String> checks = new ArrayList<>();
 
     @Test
     void aNewKeyRunsTheSubmitAndStoresItsPayment() {
@@ -160,15 +163,18 @@ class IdempotencyGuardTest {
         assertThat(submits).hasValue(0);
     }
 
-    /** {@code 400}, {@code 422}, {@code 503}: no side effect, the client may fix the request and retry. */
+    /**
+     * {@code 400}, {@code 422}, a {@code 503} whose submit did not arrive: no side effect, the client may fix the
+     * request and retry.
+     */
     @Test
     void aFailedSubmitReleasesTheKey() {
-        assertThatThrownBy(() -> guard.initiate(REQUEST, () -> {
+        assertThatThrownBy(() -> guard.initiate(REQUEST, checked -> {
             throw new OrchestratorUnavailableException("down");
         })).isInstanceOf(OrchestratorUnavailableException.class);
         assertThat(keys.rows).isEmpty();
 
-        assertThatThrownBy(() -> guard.initiate(OTHER_BODY, () -> {
+        assertThatThrownBy(() -> guard.initiate(OTHER_BODY, checked -> {
             throw new ValidationFailedException(List.of());
         })).isInstanceOf(ValidationFailedException.class);
         assertThat(keys.rows).isEmpty();
@@ -176,10 +182,89 @@ class IdempotencyGuardTest {
         assertThat(guard.initiate(REQUEST, this::submit)).isEqualTo(ACCEPTED);
     }
 
+    /** UC-01 6a: a timeout or a {@code 5xx} may have created the payment; the key keeps the check's result. */
+    @Test
+    void aSubmitThatMayHaveArrivedLeavesTheKeySubmittedWithItsVopResult() {
+        submitTimedOut();
+
+        assertThat(keys.rows.get("key-1")).isEqualTo(new IdempotencyKeys.Entry("hash-1",
+                IdempotencyKeys.Status.SUBMITTED, null, START, START.plus(Duration.ofHours(24)),
+                VopResult.CLOSE_MATCH));
+    }
+
+    /** The reference may have expired since: the retry submits the stored result, the orchestrator deduplicates. */
+    @Test
+    void aRetryOfASubmittedKeySubmitsAgainWithTheStoredVopResult() {
+        submitTimedOut();
+        clock.advance(Duration.ofMinutes(31));
+        Instant now = clock.instant();
+
+        assertThat(guard.initiate(REQUEST, this::submit)).isEqualTo(ACCEPTED);
+
+        assertThat(checks).containsExactly("stored CLOSE_MATCH");
+        assertThat(keys.rows.get("key-1")).isEqualTo(new IdempotencyKeys.Entry("hash-1",
+                IdempotencyKeys.Status.COMPLETED, ACCEPTED, now, START.plus(Duration.ofHours(24)),
+                VopResult.CLOSE_MATCH));
+        assertThat(outcome("resubmit")).isEqualTo(1);
+        assertThat(outcome("new")).isZero();
+    }
+
+    /** Only a {@code 202} settles a key whose submit may have arrived; any failed retry leaves it so. */
+    @Test
+    void aSubmittedKeyStaysSubmittedWhenItsRetryFails() {
+        submitTimedOut();
+
+        assertThatThrownBy(() -> guard.initiate(REQUEST, checked -> {
+            throw new OrchestratorUnavailableException("connect");
+        })).isInstanceOf(OrchestratorUnavailableException.class);
+        assertThat(keys.rows.get("key-1").status()).isEqualTo(IdempotencyKeys.Status.SUBMITTED);
+        assertThatThrownBy(() -> guard.initiate(REQUEST, checked -> {
+            throw new ValidationFailedException(List.of());
+        })).isInstanceOf(ValidationFailedException.class);
+        assertThat(keys.rows.get("key-1").status()).isEqualTo(IdempotencyKeys.Status.SUBMITTED);
+
+        guard.initiate(REQUEST, this::submit);
+        assertThat(checks).containsExactly("stored CLOSE_MATCH");
+    }
+
+    @Test
+    void aSubmittedKeyWithAnotherBodyIsReused() {
+        submitTimedOut();
+
+        assertThatThrownBy(() -> guard.initiate(OTHER_BODY, this::submit))
+                .isInstanceOf(IdempotencyKeyReusedException.class);
+        assertThat(submits).hasValue(0);
+        assertThat(keys.rows.get("key-1").status()).isEqualTo(IdempotencyKeys.Status.SUBMITTED);
+        assertThat(outcome("reused")).isEqualTo(1);
+    }
+
+    /** A retry that crashed while it resubmitted leaves the key in progress, with the stored result. */
+    @Test
+    void aResumedKeyAbandonedMidResubmitIsTakenOverWithItsStoredResult() {
+        submitTimedOut();
+        keys.resume(REQUEST, START, START);
+        clock.advance(Duration.ofSeconds(10));
+
+        assertThatThrownBy(() -> guard.initiate(OTHER_BODY, this::submit))
+                .isInstanceOf(IdempotencyKeyReusedException.class);
+        assertThat(guard.initiate(REQUEST, this::submit)).isEqualTo(ACCEPTED);
+        assertThat(checks).containsExactly("stored CLOSE_MATCH");
+    }
+
+    @Test
+    void aResumeLostToAnotherRetryIsInProgress() {
+        submitTimedOut();
+        keys.beforeResume = () -> keys.resume(REQUEST, START, clock.instant());
+
+        assertThatThrownBy(() -> guard.initiate(REQUEST, this::submit))
+                .isInstanceOf(IdempotencyKeyInProgressException.class);
+        assertThat(submits).hasValue(0);
+    }
+
     /** A request whose key was taken over while it ran leaves the new owner's row alone. */
     @Test
     void aFailedSubmitDoesNotReleaseAKeyTakenOverMeanwhile() {
-        assertThatThrownBy(() -> guard.initiate(REQUEST, () -> {
+        assertThatThrownBy(() -> guard.initiate(REQUEST, checked -> {
             clock.advance(Duration.ofSeconds(30));
             keys.takeOver(OTHER_BODY, START, clock.instant(), clock.instant().plus(Duration.ofHours(24)));
             throw new OrchestratorUnavailableException("down");
@@ -212,10 +297,10 @@ class IdempotencyGuardTest {
     /** The slow request's payment is not stored under the hash of the request that took its key over. */
     @Test
     void aSubmitWhoseKeyWasTakenOverMeanwhileStoresNothing() {
-        assertThat(guard.initiate(REQUEST, () -> {
+        assertThat(guard.initiate(REQUEST, checked -> {
             clock.advance(Duration.ofSeconds(30));
             keys.takeOver(OTHER_BODY, START, clock.instant(), clock.instant().plus(Duration.ofHours(24)));
-            return submit();
+            return submit(checked);
         })).isEqualTo(ACCEPTED);
 
         assertThat(keys.rows.get("key-1").requestHash()).isEqualTo("hash-2");
@@ -227,9 +312,17 @@ class IdempotencyGuardTest {
                 ACCEPTED.txId(), null, null, null, null, null, null, ACCEPTED.acceptedAt(), null));
     }
 
-    private PaymentAccepted submit() {
+    private PaymentAccepted submit(VopResult checked) {
         submits.incrementAndGet();
+        checks.add(checked == null ? "checked" : "stored " + checked);
         return ACCEPTED;
+    }
+
+    /** The first attempt's submit timed out: the key is {@code SUBMITTED} with {@code CLOSE_MATCH}. */
+    private void submitTimedOut() {
+        assertThatThrownBy(() -> guard.initiate(REQUEST, checked -> {
+            throw new OrchestratorUnavailableException("timeout", VopResult.CLOSE_MATCH);
+        })).isInstanceOf(OrchestratorUnavailableException.class);
     }
 
     private double outcome(String outcome) {
@@ -243,6 +336,7 @@ class IdempotencyGuardTest {
         final Map<String, Entry> rows = new HashMap<>();
         Runnable beforeFind = () -> {};
         Runnable beforeTakeOver = () -> {};
+        Runnable beforeResume = () -> {};
 
         @Override
         public boolean claim(IdempotentRequest request, Instant createdAt, Instant expiresAt) {
@@ -268,7 +362,8 @@ class IdempotencyGuardTest {
             if (row == null || row.status() != Status.IN_PROGRESS || !row.createdAt().equals(abandonedAt)) {
                 return false;
             }
-            rows.put(request.key(), new Entry(request.requestHash(), Status.IN_PROGRESS, null, createdAt, expiresAt));
+            rows.put(request.key(), new Entry(request.requestHash(), Status.IN_PROGRESS, null, createdAt, expiresAt,
+                    row.vopResult()));
             return true;
         }
 
@@ -279,7 +374,7 @@ class IdempotencyGuardTest {
                 return;
             }
             rows.put(request.key(), new Entry(row.requestHash(), Status.COMPLETED, payment, row.createdAt(),
-                    row.expiresAt()));
+                    row.expiresAt(), row.vopResult()));
         }
 
         @Override
@@ -288,6 +383,30 @@ class IdempotencyGuardTest {
             if (row != null && row.status() == Status.IN_PROGRESS && row.createdAt().equals(createdAt)) {
                 rows.remove(request.key());
             }
+        }
+
+        @Override
+        public void submitted(IdempotentRequest request, Instant createdAt, VopResult vopResult) {
+            Entry row = rows.get(request.key());
+            if (row != null && row.status() == Status.IN_PROGRESS && row.createdAt().equals(createdAt)) {
+                rows.put(request.key(), new Entry(row.requestHash(), Status.SUBMITTED, null, row.createdAt(),
+                        row.expiresAt(), vopResult));
+            }
+        }
+
+        @Override
+        public boolean resume(IdempotentRequest request, Instant submittedAt, Instant createdAt) {
+            Runnable hook = beforeResume;
+            beforeResume = () -> {};
+            hook.run();
+            Entry row = rows.get(request.key());
+            if (row == null || row.status() != Status.SUBMITTED || !row.createdAt().equals(submittedAt)
+                    || !row.requestHash().equals(request.requestHash())) {
+                return false;
+            }
+            rows.put(request.key(), new Entry(row.requestHash(), Status.IN_PROGRESS, null, createdAt,
+                    row.expiresAt(), row.vopResult()));
+            return true;
         }
 
         @Override

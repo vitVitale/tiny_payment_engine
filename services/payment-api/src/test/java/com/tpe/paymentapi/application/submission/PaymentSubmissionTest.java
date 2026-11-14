@@ -53,7 +53,7 @@ class PaymentSubmissionTest {
         checks.answers.add(new ReferenceChecks.Valid(VopResult.CLOSE_MATCH));
         orchestrator.answers.add(new Orchestrator.Accepted(ACCEPTED, true));
 
-        assertThat(submission.submit(CLIENT, KEY, PAYMENT)).isEqualTo(ACCEPTED);
+        assertThat(submission.submit(CLIENT, KEY, PAYMENT, null)).isEqualTo(ACCEPTED);
 
         assertThat(checks.asked).containsExactly(REFERENCE);
         assertThat(orchestrator.submitted).containsExactly(new SubmitPayment(
@@ -68,7 +68,7 @@ class PaymentSubmissionTest {
         checks.answers.add(new ReferenceChecks.Valid(VopResult.MATCH));
         orchestrator.answers.add(new Orchestrator.Accepted(ACCEPTED, false));
 
-        assertThat(submission.submit(CLIENT, KEY, PAYMENT)).isEqualTo(ACCEPTED);
+        assertThat(submission.submit(CLIENT, KEY, PAYMENT, null)).isEqualTo(ACCEPTED);
     }
 
     @ParameterizedTest
@@ -76,7 +76,7 @@ class PaymentSubmissionTest {
     void anInvalidReferenceIsVopRequiredWithItsProblem(VopReferenceProblem problem) {
         checks.answers.add(new ReferenceChecks.Invalid(problem));
 
-        assertThatThrownBy(() -> submission.submit(CLIENT, KEY, PAYMENT))
+        assertThatThrownBy(() -> submission.submit(CLIENT, KEY, PAYMENT, null))
                 .isInstanceOfSatisfying(VopRequiredException.class,
                         e -> assertThat(e.problem()).isEqualTo(problem.name()));
         assertThat(orchestrator.submitted).isEmpty();
@@ -88,7 +88,7 @@ class PaymentSubmissionTest {
                 PAYMENT.debtorIban(), PAYMENT.creditorName(), PAYMENT.creditorIban(), null, PAYMENT.amount(), null,
                 null);
 
-        assertThatThrownBy(() -> submission.submit(CLIENT, KEY, without))
+        assertThatThrownBy(() -> submission.submit(CLIENT, KEY, without, null))
                 .isInstanceOfSatisfying(VopRequiredException.class,
                         e -> assertThat(e.problem()).isEqualTo("MISSING"));
         assertThat(checks.asked).isEmpty();
@@ -102,7 +102,7 @@ class PaymentSubmissionTest {
         checks.answers.add(new ReferenceChecks.Valid(VopResult.MATCH));
         orchestrator.answers.add(new Orchestrator.Accepted(ACCEPTED, true));
 
-        assertThat(submission.submit(CLIENT, KEY, PAYMENT)).isEqualTo(ACCEPTED);
+        assertThat(submission.submit(CLIENT, KEY, PAYMENT, null)).isEqualTo(ACCEPTED);
         assertThat(checks.asked).hasSize(2);
     }
 
@@ -110,7 +110,7 @@ class PaymentSubmissionTest {
     void aReferenceCheckFailingWithAnInternalErrorIsNotRetried() {
         checks.answers.add(new ReferenceChecks.Unavailable(Failure.SERVER_ERROR, "500"));
 
-        assertThatThrownBy(() -> submission.submit(CLIENT, KEY, PAYMENT)).isInstanceOf(VopUnavailableException.class);
+        assertThatThrownBy(() -> submission.submit(CLIENT, KEY, PAYMENT, null)).isInstanceOf(VopUnavailableException.class);
         assertThat(checks.asked).hasSize(1);
     }
 
@@ -119,7 +119,7 @@ class PaymentSubmissionTest {
         checks.answers.add(new ReferenceChecks.Unavailable(Failure.TIMEOUT, "slow"));
         checks.answers.add(new ReferenceChecks.Unavailable(Failure.CONNECT, "down"));
 
-        assertThatThrownBy(() -> submission.submit(CLIENT, KEY, PAYMENT)).isInstanceOf(VopUnavailableException.class);
+        assertThatThrownBy(() -> submission.submit(CLIENT, KEY, PAYMENT, null)).isInstanceOf(VopUnavailableException.class);
         assertThat(orchestrator.submitted).isEmpty();
     }
 
@@ -129,7 +129,7 @@ class PaymentSubmissionTest {
         orchestrator.answers.add(new Orchestrator.Unavailable(Failure.CONNECT, "refused"));
         orchestrator.answers.add(new Orchestrator.Accepted(ACCEPTED, true));
 
-        assertThat(submission.submit(CLIENT, KEY, PAYMENT)).isEqualTo(ACCEPTED);
+        assertThat(submission.submit(CLIENT, KEY, PAYMENT, null)).isEqualTo(ACCEPTED);
         assertThat(orchestrator.submitted).hasSize(2).containsOnly(orchestrator.submitted.getFirst());
     }
 
@@ -139,8 +139,9 @@ class PaymentSubmissionTest {
         orchestrator.answers.add(new Orchestrator.Unavailable(Failure.CONNECT, "refused"));
         orchestrator.answers.add(new Orchestrator.Unavailable(Failure.CONNECT, "refused"));
 
-        assertThatThrownBy(() -> submission.submit(CLIENT, KEY, PAYMENT))
-                .isInstanceOf(OrchestratorUnavailableException.class);
+        assertThatThrownBy(() -> submission.submit(CLIENT, KEY, PAYMENT, null))
+                .isInstanceOfSatisfying(OrchestratorUnavailableException.class,
+                        e -> assertThat(e.submittedWith()).as("certainly not arrived").isNull());
         assertThat(orchestrator.submitted).hasSize(2);
     }
 
@@ -151,9 +152,22 @@ class PaymentSubmissionTest {
         checks.answers.add(new ReferenceChecks.Valid(VopResult.MATCH));
         orchestrator.answers.add(new Orchestrator.Unavailable(failure, "no answer"));
 
-        assertThatThrownBy(() -> submission.submit(CLIENT, KEY, PAYMENT))
-                .isInstanceOf(OrchestratorUnavailableException.class);
+        assertThatThrownBy(() -> submission.submit(CLIENT, KEY, PAYMENT, null))
+                .isInstanceOfSatisfying(OrchestratorUnavailableException.class,
+                        e -> assertThat(e.submittedWith()).isEqualTo(VopResult.MATCH));
         assertThat(orchestrator.submitted).hasSize(1);
+    }
+
+    /** specs/10 §5.1: the retry of a key whose submit may have arrived; the reference may have expired since. */
+    @Test
+    void aStoredResultIsSubmittedWithoutCheckingTheReference() {
+        orchestrator.answers.add(new Orchestrator.Accepted(ACCEPTED, false));
+
+        assertThat(submission.submit(CLIENT, KEY, PAYMENT, VopResult.NO_MATCH)).isEqualTo(ACCEPTED);
+
+        assertThat(checks.asked).isEmpty();
+        assertThat(orchestrator.submitted).singleElement()
+                .satisfies(command -> assertThat(command.vopResult()).isEqualTo(VopResult.NO_MATCH));
     }
 
     @Test
@@ -161,7 +175,7 @@ class PaymentSubmissionTest {
         checks.answers.add(new ReferenceChecks.Valid(VopResult.MATCH));
         orchestrator.answers.add(new Orchestrator.CommandConflict());
 
-        assertThatThrownBy(() -> submission.submit(CLIENT, KEY, PAYMENT))
+        assertThatThrownBy(() -> submission.submit(CLIENT, KEY, PAYMENT, null))
                 .isInstanceOf(IdempotencyKeyReusedException.class);
     }
 
@@ -170,7 +184,7 @@ class PaymentSubmissionTest {
         checks.answers.add(new ReferenceChecks.Valid(VopResult.MATCH));
         orchestrator.answers.add(new Orchestrator.CreditorAgentNotReachable());
 
-        assertThatThrownBy(() -> submission.submit(CLIENT, KEY, PAYMENT))
+        assertThatThrownBy(() -> submission.submit(CLIENT, KEY, PAYMENT, null))
                 .isInstanceOf(CreditorAgentNotReachableException.class);
     }
 
