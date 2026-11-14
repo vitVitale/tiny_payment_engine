@@ -4,7 +4,11 @@ import com.tpe.observability.context.Spans;
 import com.tpe.observability.payment.PaymentTelemetry;
 import com.tpe.messaging.worker.PollingWorker;
 import com.tpe.paymentdomain.PaymentId;
+import com.tpe.paymentorchestrator.application.ledger.Ledger;
+import com.tpe.paymentorchestrator.application.outgoing.AssessPayeeRiskAction;
 import com.tpe.paymentorchestrator.application.outgoing.AssessRiskAction;
+import com.tpe.paymentorchestrator.application.outgoing.CreateHoldAction;
+import com.tpe.paymentorchestrator.application.outgoing.SettleOnUsAction;
 import com.tpe.paymentorchestrator.application.payments.Payments;
 import com.tpe.paymentorchestrator.application.risk.RiskAssessments;
 import com.tpe.paymentorchestrator.application.runner.RunnerSettings;
@@ -12,6 +16,7 @@ import com.tpe.paymentorchestrator.application.runner.SagaAction;
 import com.tpe.paymentorchestrator.application.runner.SagaRunner;
 import com.tpe.paymentorchestrator.application.runner.SagaTelemetry;
 import com.tpe.paymentorchestrator.application.runner.StepApplier;
+import com.tpe.paymentorchestrator.infrastructure.ledger.HttpLedger;
 import com.tpe.paymentorchestrator.infrastructure.risk.HttpRiskAssessments;
 import com.tpe.paymentorchestrator.infrastructure.telemetry.MicrometerSagaTelemetry;
 import io.micrometer.core.instrument.MeterRegistry;
@@ -35,7 +40,8 @@ import org.springframework.web.client.RestClient;
  * §6.3, §7).
  */
 @Configuration(proxyBeanMethods = false)
-@EnableConfigurationProperties({SagaConfiguration.RunnerProperties.class, SagaConfiguration.RiskProperties.class})
+@EnableConfigurationProperties({SagaConfiguration.RunnerProperties.class, SagaConfiguration.RiskProperties.class,
+        SagaConfiguration.LedgerProperties.class})
 class SagaConfiguration {
 
     /** The sweeper's poll: actions whose lease expired or whose retry is due (§6.3). */
@@ -58,6 +64,29 @@ class SagaConfiguration {
     AssessRiskAction assessRiskAction(RiskAssessments risk, RunnerSettings settings, RiskProperties properties,
             Clock clock) {
         return new AssessRiskAction(risk, settings, properties.timeout().outgoing(), clock);
+    }
+
+    @Bean
+    Ledger ledger(RestClient.Builder builder, LedgerProperties ledger) {
+        return new HttpLedger(builder.clone().baseUrl(ledger.baseUrl().toString()).build(), CONNECT_TIMEOUT);
+    }
+
+    @Bean
+    CreateHoldAction createHoldAction(Ledger ledger, RunnerSettings settings, LedgerProperties properties,
+            Clock clock) {
+        return new CreateHoldAction(ledger, settings, properties.timeout(), clock);
+    }
+
+    @Bean
+    AssessPayeeRiskAction assessPayeeRiskAction(RiskAssessments risk, RunnerSettings settings,
+            RiskProperties properties, Clock clock) {
+        return new AssessPayeeRiskAction(risk, settings, properties.timeout().outgoing(), clock);
+    }
+
+    @Bean
+    SettleOnUsAction settleOnUsAction(Ledger ledger, RunnerSettings settings, LedgerProperties properties,
+            Clock clock) {
+        return new SettleOnUsAction(ledger, settings, properties.timeout(), clock);
     }
 
     @Bean
@@ -101,7 +130,14 @@ class SagaConfiguration {
     @ConfigurationProperties("tpe.clients.risk")
     record RiskProperties(URI baseUrl, Timeout timeout) {
 
-        /** @param outgoing {@code ASSESS_RISK} of an outgoing payment, 500 ms (UC-04 2c) */
+        /**
+         * @param outgoing {@code ASSESS_RISK} of an outgoing payment and {@code ASSESS_PAYEE_RISK} of an on-us one,
+         *     500 ms (UC-04 2c)
+         */
         record Timeout(Duration outgoing, Duration incoming) {}
     }
+
+    /** {@code tpe.clients.ledger.*} (§7). */
+    @ConfigurationProperties("tpe.clients.ledger")
+    record LedgerProperties(URI baseUrl, Duration timeout) {}
 }

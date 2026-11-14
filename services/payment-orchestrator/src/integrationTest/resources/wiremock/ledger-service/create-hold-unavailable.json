@@ -1,0 +1,15 @@
+{
+  "request": {
+    "method": "POST",
+    "url": "/v1/holds"
+  },
+  "response": {
+    "status": 503,
+    "headers": {
+      "Retry-After": "1"
+    }
+  },
+  "metadata": {
+    "pact": "fault"
+  }
+}

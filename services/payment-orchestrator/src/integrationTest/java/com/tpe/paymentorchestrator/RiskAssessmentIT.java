@@ -32,6 +32,7 @@ import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.MediaType;
@@ -58,6 +59,12 @@ class RiskAssessmentIT extends OrchestratorStack {
 
     @Autowired
     MeterRegistry meters;
+
+    /** An allowed payment stops at its hold: retried after the back-off, which the clock does not reach by itself. */
+    @BeforeEach
+    void holdsFail() {
+        ledgerAnswers("create-hold-unavailable");
+    }
 
     @Test
     void anAllowedPaymentIsRiskCheckedWithItsVopResultAndWaitsForItsHold() {

@@ -1,0 +1,18 @@
+{
+  "request": {
+    "method": "POST",
+    "url": "/v1/holds/0192f0e4-7b1c-7cc3-a1b2-0000000000a1/settle-on-us"
+  },
+  "response": {
+    "status": 200,
+    "headers": {
+      "Content-Type": "application/json"
+    },
+    "jsonBody": {
+      "holdId": "0192f0e4-7b1c-7cc3-a1b2-0000000000a1",
+      "status": "SETTLED",
+      "journalEntryId": "0192f0e4-7b1c-7cc3-a1b2-0000000000c1",
+      "creditorAccountId": "0192f0e4-7b1c-7cc3-a1b2-0000000000b2"
+    }
+  }
+}

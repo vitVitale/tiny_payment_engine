@@ -9,6 +9,7 @@ import com.tpe.contracts.vop.VopResult;
 import com.tpe.paymentorchestrator.application.risk.RiskAnswer;
 import com.tpe.paymentorchestrator.application.risk.RiskAssessments;
 import com.tpe.paymentorchestrator.domain.payment.Payment;
+import com.tpe.paymentorchestrator.domain.payment.PaymentDirection;
 import com.tpe.paymentorchestrator.domain.payment.PaymentParty;
 import java.net.http.HttpClient;
 import java.time.Duration;
@@ -47,10 +48,10 @@ public class HttpRiskAssessments implements RiskAssessments {
     }
 
     @Override
-    public RiskAnswer assess(Payment payment, Duration readTimeout) {
+    public RiskAnswer assess(Payment payment, PaymentDirection assessed, Duration readTimeout) {
         var factory = new JdkClientHttpRequestFactory(http);
         factory.setReadTimeout(readTimeout);
-        Direction direction = Direction.valueOf(payment.direction().name());
+        Direction direction = Direction.valueOf(assessed.name());
         AssessmentRequest request = new AssessmentRequest(AssessmentRequest.assessmentId(payment.paymentId(),
                 direction), payment.paymentId(), direction, payment.txId(), payment.amount(),
                 party(payment.debtor()), party(payment.creditor()), payment.debtor().agentBic(),
