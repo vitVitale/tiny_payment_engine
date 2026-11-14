@@ -10,9 +10,26 @@
     },
     "jsonBody": {
       "paymentId": "0192f0e4-7b1c-7cc3-a1b2-000000000101",
+      "direction": "OUTGOING",
+      "onUs": false,
       "state": "SETTLED",
+      "reasonCode": null,
       "txId": "TPE01JABCDEFGHJKMNPQRSTVW0101",
-      "acceptedAt": "2026-11-14T10:00:00.123Z"
+      "uetr": "eb6305c9-1f7f-49de-aed0-16487c27b42d",
+      "endToEndId": "INV-2026-0042",
+      "amountMinor": 12345,
+      "currency": "EUR",
+      "debtor": {
+        "name": "Anna Schmidt",
+        "iban": "DE36100100100000000001"
+      },
+      "creditor": {
+        "name": "Max Mustermann",
+        "iban": "DE63200200200000000001"
+      },
+      "remittanceInformation": "Invoice 42",
+      "acceptedAt": "2026-11-14T10:00:00.123Z",
+      "finalisedAt": "2026-11-14T10:00:01.5Z"
     }
   }
 }

@@ -1,22 +1,29 @@
 package com.tpe.paymentapi.infrastructure.config;
 
 import com.tpe.contracts.ContractsModule;
+import com.tpe.iso20022model.IsoCodec;
 import com.tpe.paymentapi.application.idempotency.IdempotencyGuard;
 import com.tpe.paymentapi.application.idempotency.IdempotencyKeys;
 import com.tpe.paymentapi.application.idempotency.IdempotencyRetention;
+import com.tpe.paymentapi.application.mapping.PaymentStatusReport;
+import com.tpe.paymentapi.application.status.PaymentStatuses;
 import com.tpe.paymentapi.application.submission.Orchestrator;
 import com.tpe.paymentapi.application.submission.PaymentSubmission;
 import com.tpe.paymentapi.application.submission.ReferenceChecks;
 import com.tpe.paymentapi.application.validation.PaymentValidator;
+import com.tpe.paymentapi.application.verification.PayeeVerification;
 import com.tpe.paymentapi.infrastructure.orchestrator.HttpOrchestrator;
 import com.tpe.paymentapi.infrastructure.persistence.JdbcIdempotencyKeys;
+import com.tpe.paymentapi.infrastructure.vop.HttpPayeeVerifications;
 import com.tpe.paymentapi.infrastructure.vop.HttpReferenceChecks;
 import com.tpe.paymentdomain.BankDirectory;
+import com.tpe.paymentdomain.UlidGenerator;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import jakarta.validation.Validator;
 import java.net.URI;
 import java.net.http.HttpClient;
+import java.security.SecureRandom;
 import java.time.Clock;
 import java.time.Duration;
 import org.springframework.beans.factory.ObjectProvider;
@@ -71,9 +78,19 @@ class PaymentApiConfiguration {
     }
 
     @Bean
-    IdempotencyGuard idempotencyGuard(IdempotencyKeys keys, Orchestrator orchestrator, Clock clock,
+    PaymentStatusReport paymentStatusReport(Clock clock) {
+        return new PaymentStatusReport(new IsoCodec(), new UlidGenerator(clock, new SecureRandom()), clock);
+    }
+
+    @Bean
+    PaymentStatuses paymentStatuses(Orchestrator orchestrator) {
+        return new PaymentStatuses(orchestrator);
+    }
+
+    @Bean
+    IdempotencyGuard idempotencyGuard(IdempotencyKeys keys, PaymentStatuses statuses, Clock clock,
             IdempotencyProperties idempotency, ObjectProvider<MeterRegistry> meters) {
-        return new IdempotencyGuard(keys, orchestrator, clock, idempotency.retention(),
+        return new IdempotencyGuard(keys, statuses, clock, idempotency.retention(),
                 idempotency.inProgressTakeover(), meters.getIfAvailable(SimpleMeterRegistry::new));
     }
 
@@ -85,6 +102,12 @@ class PaymentApiConfiguration {
     @Bean
     ReferenceChecks referenceChecks(RestClient.Builder builder, VopProperties vop) {
         return new HttpReferenceChecks(client(builder, vop.baseUrl(), vop.checkTimeout()));
+    }
+
+    @Bean
+    PayeeVerification payeeVerification(RestClient.Builder builder, VopProperties vop) {
+        return new PayeeVerification(
+                new HttpPayeeVerifications(client(builder, vop.baseUrl(), vop.verifyTimeout())));
     }
 
     @Bean
@@ -106,7 +129,7 @@ class PaymentApiConfiguration {
     @ConfigurationProperties("tpe.api.idempotency")
     record IdempotencyProperties(Duration retention, Duration inProgressTakeover) {}
 
-    /** {@code tpe.clients.vop}. */
+    /** {@code tpe.clients.vop}: {@code check-timeout} the reference check's, {@code verify-timeout} the verify's. */
     @ConfigurationProperties("tpe.clients.vop")
-    record VopProperties(URI baseUrl, Duration checkTimeout) {}
+    record VopProperties(URI baseUrl, Duration checkTimeout, Duration verifyTimeout) {}
 }

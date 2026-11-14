@@ -1,5 +1,6 @@
 package com.tpe.paymentapi.api.security;
 
+import com.tpe.paymentdomain.Iban;
 import java.util.List;
 import java.util.Locale;
 import java.util.Set;
@@ -37,6 +38,11 @@ public record Caller(String clientId, Set<String> accounts) {
         if (iban != null && !iban.isBlank() && !accounts.contains(normalised(iban))) {
             throw new DebtorAccountNotOwnedException();
         }
+    }
+
+    /** {@code iban} is one of the token's accounts. */
+    public boolean owns(Iban iban) {
+        return accounts.contains(iban.value());
     }
 
     private static String normalised(String iban) {

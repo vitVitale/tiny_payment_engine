@@ -1,10 +1,9 @@
 package com.tpe.paymentapi.application.submission;
 
 import com.tpe.contracts.payment.PaymentAccepted;
-import com.tpe.contracts.payment.PaymentState;
+import com.tpe.contracts.payment.PaymentView;
 import com.tpe.contracts.payment.SubmitPayment;
 import com.tpe.paymentdomain.PaymentId;
-import com.tpe.paymentdomain.TxId;
 
 /**
  * payment-orchestrator's {@code POST /v1/payments} and {@code GET /v1/payments/{paymentId}}
@@ -24,8 +23,8 @@ public interface Orchestrator {
     /** What the orchestrator answered a status read, or that it could not be asked. */
     sealed interface Read {}
 
-    /** {@code 200}: the payment's state now, what the idempotency guard's replay refreshes (10 §5.1). */
-    record Found(PaymentState state, TxId txId) implements Read {}
+    /** {@code 200}: the payment as it is now. */
+    record Found(PaymentView payment) implements Read {}
 
     /** {@code 404 PAYMENT_NOT_FOUND}. */
     record NotFound() implements Read {}

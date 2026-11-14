@@ -29,7 +29,8 @@ import tools.jackson.databind.node.ObjectNode;
 /**
  * The service on a random port against PostgreSQL of the compose stack's version (deploy/docker-compose.yml), with
  * WireMock as payment-orchestrator and vop-service, started once per JVM; every subclass shares one Spring context.
- * Every test starts with no idempotency keys and the service's time at {@link #START} ({@link #CLOCK}). Tokens are
+ * Every test starts with no idempotency keys, no WireMock mappings or requests, and the service's time at
+ * {@link #START} ({@link #CLOCK}). Tokens are
  * {@link Tokens}'; the bank directory is the default, deploy/config/bank-directory.yml. The orchestrator answers what
  * {@link #orchestratorAnswers} loaded last, vop-service what {@link #vopAnswers} did. {@link #http()} never throws on
  * an error status and never repeats a request.
@@ -83,6 +84,8 @@ public abstract class PaymentApiStack {
     void noKeysAtTheStart() {
         jdbc.sql("DELETE FROM idempotency_keys").update();
         CLOCK.set(START);
+        ORCHESTRATOR.resetAll();
+        VOP.resetAll();
     }
 
     @DynamicPropertySource
@@ -93,6 +96,8 @@ public abstract class PaymentApiStack {
         registry.add("spring.security.oauth2.resourceserver.jwt.public-key-location", Tokens::publicKeyLocation);
         registry.add("tpe.clients.orchestrator.base-url", ORCHESTRATOR::baseUrl);
         registry.add("tpe.clients.vop.base-url", VOP::baseUrl);
+        // the verify fault mapping answers after 1.5 s, not after the 5.5 s of production
+        registry.add("tpe.clients.vop.verify-timeout", () -> "1s");
     }
 
     /**

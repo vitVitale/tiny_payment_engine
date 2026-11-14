@@ -1,7 +1,7 @@
 package com.tpe.paymentapi.application.idempotency;
 
 import com.tpe.contracts.payment.PaymentAccepted;
-import com.tpe.paymentapi.application.submission.Failure;
+import com.tpe.paymentapi.application.status.PaymentStatuses;
 import com.tpe.paymentapi.application.submission.IdempotencyKeyReusedException;
 import com.tpe.paymentapi.application.submission.Orchestrator;
 import com.tpe.paymentapi.application.submission.UnexpectedAnswerException;
@@ -12,7 +12,6 @@ import java.time.Duration;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.Optional;
-import java.util.Set;
 import java.util.function.Supplier;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -38,13 +37,11 @@ public class IdempotencyGuard {
 
     /** Each attempt claims, answers, or finds the key gone between claim and read; the next one claims it then. */
     private static final int MAX_ATTEMPTS = 3;
-    /** The status read, a read, is retried once on a connect failure, a timeout or a gateway status (10 §4). */
-    private static final Set<Failure> READ_RETRIED = Set.of(Failure.CONNECT, Failure.TIMEOUT, Failure.GATEWAY);
 
     private static final Logger LOG = LoggerFactory.getLogger(IdempotencyGuard.class);
 
     private final IdempotencyKeys keys;
-    private final Orchestrator orchestrator;
+    private final PaymentStatuses statuses;
     private final Clock clock;
     private final Duration retention;
     private final Duration takeover;
@@ -57,10 +54,10 @@ public class IdempotencyGuard {
      * @param retention {@code tpe.api.idempotency.retention}
      * @param takeover {@code tpe.api.idempotency.in-progress-takeover}
      */
-    public IdempotencyGuard(IdempotencyKeys keys, Orchestrator orchestrator, Clock clock, Duration retention,
+    public IdempotencyGuard(IdempotencyKeys keys, PaymentStatuses statuses, Clock clock, Duration retention,
             Duration takeover, MeterRegistry meters) {
         this.keys = keys;
-        this.orchestrator = orchestrator;
+        this.statuses = statuses;
         this.clock = clock;
         this.retention = retention;
         this.takeover = takeover;
@@ -126,18 +123,14 @@ public class IdempotencyGuard {
         PaymentAccepted stored = entry.response();
         Orchestrator.Read read;
         try {
-            read = orchestrator.payment(stored.paymentId());
-            if (read instanceof Orchestrator.Unavailable unavailable
-                    && READ_RETRIED.contains(unavailable.failure())) {
-                read = orchestrator.payment(stored.paymentId());
-            }
+            read = statuses.read(stored.paymentId());
         } catch (UnexpectedAnswerException e) {
             // a bug on one side, logged where it was found; the replay has the stored state
             return stored;
         }
         return switch (read) {
-            case Orchestrator.Found found -> new PaymentAccepted(stored.paymentId(), found.state(), found.txId(),
-                    stored.acceptedAt());
+            case Orchestrator.Found found -> new PaymentAccepted(stored.paymentId(), found.payment().state(),
+                    found.payment().txId(), stored.acceptedAt());
             case Orchestrator.NotFound notFound -> {
                 LOG.error("payment {} of a stored response is unknown to the orchestrator", stored.paymentId());
                 yield stored;

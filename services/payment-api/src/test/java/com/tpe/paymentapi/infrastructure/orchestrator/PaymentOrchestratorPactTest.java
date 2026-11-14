@@ -6,13 +6,20 @@ import static org.assertj.core.api.Assertions.assertThat;
 import au.com.dius.pact.consumer.MockServer;
 import au.com.dius.pact.consumer.dsl.DslPart;
 import au.com.dius.pact.consumer.dsl.LambdaDslObject;
+import au.com.dius.pact.consumer.dsl.PactDslResponse;
 import au.com.dius.pact.consumer.dsl.PactDslWithProvider;
+import au.com.dius.pact.consumer.dsl.PactDslWithState;
 import au.com.dius.pact.consumer.junit5.PactConsumerTestExt;
 import au.com.dius.pact.consumer.junit5.PactTestFor;
 import au.com.dius.pact.core.model.PactSpecVersion;
 import au.com.dius.pact.core.model.V4Pact;
 import au.com.dius.pact.core.model.annotations.Pact;
 import com.tpe.contracts.ContractsModule;
+import com.tpe.paymentdomain.Uetr;
+import com.tpe.paymentdomain.StatusReason;
+import com.tpe.paymentdomain.ReasonCode;
+import com.tpe.contracts.payment.PaymentView;
+import com.tpe.contracts.Direction;
 import com.tpe.contracts.payment.PaymentAccepted;
 import com.tpe.contracts.payment.PaymentState;
 import com.tpe.contracts.payment.SubmitPayment;
@@ -28,8 +35,10 @@ import com.tpe.paymentdomain.TxId;
 import java.time.Instant;
 import java.util.Currency;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.function.Function;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.springframework.http.converter.json.JacksonJsonHttpMessageConverter;
@@ -67,7 +76,13 @@ class PaymentOrchestratorPactTest {
     private static final String EXISTS = "a payment exists for the commandId";
     private static final String CONFLICT = "a payment for another request exists for the commandId";
     private static final String NOT_IN_DIRECTORY = "the creditor's bank is not in the directory";
-    private static final String PAYMENT_EXISTS = "an outgoing payment exists";
+    private static final String IN_A_STATE = "an outgoing payment is in a state";
+    private static final List<String> PENDING_STATES = List.of("RECEIVED", "RISK_CHECKED", "FUNDS_RESERVED",
+            "SENT_TO_CSM", "INVESTIGATING");
+    private static final String TX_ID = "TPE01JABCDEFGHJKMNPQRSTVW0101";
+    private static final String UETR = "eb6305c9-1f7f-49de-aed0-16487c27b42d";
+    private static final String UETR_FORMAT = "[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}";
+    private static final String FINALISED_AT = "2026-11-14T10:00:01.5Z";
     private static final String NO_PAYMENT = "no payment exists for the paymentId";
 
     @Pact(consumer = CONSUMER)
@@ -127,22 +142,29 @@ class PaymentOrchestratorPactTest {
                 .toPact(V4Pact.class);
     }
 
+    /** Each state before the outcome (UC-07 3: {@code PDNG}), the provider's payment in it. */
     @Pact(consumer = CONSUMER)
-    V4Pact paymentStatus(PactDslWithProvider builder) {
-        return builder.given(PAYMENT_EXISTS, submitted(CREDITOR))
-                .uponReceiving("status: an outgoing payment")
-                .method("GET").pathFromProviderState(HttpOrchestrator.PAYMENTS + "/${paymentId}",
-                        HttpOrchestrator.PAYMENTS + "/" + PAYMENT_ID)
-                .willRespondWith()
-                .status(200)
-                .matchHeader("Content-Type", "application/json.*", "application/json")
-                .body(newJsonBody(body -> {
-                    body.stringMatcher("paymentId", UUID_FORMAT, PAYMENT_ID);
-                    body.stringMatcher("state", STATES, "SETTLED");
-                    body.stringType("txId", "TPE01JABCDEFGHJKMNPQRSTVW0101");
-                    body.stringMatcher("acceptedAt", INSTANT, ACCEPTED_AT);
-                }).build())
-                .toPact(V4Pact.class);
+    V4Pact pendingPayments(PactDslWithProvider builder) {
+        PactDslResponse interactions = null;
+        for (String state : PENDING_STATES) {
+            PactDslResponse previous = interactions;
+            interactions = status(parameters -> previous == null ? builder.given(IN_A_STATE, parameters)
+                    : previous.given(IN_A_STATE, parameters), pendingId(state), state, null,
+                    "status: a payment in " + state, state, false);
+        }
+        return interactions.toPact(V4Pact.class);
+    }
+
+    @Pact(consumer = CONSUMER)
+    V4Pact settledPayment(PactDslWithProvider builder) {
+        return status(parameters -> builder.given(IN_A_STATE, parameters), "SETTLED", null,
+                "status: a settled payment", "SETTLED", true).toPact(V4Pact.class);
+    }
+
+    @Pact(consumer = CONSUMER)
+    V4Pact rejectedPayment(PactDslWithProvider builder) {
+        return status(parameters -> builder.given(IN_A_STATE, parameters), "REJECTED", "AM04",
+                "status: a rejected payment with its reason", "REJECTED", true).toPact(V4Pact.class);
     }
 
     @Pact(consumer = CONSUMER)
@@ -159,10 +181,28 @@ class PaymentOrchestratorPactTest {
     }
 
     @Test
-    @PactTestFor(pactMethod = "paymentStatus")
-    void PACT_P01_theStatusOfAPaymentIsItsCurrentState(MockServer server) {
+    @PactTestFor(pactMethod = "pendingPayments")
+    void PACT_P01_aPaymentBeforeItsOutcomeIsItsViewInEachState(MockServer server) {
+        for (String state : PENDING_STATES) {
+            String id = pendingId(state);
+            assertThat(client(server).payment(new PaymentId(UUID.fromString(id))))
+                    .isEqualTo(new Orchestrator.Found(view(id, PaymentState.valueOf(state), null, null)));
+        }
+    }
+
+    @Test
+    @PactTestFor(pactMethod = "settledPayment")
+    void PACT_P01_aSettledPaymentIsFinalised(MockServer server) {
         assertThat(client(server).payment(new PaymentId(UUID.fromString(PAYMENT_ID))))
-                .isEqualTo(new Orchestrator.Found(PaymentState.SETTLED, new TxId("TPE01JABCDEFGHJKMNPQRSTVW0101")));
+                .isEqualTo(new Orchestrator.Found(view(PaymentState.SETTLED, null, Instant.parse(FINALISED_AT))));
+    }
+
+    @Test
+    @PactTestFor(pactMethod = "rejectedPayment")
+    void PACT_P01_aRejectedPaymentHasItsReasonCode(MockServer server) {
+        assertThat(client(server).payment(new PaymentId(UUID.fromString(PAYMENT_ID))))
+                .isEqualTo(new Orchestrator.Found(view(PaymentState.REJECTED, ReasonCode.AM04,
+                        Instant.parse(FINALISED_AT))));
     }
 
     @Test
@@ -199,6 +239,86 @@ class PaymentOrchestratorPactTest {
     void PACT_P01_aCreditorBankOutsideTheDirectoryIsNotReachable(MockServer server) {
         assertThat(client(server).submit(command(UNKNOWN_BANK)))
                 .isEqualTo(new Orchestrator.CreditorAgentNotReachable());
+    }
+
+    /**
+     * {@code GET /v1/payments/{id}} of the provider's payment in {@code state}: the submitted request, then the state
+     * the provider puts it in; the whole view, as the status query shows it.
+     */
+    private static PactDslResponse status(Function<Map<String, Object>, PactDslWithState> given, String state,
+            String reasonCode, String description, String states, boolean final_) {
+        return status(given, PAYMENT_ID, state, reasonCode, description, states, final_);
+    }
+
+    /**
+     * @param paymentId the example id; the provider's state gives the real one, so it only tells interactions with
+     *     the same request apart in the consumer's mock server
+     */
+    private static PactDslResponse status(Function<Map<String, Object>, PactDslWithState> given, String paymentId,
+            String state, String reasonCode, String description, String states, boolean final_) {
+        Map<String, Object> parameters = new LinkedHashMap<>(submitted(CREDITOR));
+        parameters.put("state", state);
+        if (reasonCode != null) {
+            parameters.put("reasonCode", reasonCode);
+        }
+        return given.apply(parameters)
+                .uponReceiving(description)
+                .method("GET").pathFromProviderState(HttpOrchestrator.PAYMENTS + "/${paymentId}",
+                        HttpOrchestrator.PAYMENTS + "/" + paymentId)
+                .willRespondWith()
+                .status(200)
+                .matchHeader("Content-Type", "application/json.*", "application/json")
+                .body(newJsonBody(body -> {
+                    body.stringMatcher("paymentId", UUID_FORMAT, paymentId);
+                    body.stringValue("direction", "OUTGOING");
+                    body.booleanType("onUs", false);
+                    body.stringMatcher("state", states, state);
+                    if (reasonCode == null) {
+                        body.nullValue("reasonCode");
+                    } else {
+                        body.stringMatcher("reasonCode", "[A-Z0-9]{4}", reasonCode);
+                    }
+                    body.stringType("txId", TX_ID);
+                    body.stringMatcher("uetr", UETR_FORMAT, UETR);
+                    body.stringType("endToEndId", "INV-2026-0042");
+                    body.integerType("amountMinor", 12_345);
+                    body.stringValue("currency", "EUR");
+                    body.object("debtor", debtor -> {
+                        debtor.stringType("name", "Anna Schmidt");
+                        debtor.stringMatcher("iban", IBAN, DEBTOR);
+                    });
+                    body.object("creditor", creditor -> {
+                        creditor.stringType("name", "Max Mustermann");
+                        creditor.stringMatcher("iban", IBAN, CREDITOR);
+                    });
+                    body.stringType("remittanceInformation", "Invoice 42");
+                    body.stringMatcher("acceptedAt", INSTANT, ACCEPTED_AT);
+                    if (final_) {
+                        body.stringMatcher("finalisedAt", INSTANT, FINALISED_AT);
+                    } else {
+                        body.nullValue("finalisedAt");
+                    }
+                }).build());
+    }
+
+    /** {@code SENT_TO_CSM}, the state of the component tests' mapping, has the example id of every interaction. */
+    private static String pendingId(String state) {
+        return state.equals("SENT_TO_CSM") ? PAYMENT_ID
+                : "0192f0e4-7b1c-7cc3-a1b2-00000000011" + PENDING_STATES.indexOf(state);
+    }
+
+    private static PaymentView view(PaymentState state, StatusReason reason, Instant finalisedAt) {
+        return view(PAYMENT_ID, state, reason, finalisedAt);
+    }
+
+    private static PaymentView view(String paymentId, PaymentState state, StatusReason reason,
+            Instant finalisedAt) {
+        return new PaymentView(new PaymentId(UUID.fromString(paymentId)), Direction.OUTGOING, false, state, reason,
+                new TxId(TX_ID), new Uetr(UETR), new EndToEndId("INV-2026-0042"),
+                new Money(12_345, Currency.getInstance("EUR")),
+                new PaymentView.Holder(new PartyName("Anna Schmidt"), new Iban(DEBTOR)),
+                new PaymentView.Holder(new PartyName("Max Mustermann"), new Iban(CREDITOR)),
+                new RemittanceInformation("Invoice 42"), Instant.parse(ACCEPTED_AT), finalisedAt);
     }
 
     private static HttpOrchestrator client(MockServer server) {

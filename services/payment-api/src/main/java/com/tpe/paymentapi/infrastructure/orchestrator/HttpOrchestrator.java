@@ -1,8 +1,7 @@
 package com.tpe.paymentapi.infrastructure.orchestrator;
 
-import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.tpe.contracts.payment.PaymentAccepted;
-import com.tpe.contracts.payment.PaymentState;
+import com.tpe.contracts.payment.PaymentView;
 import com.tpe.contracts.payment.SubmitPayment;
 import com.tpe.paymentapi.application.submission.Failure;
 import com.tpe.paymentapi.application.submission.Orchestrator;
@@ -10,7 +9,6 @@ import com.tpe.paymentapi.application.submission.UnexpectedAnswerException;
 import com.tpe.paymentapi.infrastructure.http.HttpFailures;
 import com.tpe.paymentapi.infrastructure.http.ProblemCode;
 import com.tpe.paymentdomain.PaymentId;
-import com.tpe.paymentdomain.TxId;
 import java.util.Optional;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -69,34 +67,31 @@ public class HttpOrchestrator implements Orchestrator {
 
     @Override
     public Read payment(PaymentId paymentId) {
-        PaymentStatus payment;
+        PaymentView payment;
         try {
             payment = status.get().uri(PAYMENTS + "/{paymentId}", paymentId.value()).retrieve()
-                    .body(PaymentStatus.class);
+                    .body(PaymentView.class);
         } catch (RestClientResponseException e) {
             int code = e.getStatusCode().value();
             Optional<Unavailable> unavailable = answered(code);
             if (unavailable.isPresent()) {
                 return unavailable.get();
             }
-            if (code == 404 && "PAYMENT_NOT_FOUND".equals(code(e))) {
+            if (code == 404 && "PAYMENT_NOT_FOUND".equals(ProblemCode.of(e))) {
                 return new NotFound();
             }
-            throw unexpected(paymentId, code + " " + code(e));
+            throw unexpected(paymentId, code + " " + ProblemCode.of(e));
         } catch (ResourceAccessException e) {
             return notReached(e);
         } catch (RestClientException e) {
             throw unexpected(paymentId, "an unreadable answer");
         }
-        if (payment == null || !paymentId.equals(payment.paymentId()) || payment.state() == null) {
+        if (payment == null || !paymentId.equals(payment.paymentId()) || payment.direction() == null
+                || payment.state() == null || payment.acceptedAt() == null) {
             throw unexpected(paymentId, "200 without the payment");
         }
-        return new Found(payment.state(), payment.txId());
+        return new Found(payment);
     }
-
-    /** What payment-api reads of {@code PaymentView} (P-01). */
-    @JsonIgnoreProperties(ignoreUnknown = true)
-    record PaymentStatus(PaymentId paymentId, PaymentState state, TxId txId) {}
 
     private Answer refused(SubmitPayment command, RestClientResponseException e) {
         int status = e.getStatusCode().value();
@@ -104,7 +99,7 @@ public class HttpOrchestrator implements Orchestrator {
         if (unavailable.isPresent()) {
             return unavailable.get();
         }
-        String code = code(e);
+        String code = ProblemCode.of(e);
         if (status == 409 && "COMMAND_CONFLICT".equals(code)) {
             return new CommandConflict();
         }
@@ -124,15 +119,6 @@ public class HttpOrchestrator implements Orchestrator {
     private static Optional<Unavailable> answered(int status) {
         return HttpFailures.of(status)
                 .map(failure -> new Unavailable(failure, "payment-orchestrator answered " + status));
-    }
-
-    private static String code(RestClientResponseException e) {
-        try {
-            ProblemCode problem = e.getResponseBodyAs(ProblemCode.class);
-            return problem == null ? null : problem.code();
-        } catch (RuntimeException unreadable) {
-            return null;
-        }
     }
 
     private static UnexpectedAnswerException unexpected(PaymentId paymentId, String answer) {

@@ -6,6 +6,52 @@ info:
 servers:
 - url: /
 paths:
+  /v1/payee-verifications:
+    post:
+      operationId: verify
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/Request"
+        required: true
+      responses:
+        "201":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/VerificationResponse"
+          description: The verification and the reference to pay with
+        "400":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ProblemDetail"
+          description: "VALIDATION_FAILED with errors[], e.g. INVALID_IBAN"
+        "403":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ProblemDetail"
+          description: "Scope vop:verify missing, or DEBTOR_ACCOUNT_NOT_OWNED"
+        "422":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ProblemDetail"
+          description: PAYEE_BANK_UNKNOWN
+        "503":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ProblemDetail"
+          description: VOP_UNAVAILABLE; retry after Retry-After
+      security:
+      - bearer:
+        - vop:verify
+      summary: Verify a payee before paying (UC-02)
+      tags:
+      - payee-verification-controller
   /v1/payments:
     post:
       operationId: initiate
@@ -78,6 +124,74 @@ paths:
       summary: Initiate an SCT Inst payment (UC-01)
       tags:
       - payment-controller
+  /v1/payments/{paymentId}:
+    get:
+      operationId: status
+      parameters:
+      - in: path
+        name: paymentId
+        required: true
+        schema:
+          type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PaymentStatusResponse"
+          description: The payment's customer status
+        "404":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ProblemDetail"
+          description: "PAYMENT_NOT_FOUND: unknown, or not the caller's"
+        "503":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ProblemDetail"
+          description: ORCHESTRATOR_UNAVAILABLE; retry after Retry-After
+      security:
+      - bearer:
+        - payments:read
+      summary: The status of a payment (UC-07)
+      tags:
+      - payment-status-controller
+  /v1/payments/{paymentId}/pain.002:
+    get:
+      operationId: pain002
+      parameters:
+      - in: path
+        name: paymentId
+        required: true
+        schema:
+          type: string
+      responses:
+        "200":
+          content:
+            application/xml:
+              schema:
+                type: string
+          description: pain.002.001.10 with GrpSts and TxSts
+        "404":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ProblemDetail"
+          description: "PAYMENT_NOT_FOUND: unknown, or not the caller's"
+        "503":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ProblemDetail"
+          description: ORCHESTRATOR_UNAVAILABLE; retry after Retry-After
+      security:
+      - bearer:
+        - payments:read
+      summary: The status of a payment as pain.002.001.10 (UC-07)
+      tags:
+      - payment-status-controller
 components:
   schemas:
     Amount:
@@ -166,6 +280,44 @@ components:
           - PDNG
           - ACSC
           - RJCT
+    PaymentStatusResponse:
+      type: object
+      properties:
+        acceptedAt:
+          type: string
+          format: date-time
+        amount:
+          $ref: "#/components/schemas/Amount"
+        creditor:
+          $ref: "#/components/schemas/Creditor"
+        endToEndId:
+          type: string
+        finalisedAt:
+          type: string
+          format: date-time
+        internalState:
+          type: string
+          enum:
+          - RECEIVED
+          - RISK_CHECKED
+          - FUNDS_RESERVED
+          - SENT_TO_CSM
+          - ACCEPT_REQUESTED
+          - ACCEPTED
+          - INVESTIGATING
+          - SETTLED
+          - REJECTED
+        paymentId:
+          type: string
+          format: uuid
+        reasonCode:
+          type: string
+        status:
+          type: string
+          enum:
+          - PDNG
+          - ACSC
+          - RJCT
     ProblemDetail:
       type: object
       properties:
@@ -197,6 +349,36 @@ components:
         type:
           type: string
           format: uri
+    Request:
+      type: object
+      properties:
+        debtorIban:
+          type: string
+        payeeIban:
+          type: string
+        payeeName:
+          type: string
+        payeeOrganisationId:
+          type: string
+    VerificationResponse:
+      type: object
+      properties:
+        actualName:
+          type: string
+        expiresAt:
+          type: string
+          format: date-time
+        respondedBy:
+          type: string
+        result:
+          type: string
+          enum:
+          - MATCH
+          - CLOSE_MATCH
+          - NO_MATCH
+          - NOT_POSSIBLE
+        vopReference:
+          type: string
   securitySchemes:
     bearer:
       bearerFormat: JWT

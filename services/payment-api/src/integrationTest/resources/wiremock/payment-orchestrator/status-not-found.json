@@ -1,0 +1,18 @@
+{
+  "request": {
+    "method": "GET",
+    "url": "/v1/payments/0192f0e4-7b1c-7cc3-a1b2-000000000101"
+  },
+  "response": {
+    "status": 404,
+    "headers": {
+      "Content-Type": "application/problem+json"
+    },
+    "jsonBody": {
+      "type": "https://tpe.example/problems/payment-not-found",
+      "title": "Not Found",
+      "status": 404,
+      "code": "PAYMENT_NOT_FOUND"
+    }
+  }
+}
