@@ -10,6 +10,7 @@ import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.Map;
 import java.util.jar.Attributes;
 import java.util.jar.JarEntry;
 import java.util.jar.JarOutputStream;
@@ -53,6 +54,18 @@ class ServiceProcessTest {
         } finally {
             System.clearProperty("tpe.fake-service-b.jar");
         }
+    }
+
+    /** How a service learns its neighbours' random ports: as properties on its command line, after the profiles. */
+    @Test
+    void propertiesGivenAtTheFirstStartAreCommandLineArguments() throws Exception {
+        var service = new ServiceJar("fake-service-c", fakeJar(jars.resolve("c"), "fake-service-c-1.0.jar").getParent());
+
+        ServiceProcess process = ServiceProcess.of(service,
+                Map.of("tpe.clients.ledger.base-url", "http://localhost:4711"));
+
+        assertThat(get(process, "/args")).contains("--tpe.clients.ledger.base-url=http://localhost:4711");
+        assertThat(ServiceProcess.of(service)).isSameAs(process);
     }
 
     @Test

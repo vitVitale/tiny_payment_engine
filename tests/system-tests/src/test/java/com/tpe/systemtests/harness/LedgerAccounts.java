@@ -35,6 +35,11 @@ public final class LedgerAccounts {
         return http.get(authorization, path(account, ""));
     }
 
+    /** {@code GET /v1/accounts/{id}/entries}: the newest page of the account's postings. */
+    public Response entries(String authorization, UUID account) {
+        return http.get(authorization, path(account, "/entries"));
+    }
+
     /** {@code POST /v1/accounts/{id}/block} for {@code reason}. */
     public Response block(String authorization, UUID account, BlockReason reason) {
         return http.post(authorization, path(account, "/block"), Map.of("reason", reason.name()));

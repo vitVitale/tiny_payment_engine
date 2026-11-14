@@ -19,6 +19,14 @@ public record ServiceJar(String name, Path directory) {
 
     /** ledger-service, the harness's first user. */
     public static final ServiceJar LEDGER = inRepository("ledger-service");
+    /** risk-service, called by the orchestrator; its account projection is fed by the ledger's events. */
+    public static final ServiceJar RISK = inRepository("risk-service");
+    /** vop-service, called by payment-api; answers own-bank payees from the ledger's events. */
+    public static final ServiceJar VOP = inRepository("vop-service");
+    /** payment-orchestrator, calling risk-service and ledger-service. */
+    public static final ServiceJar ORCHESTRATOR = inRepository("payment-orchestrator");
+    /** payment-api, the customer channels' API, calling payment-orchestrator and vop-service. */
+    public static final ServiceJar PAYMENT_API = inRepository("payment-api");
 
     /**
      * A service of this repository: its jar in {@code services/<name>/target}, built earlier in the same reactor run

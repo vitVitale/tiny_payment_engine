@@ -40,6 +40,26 @@ public final class JsonHttp {
         return send(request.build());
     }
 
+    /** A response read as text, e.g. a {@code pain.002}. */
+    public record Text(int status, String contentType, String body) {}
+
+    /** {@code GET path} accepting {@code accept}, the body as text. */
+    public Text getText(String authorization, String path, String accept) {
+        var request = HttpRequest.newBuilder(baseUrl.resolve(path)).header("Accept", accept).GET();
+        authorize(request, authorization);
+        HttpRequest built = request.build();
+        try (var http = HttpClient.newHttpClient()) {
+            var response = http.send(built, HttpResponse.BodyHandlers.ofString());
+            return new Text(response.statusCode(), response.headers().firstValue("Content-Type").orElse(null),
+                    response.body());
+        } catch (IOException e) {
+            throw new IllegalStateException("GET " + built.uri() + " failed", e);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new IllegalStateException(e);
+        }
+    }
+
     private static void authorize(HttpRequest.Builder request, String authorization) {
         if (authorization != null) {
             request.header("Authorization", authorization);

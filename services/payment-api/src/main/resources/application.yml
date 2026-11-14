@@ -23,7 +23,8 @@ tpe:
       base-url: http://vop-service:8083
       check-timeout: 300ms
       # vop-service answers NOT_POSSIBLE after its own 5 s responder timeout (specs/10-payment-api.md §3.4)
-      verify-timeout: 5.5s
+      # (5.5 s: Spring's simple duration format takes whole units only)
+      verify-timeout: 5500ms
   api:
     # specs/10-payment-api.md §5.1, §6
     idempotency:

@@ -14,6 +14,27 @@ public final class Bounds {
 
     private Bounds() {}
 
+    /**
+     * From a {@code 202} to the payment's final state and its final event at a consumer: an outgoing payment is final by
+     * its deadline ({@code tpe.outgoing.deadline-offset} of the orchestrator), and its event is delivered as any
+     * outbox event is.
+     */
+    public static Duration paymentFinal() {
+        ServiceProfile orchestrator = ServiceProfile.systemtest(ServiceJar.ORCHESTRATOR);
+        return orchestrator.duration("tpe.outgoing.deadline-offset").orElseThrow()
+                .plus(eventDelivery(orchestrator));
+    }
+
+    /**
+     * How long a pending action may be overdue before INV-11 calls it stuck: the orchestrator's
+     * {@code tpe.runner.lease + tpe.runner.max-backoff}.
+     */
+    public static Duration actionOverdue() {
+        ServiceProfile orchestrator = ServiceProfile.systemtest(ServiceJar.ORCHESTRATOR);
+        return orchestrator.duration("tpe.runner.lease").orElseThrow()
+                .plus(orchestrator.duration("tpe.runner.max-backoff").orElseThrow());
+    }
+
     /** {@link #eventDelivery(ServiceProfile)} of ledger-service as the harness runs it. */
     public static Duration eventDelivery() {
         return eventDelivery(ServiceProfile.ledger());

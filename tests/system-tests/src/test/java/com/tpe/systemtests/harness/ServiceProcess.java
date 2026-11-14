@@ -11,9 +11,11 @@ import java.net.http.HttpResponse;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.TreeMap;
 import org.awaitility.core.ConditionTimeoutException;
 
 /**
@@ -44,14 +46,23 @@ public final class ServiceProcess {
 
     /** The running {@code service}, started on first use. */
     public static synchronized ServiceProcess of(ServiceJar service) {
-        return RUNNING.computeIfAbsent(service.name(), name -> start(service));
+        return of(service, Map.of());
+    }
+
+    /**
+     * The running {@code service}, started on first use with {@code properties} as {@code --key=value} arguments after
+     * the profiles: how a service learns the random ports of the services it calls. A later call gets the running
+     * process whatever properties it gives, so a service's neighbours are started before it.
+     */
+    public static synchronized ServiceProcess of(ServiceJar service, Map<String, String> properties) {
+        return RUNNING.computeIfAbsent(service.name(), name -> start(service, properties));
     }
 
     public URI baseUrl() {
         return baseUrl;
     }
 
-    private static ServiceProcess start(ServiceJar service) {
+    private static ServiceProcess start(ServiceJar service, Map<String, String> properties) {
         Path jar = service.locate();
         int port = freePort();
         Path log = Path.of("target", service.name() + "-systemtest.log");
@@ -59,8 +70,10 @@ public final class ServiceProcess {
         Process process;
         try {
             Files.createDirectories(log.getParent());
-            process = new ProcessBuilder(List.of(java, "-jar", jar.toString(),
-                    "--spring.profiles.active=" + String.join(",", PROFILES), "--server.port=" + port))
+            var command = new ArrayList<>(List.of(java, "-jar", jar.toString(),
+                    "--spring.profiles.active=" + String.join(",", PROFILES), "--server.port=" + port));
+            new TreeMap<>(properties).forEach((key, value) -> command.add("--" + key + "=" + value));
+            process = new ProcessBuilder(command)
                     .redirectErrorStream(true)
                     .redirectOutput(log.toFile())
                     .start();
