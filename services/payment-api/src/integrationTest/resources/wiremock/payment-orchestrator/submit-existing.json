@@ -1,0 +1,18 @@
+{
+  "request": {
+    "method": "POST",
+    "url": "/v1/payments"
+  },
+  "response": {
+    "status": 200,
+    "headers": {
+      "Content-Type": "application/json"
+    },
+    "jsonBody": {
+      "paymentId": "0192f0e4-7b1c-7cc3-a1b2-000000000102",
+      "state": "SETTLED",
+      "txId": "TPE01JABCDEFGHJKMNPQRST0102",
+      "acceptedAt": "2026-11-14T09:59:58.5Z"
+    }
+  }
+}

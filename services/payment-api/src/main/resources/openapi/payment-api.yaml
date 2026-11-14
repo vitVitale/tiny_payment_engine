@@ -1,0 +1,198 @@
+openapi: 3.1.0
+info:
+  description: "Customer channels' API for SCT Inst payments (UC-01, UC-02, UC-07)"
+  title: payment-api
+  version: v1
+servers:
+- url: /
+paths:
+  /v1/payments:
+    post:
+      operationId: initiate
+      parameters:
+      - description: The same key is the same payment
+        in: header
+        name: Idempotency-Key
+        required: true
+        schema:
+          type: string
+          maxLength: 64
+          minLength: 1
+          pattern: "^[A-Za-z0-9_-]{1,64}$"
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PaymentInstruction"
+        required: true
+      responses:
+        "202":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PaymentResponse"
+          description: Accepted; Location is the payment's status
+        "400":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ProblemDetail"
+          description: "VALIDATION_FAILED with errors[], IDEMPOTENCY_KEY_MISSING,\
+            \ IDEMPOTENCY_KEY_INVALID"
+        "401":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ProblemDetail"
+          description: No valid Bearer token
+        "403":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ProblemDetail"
+          description: "Scope payments:write missing, or DEBTOR_ACCOUNT_NOT_OWNED"
+        "422":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ProblemDetail"
+          description: "VOP_REQUIRED, CREDITOR_AGENT_NOT_REACHABLE, IDEMPOTENCY_KEY_REUSED"
+        "503":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ProblemDetail"
+          description: "ORCHESTRATOR_UNAVAILABLE, VOP_UNAVAILABLE; retry after Retry-After\
+            \ with the same Idempotency-Key"
+      security:
+      - bearer:
+        - payments:write
+      summary: Initiate an SCT Inst payment (UC-01)
+      tags:
+      - payment-controller
+components:
+  schemas:
+    Amount:
+      type: object
+      properties:
+        currency:
+          type: string
+          minLength: 1
+        value:
+          type: string
+          minLength: 1
+      required:
+      - currency
+      - value
+    Creditor:
+      type: object
+      properties:
+        bic:
+          type: string
+        iban:
+          type: string
+          minLength: 1
+        name:
+          type: string
+          minLength: 1
+      required:
+      - iban
+      - name
+    Debtor:
+      type: object
+      properties:
+        iban:
+          type: string
+          minLength: 1
+        name:
+          type: string
+          minLength: 1
+      required:
+      - iban
+      - name
+    PaymentInstruction:
+      type: object
+      properties:
+        amount:
+          $ref: "#/components/schemas/Amount"
+        creditor:
+          $ref: "#/components/schemas/Creditor"
+        debtor:
+          $ref: "#/components/schemas/Debtor"
+        endToEndId:
+          type: string
+          minLength: 1
+        remittanceInformation:
+          type: string
+        vopReference:
+          type: string
+      required:
+      - amount
+      - creditor
+      - debtor
+      - endToEndId
+    PaymentResponse:
+      type: object
+      properties:
+        acceptedAt:
+          type: string
+          format: date-time
+        internalState:
+          type: string
+          enum:
+          - RECEIVED
+          - RISK_CHECKED
+          - FUNDS_RESERVED
+          - SENT_TO_CSM
+          - ACCEPT_REQUESTED
+          - ACCEPTED
+          - INVESTIGATING
+          - SETTLED
+          - REJECTED
+        paymentId:
+          type: string
+          format: uuid
+        status:
+          type: string
+          enum:
+          - PDNG
+          - ACSC
+          - RJCT
+    ProblemDetail:
+      type: object
+      properties:
+        code:
+          type: string
+          description: Machine-readable error code (specs/10-payment-api.md §3.5)
+        detail:
+          type: string
+        errors:
+          type: array
+          description: "VALIDATION_FAILED only: the invalid fields"
+          items:
+            type: object
+            properties:
+              code:
+                type: string
+                description: "Field error code, e.g. INVALID_IBAN"
+              field:
+                type: string
+                description: "JSON path, e.g. debtor.iban"
+        instance:
+          type: string
+          format: uri
+        status:
+          type: integer
+          format: int32
+        title:
+          type: string
+        type:
+          type: string
+          format: uri
+  securitySchemes:
+    bearer:
+      bearerFormat: JWT
+      description: "Claims client_id, scope and accounts (specs/00-engineering-baseline.md\
+        \ §12.1)"
+      scheme: bearer
+      type: http

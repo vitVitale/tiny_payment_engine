@@ -1,0 +1,19 @@
+{
+  "request": {
+    "method": "POST",
+    "url": "/v1/payments"
+  },
+  "response": {
+    "status": 409,
+    "headers": {
+      "Content-Type": "application/problem+json"
+    },
+    "jsonBody": {
+      "type": "https://tpe.example/problems/command-conflict",
+      "title": "Conflict",
+      "status": 409,
+      "detail": "The commandId already has a payment for a different request",
+      "code": "COMMAND_CONFLICT"
+    }
+  }
+}
