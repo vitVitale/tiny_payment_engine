@@ -9,11 +9,11 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
 
-/** Back-off and remote read timeouts of the saga runner (specs/11-payment-orchestrator.md §6.3). */
+/** Back-off, remote read timeouts and stuck actions of the saga runner (specs/11-payment-orchestrator.md §6.3). */
 class RunnerSettingsTest {
 
     private static final RunnerSettings SETTINGS = new RunnerSettings(Duration.ofSeconds(5), Duration.ofSeconds(30),
-            256, Duration.ofMillis(100));
+            256, Duration.ofMillis(100), Duration.ofMinutes(10));
 
     @ParameterizedTest(name = "attempt {0} -> {1}")
     @CsvSource({"1, PT0.1S", "2, PT0.2S", "3, PT0.4S", "4, PT0.8S", "9, PT25.6S", "10, PT30S", "64, PT30S"})
@@ -55,6 +55,14 @@ class RunnerSettingsTest {
     @Test
     void aConcurrencyBelowOneIsRefused() {
         assertThatThrownBy(() -> new RunnerSettings(Duration.ofSeconds(5), Duration.ofSeconds(30), 0,
-                Duration.ofMillis(100))).isInstanceOf(IllegalArgumentException.class);
+                Duration.ofMillis(100), Duration.ofMinutes(10))).isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
+    void anActionPendingForStuckAfterIsStuck() {
+        Instant since = Instant.parse("2026-11-13T10:00:00Z");
+
+        assertThat(SETTINGS.stuck(since, since.plus(Duration.ofMinutes(10)).minusMillis(1))).isFalse();
+        assertThat(SETTINGS.stuck(since, since.plus(Duration.ofMinutes(10)))).isTrue();
     }
 }

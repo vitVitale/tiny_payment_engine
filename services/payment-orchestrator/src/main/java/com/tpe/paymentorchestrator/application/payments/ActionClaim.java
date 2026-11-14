@@ -3,6 +3,7 @@ package com.tpe.paymentorchestrator.application.payments;
 import com.tpe.paymentdomain.PaymentId;
 import com.tpe.paymentorchestrator.domain.payment.PaymentState;
 import com.tpe.paymentorchestrator.domain.payment.PendingAction;
+import java.time.Instant;
 
 /**
  * A runner's claim of a payment's pending action (specs/11-payment-orchestrator.md §6.3): what the payment was when
@@ -10,6 +11,8 @@ import com.tpe.paymentorchestrator.domain.payment.PendingAction;
  *
  * @param attempts how often the action has been claimed, this claim included
  * @param version the payment's version after the claim
+ * @param actionSince when the action became pending; {@code stuck-after} counts from here. A row an earlier
+ *     release stored without it gets the first claim's time.
  */
 public record ActionClaim(PaymentId paymentId, PaymentState state, PendingAction action, int attempts,
-        long version) {}
+        long version, Instant actionSince) {}

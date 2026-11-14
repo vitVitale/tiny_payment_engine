@@ -13,8 +13,11 @@ import java.util.Optional;
  * @param maxBackoff the cap of the retry back-off
  * @param maxConcurrency how many actions run at once on this instance
  * @param safetyMargin what a remote call leaves before its deadline
+ * @param stuckAfter how long a ledger action that is retried forever may stay pending before a
+ *     {@code LEDGER_ACTION_STUCK} case is opened
  */
-public record RunnerSettings(Duration lease, Duration maxBackoff, int maxConcurrency, Duration safetyMargin) {
+public record RunnerSettings(Duration lease, Duration maxBackoff, int maxConcurrency, Duration safetyMargin,
+        Duration stuckAfter) {
 
     private static final Duration FIRST_BACKOFF = Duration.ofMillis(100);
 
@@ -22,6 +25,7 @@ public record RunnerSettings(Duration lease, Duration maxBackoff, int maxConcurr
         Objects.requireNonNull(lease, "lease");
         Objects.requireNonNull(maxBackoff, "maxBackoff");
         Objects.requireNonNull(safetyMargin, "safetyMargin");
+        Objects.requireNonNull(stuckAfter, "stuckAfter");
         if (maxConcurrency < 1) {
             throw new IllegalArgumentException("tpe.runner.max-concurrency must be at least 1");
         }
@@ -51,5 +55,10 @@ public record RunnerSettings(Duration lease, Duration maxBackoff, int maxConcurr
             return Optional.empty();
         }
         return Optional.of(left.compareTo(configured) < 0 ? left : configured);
+    }
+
+    /** The action pending since {@code since} is stuck at {@code now}: {@code stuck-after} has passed. */
+    public boolean stuck(Instant since, Instant now) {
+        return !now.isBefore(since.plus(stuckAfter));
     }
 }

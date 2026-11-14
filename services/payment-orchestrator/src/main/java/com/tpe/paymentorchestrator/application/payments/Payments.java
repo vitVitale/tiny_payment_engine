@@ -3,11 +3,13 @@ package com.tpe.paymentorchestrator.application.payments;
 import com.tpe.paymentdomain.CommandId;
 import com.tpe.paymentdomain.PaymentId;
 import com.tpe.paymentdomain.StatusReason;
+import com.tpe.paymentorchestrator.domain.payment.ExceptionCaseType;
 import com.tpe.paymentorchestrator.domain.payment.Payment;
 import com.tpe.paymentorchestrator.domain.payment.PaymentState;
 import com.tpe.paymentorchestrator.domain.payment.PendingAction;
 import com.tpe.paymentorchestrator.domain.payment.TimerType;
 import java.time.Instant;
+import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 
@@ -43,7 +45,7 @@ public interface Payments {
 
     /**
      * Stores the payment's next state and action if it is still as claimed (state, action and version), and makes
-     * a new action due at {@code now}.
+     * a new action due, and pending since, {@code now}.
      *
      * @param finalEventEmitted the transaction writes the payment's final event
      * @return {@code false}: an event or timer overtook the step; the result is discarded
@@ -52,4 +54,12 @@ public interface Payments {
 
     /** Makes the claimed action due again at {@code at}, if the payment is still as claimed. */
     void retryAt(ActionClaim claim, Instant at, Instant now);
+
+    /**
+     * Opens an exception case of the payment unless one of its type is open already (§5).
+     *
+     * @param details the case's {@code details} JSON object; never personal data
+     * @return {@code false} if a case of the type was open
+     */
+    boolean openCase(PaymentId paymentId, ExceptionCaseType type, Map<String, Object> details, Instant now);
 }

@@ -12,8 +12,10 @@ import com.tpe.paymentdomain.RemittanceInformation;
 import com.tpe.paymentdomain.StatusReason;
 import com.tpe.paymentdomain.TxId;
 import com.tpe.paymentdomain.Uetr;
+import com.tpe.paymentdomain.UuidV7Generator;
 import com.tpe.paymentorchestrator.application.payments.Payments;
 import com.tpe.paymentorchestrator.application.payments.ActionClaim;
+import com.tpe.paymentorchestrator.domain.payment.ExceptionCaseType;
 import com.tpe.paymentorchestrator.domain.payment.PayeeVerification;
 import com.tpe.paymentorchestrator.domain.payment.Payment;
 import com.tpe.paymentorchestrator.domain.payment.PaymentDirection;
@@ -26,15 +28,17 @@ import java.sql.SQLException;
 import java.sql.Timestamp;
 import java.time.Instant;
 import java.util.Currency;
+import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Repository;
+import tools.jackson.databind.json.JsonMapper;
 
 /**
- * {@code payments}, {@code payment_transitions} and {@code payment_timers} in PostgreSQL. A new payment is due for
- * its first action at once: {@code next_action_at = accepted_at}.
+ * {@code payments}, {@code payment_transitions}, {@code payment_timers} and {@code exception_cases} in PostgreSQL. A
+ * new payment is due for its first action at once: {@code next_action_at = action_since = accepted_at}.
  */
 @Repository
 class JdbcPayments implements Payments {
@@ -46,22 +50,27 @@ class JdbcPayments implements Payments {
             deadline_at, pending_action, finalised_at, debtor_account_id, creditor_account_id, booking_entry_id,
             trace_context""";
 
-    private final JdbcClient jdbc;
+    private static final JsonMapper JSON = JsonMapper.builder().build();
 
-    JdbcPayments(JdbcClient jdbc) {
+    private final JdbcClient jdbc;
+    private final UuidV7Generator ids;
+
+    /** @param ids the case ids */
+    JdbcPayments(JdbcClient jdbc, UuidV7Generator ids) {
         this.jdbc = jdbc;
+        this.ids = ids;
     }
 
     @Override
     public boolean insertIfNewCommand(Payment payment, Instant now) {
         return jdbc.sql("INSERT INTO payments (" + COLUMNS + """
-                        , next_action_at, created_at, updated_at)
+                        , next_action_at, action_since, created_at, updated_at)
                         VALUES (:paymentId, :direction, :state, :reasonCode, :onUs, :commandId, :clientId, :requestHash,
                                 :txId, CAST(:uetr AS UUID), :endToEndId, :amountMinor, :currency, :debtorName,
                                 :debtorIban, :debtorAgentBic, :creditorName, :creditorIban, :creditorAgentBic,
                                 :remittance, :vopReference, :vopResult, :acceptedAt, :sendBy, :deadlineAt,
                                 :pendingAction, :finalisedAt, :debtorAccountId, :creditorAccountId, :bookingEntryId,
-                                :traceContext, :acceptedAt, :now, :now)
+                                :traceContext, :acceptedAt, :acceptedAt, :now, :now)
                         ON CONFLICT (command_id) DO NOTHING""")
                 .param("paymentId", payment.paymentId().value())
                 .param("direction", payment.direction().name())
@@ -150,16 +159,17 @@ class JdbcPayments implements Payments {
         return jdbc.sql("""
                         UPDATE payments
                         SET next_action_at = :leaseUntil, action_attempts = action_attempts + 1,
+                            action_since = coalesce(action_since, :now),
                             version = version + 1, updated_at = :now
                         WHERE payment_id = :paymentId AND pending_action IN (:actions) AND next_action_at <= :now
-                        RETURNING state, pending_action, action_attempts, version""")
+                        RETURNING state, pending_action, action_attempts, version, action_since""")
                 .param("leaseUntil", timestamp(leaseUntil))
                 .param("now", timestamp(now))
                 .param("paymentId", paymentId.value())
                 .param("actions", actions.stream().map(Enum::name).toList())
                 .query((rs, n) -> new ActionClaim(paymentId, PaymentState.valueOf(rs.getString("state")),
                         PendingAction.valueOf(rs.getString("pending_action")), rs.getInt("action_attempts"),
-                        rs.getLong("version")))
+                        rs.getLong("version"), instant(rs, "action_since")))
                 .optional();
     }
 
@@ -168,7 +178,8 @@ class JdbcPayments implements Payments {
         return jdbc.sql("""
                         UPDATE payments
                         SET state = :state, reason_code = :reasonCode, pending_action = :pendingAction,
-                            next_action_at = :nextActionAt, action_attempts = 0, finalised_at = :finalisedAt,
+                            next_action_at = :nextActionAt, action_since = :nextActionAt, action_attempts = 0,
+                            finalised_at = :finalisedAt,
                             debtor_account_id = :debtorAccountId, creditor_account_id = :creditorAccountId,
                             booking_entry_id = :bookingEntryId,
                             final_event_emitted = final_event_emitted OR :finalEventEmitted,
@@ -203,6 +214,20 @@ class JdbcPayments implements Payments {
                 .param("action", claim.action().name())
                 .param("version", claim.version())
                 .update();
+    }
+
+    @Override
+    public boolean openCase(PaymentId paymentId, ExceptionCaseType type, Map<String, Object> details, Instant now) {
+        return jdbc.sql("""
+                        INSERT INTO exception_cases (case_id, payment_id, type, status, details, opened_at)
+                        VALUES (?, ?, ?, 'OPEN', CAST(? AS JSONB), ?)
+                        ON CONFLICT (payment_id, type) WHERE status = 'OPEN' DO NOTHING""")
+                .param(ids.next())
+                .param(paymentId.value())
+                .param(type.name())
+                .param(JSON.writeValueAsString(details))
+                .param(timestamp(now))
+                .update() == 1;
     }
 
     private static Payment payment(ResultSet rs, int row) throws SQLException {

@@ -112,7 +112,7 @@ Resolve body: `{ "resolution": "<value>", "reasonCode": "AB05", "comment": "…"
 | | `CONFIRMED_SETTLED` | as if `CreditTransferSettled` arrived (settle hold / confirm credit) |
 | | `CONFIRMED_REJECTED` (+ `reasonCode`) | as if `CreditTransferRejected` arrived (release / cancel) |
 | `CONTRADICTING_CSM_OUTCOME` | `ACKNOWLEDGED` | none — money correction is a manual ledger process outside the MVP (UC-12) |
-| `LEDGER_ACTION_STUCK` | `RETRY_NOW` | resets `next_action_at` |
+| `LEDGER_ACTION_STUCK` | `RETRY_NOW` | resets `next_action_at` and `action_since` (§6.3) |
 | `DLT_MESSAGE` | `ACKNOWLEDGED` | none |
 
 Every resolution is written to `exception_cases` and `payment_transitions` with the operator's `sub`.
@@ -172,6 +172,7 @@ CREATE TABLE payments (
                       'CANCEL_CREDIT')),
   next_action_at    TIMESTAMPTZ,
   action_attempts   INT NOT NULL DEFAULT 0,
+  action_since      TIMESTAMPTZ,                 -- when pending_action was set; stuck-after counts from here (§6.3)
   investigation_started_at TIMESTAMPTZ,          -- start of the current investigation; reset by RETRY_INVESTIGATION
   status_request_attempt INT NOT NULL DEFAULT 0, -- attempt of the last RequestPaymentStatus; never reset (§6.4)
   final_event_emitted BOOLEAN NOT NULL DEFAULT false,
@@ -269,6 +270,10 @@ Rules:
 - Final events: `PaymentSettled` / `PaymentRejected` are written to the outbox in the transaction that completes
   the ledger effect (or in the rejecting transaction if no ledger effect is needed), and `final_event_emitted` is set.
   Exactly one final event per payment.
+- A compensation answered as contradicting (`HOLD_SETTLED` on release, `PENDING_CREDIT_CONFIRMED` on cancel) clears
+  `pending_action` and opens the `CONTRADICTING_CSM_OUTCOME` case in that transaction, but writes **no** final
+  event: the payment is `REJECTED` while the money moved, so neither event would be true. The money correction and
+  the customer's notice belong to the manual process of UC-12.
 
 ### 6.3 Saga runner
 
@@ -282,6 +287,10 @@ Rules:
   of being handed over every 100 ms. "Now" in the claim and the sweep is the service's clock.
 - On technical failure the runner sets `next_action_at = now() + backoff(action_attempts)` (100 ms, 200 ms, 400 ms
   … capped at `max-backoff`) unless the table above says to give up.
+- **Stuck actions:** `action_since` is when the transaction that set `pending_action` committed it (claims and
+  retries leave it alone). A ledger action the table retries forever whose technical failure comes at
+  `now ≥ action_since + stuck-after` opens a `LEDGER_ACTION_STUCK` case (one open case per payment and type) and goes
+  on retrying.
 - Every remote call's read timeout is `min(configured timeout, deadline − now − safety-margin)` where the deadline is
   `send_by` (outgoing before sending), `answer_deadline` (incoming before the verdict), or none (settle / release /
   confirm / cancel).
@@ -352,7 +361,7 @@ Listener transaction: validate → inbox → load payment by `(direction, debtor
 | `tpe.runner.max-backoff` | `30s` | |
 | `tpe.runner.max-concurrency` | `256` | |
 | `tpe.runner.safety-margin` | `100ms` | what a remote call leaves before its deadline (§6.3) |
-| `tpe.runner.stuck-after` | `10m` | `LEDGER_ACTION_STUCK` |
+| `tpe.runner.stuck-after` | `10m` | `LEDGER_ACTION_STUCK`, counted from `action_since` (§6.3) |
 | `tpe.clients.risk.timeout.outgoing`, `.incoming` | `500ms` / `300ms` | |
 | `tpe.clients.ledger.timeout` | `1s` | |
 | `tpe.clients.*.base-url` | compose hosts | |

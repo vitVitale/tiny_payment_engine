@@ -7,6 +7,7 @@ import com.tpe.paymentdomain.Iban;
 import com.tpe.paymentdomain.Money;
 import com.tpe.paymentdomain.PartyName;
 import com.tpe.paymentdomain.PaymentId;
+import com.tpe.paymentdomain.ReasonCode;
 import com.tpe.paymentdomain.TxId;
 import com.tpe.paymentdomain.Uetr;
 import com.tpe.paymentorchestrator.domain.payment.OutgoingCommand;
@@ -14,6 +15,7 @@ import com.tpe.paymentorchestrator.domain.payment.OutgoingTimings;
 import com.tpe.paymentorchestrator.domain.payment.PayeeVerification;
 import com.tpe.paymentorchestrator.domain.payment.Payment;
 import com.tpe.paymentorchestrator.domain.payment.PaymentParty;
+import com.tpe.paymentorchestrator.domain.payment.PendingAction;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.UUID;
@@ -53,5 +55,10 @@ final class OutgoingPayments {
     /** On-us, {@code FUNDS_RESERVED}, its {@code SETTLE_ON_US} pending. */
     static Payment payeeChecked() {
         return heldOnUs().payeeRiskChecked();
+    }
+
+    /** On-us, {@code REJECTED AC06} by the payee check, its {@code RELEASE_HOLD} pending. */
+    static Payment awaitingRelease() {
+        return payeeChecked().rejected(ReasonCode.AC06, PendingAction.RELEASE_HOLD, ACCEPTED.plusSeconds(1));
     }
 }

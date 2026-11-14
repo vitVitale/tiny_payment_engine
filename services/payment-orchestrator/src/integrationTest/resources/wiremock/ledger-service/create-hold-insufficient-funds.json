@@ -1,0 +1,18 @@
+{
+  "request": {
+    "method": "POST",
+    "url": "/v1/holds"
+  },
+  "response": {
+    "status": 422,
+    "headers": {
+      "Content-Type": "application/problem+json"
+    },
+    "jsonBody": {
+      "type": "https://tpe.example/problems/insufficient-funds",
+      "title": "Insufficient funds",
+      "status": 422,
+      "code": "INSUFFICIENT_FUNDS"
+    }
+  }
+}

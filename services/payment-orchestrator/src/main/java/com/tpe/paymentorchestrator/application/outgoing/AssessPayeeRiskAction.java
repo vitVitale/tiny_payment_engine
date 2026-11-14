@@ -1,5 +1,6 @@
 package com.tpe.paymentorchestrator.application.outgoing;
 
+import com.tpe.paymentdomain.ReasonCode;
 import com.tpe.paymentorchestrator.application.risk.RiskAnswer;
 import com.tpe.paymentorchestrator.application.risk.RiskAssessments;
 import com.tpe.paymentorchestrator.application.runner.RunnerSettings;
@@ -8,18 +9,23 @@ import com.tpe.paymentorchestrator.application.runner.StepOutcome;
 import com.tpe.paymentorchestrator.domain.payment.Payment;
 import com.tpe.paymentorchestrator.domain.payment.PaymentDirection;
 import com.tpe.paymentorchestrator.domain.payment.PendingAction;
+import com.tpe.paymentorchestrator.domain.payment.RejectionCause;
 import java.time.Clock;
 import java.time.Duration;
+import java.time.Instant;
 import java.util.Optional;
 
 /**
- * {@code ASSESS_PAYEE_RISK} of an on-us payment (specs/11-payment-orchestrator.md §6.2, UC-04 4a): risk-service,
+ * {@code ASSESS_PAYEE_RISK} of an on-us payment (specs/11-payment-orchestrator.md §6.2, UC-04 4a, 4a-1): risk-service,
  * direction {@code INCOMING}, for the same payment ({@code assessmentId = <paymentId>:INCOMING}). {@code ALLOW} →
- * next {@code SETTLE_ON_US}; the state stays {@code FUNDS_RESERVED}. A technical failure is retried after the
- * back-off. {@code DENY}, {@code REVIEW} and the give-up, each ending in {@code RELEASE_HOLD}, come with #73; until
- * then they are retried and nothing is booked.
+ * next {@code SETTLE_ON_US}; the state stays {@code FUNDS_RESERVED}. {@code DENY} → {@code REJECTED} with its reason,
+ * {@code REVIEW} → {@code REJECTED FR01}, and fail closed as {@code ASSESS_RISK}: after the second technical failure,
+ * or the first that asking again cannot mend, {@code REJECTED FR01}. Each rejection releases the hold next.
  */
 public class AssessPayeeRiskAction implements SagaAction {
+
+    /** The first try and one retry, as {@code ASSESS_RISK} (UC-04 2c). */
+    static final int ATTEMPTS = 2;
 
     private final RiskAssessments risk;
     private final RunnerSettings settings;
@@ -45,20 +51,28 @@ public class AssessPayeeRiskAction implements SagaAction {
         if (readTimeout.isEmpty()) {
             return new StepOutcome.TechnicalFailure("no time left before send_by", false);
         }
-        return switch (risk.assess(payment, PaymentDirection.INCOMING, readTimeout.get())) {
+        RiskAnswer answer = risk.assess(payment, PaymentDirection.INCOMING, readTimeout.get());
+        Instant now = clock.instant();
+        return switch (answer) {
             case RiskAnswer.Allow allow -> new StepOutcome.Moved(payment.payeeRiskChecked(), "PAYEE_RISK_ALLOW", null);
-            case RiskAnswer.Deny deny -> new StepOutcome.TechnicalFailure(
-                    "payee risk DENY " + deny.reason().code() + " not handled yet (#73)", false);
-            case RiskAnswer.Review review ->
-                    new StepOutcome.TechnicalFailure("payee risk REVIEW not handled yet (#73)", false);
+            case RiskAnswer.Deny deny -> new StepOutcome.Moved(
+                    payment.rejected(deny.reason(), PendingAction.RELEASE_HOLD, now), "PAYEE_RISK_DENY",
+                    RejectionCause.BUSINESS);
+            case RiskAnswer.Review review -> new StepOutcome.Moved(
+                    payment.rejected(ReasonCode.FR01, PendingAction.RELEASE_HOLD, now), "PAYEE_RISK_REVIEW",
+                    RejectionCause.BUSINESS);
             case RiskAnswer.Unavailable unavailable ->
                     new StepOutcome.TechnicalFailure(unavailable.detail(), unavailable.retryable());
         };
     }
 
-    /** Not yet (#73). */
     @Override
     public Optional<StepOutcome.Moved> giveUp(Payment payment, int attempts, StepOutcome.TechnicalFailure failure) {
-        return Optional.empty();
+        if (failure.retryable() && attempts < ATTEMPTS) {
+            return Optional.empty();
+        }
+        return Optional.of(new StepOutcome.Moved(
+                payment.rejected(ReasonCode.FR01, PendingAction.RELEASE_HOLD, clock.instant()),
+                "PAYEE_RISK_UNAVAILABLE", RejectionCause.TECHNICAL));
     }
 }

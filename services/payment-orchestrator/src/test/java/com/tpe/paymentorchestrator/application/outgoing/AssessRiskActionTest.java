@@ -43,7 +43,8 @@ class AssessRiskActionTest {
     private final AssessRiskAction action = new AssessRiskAction((payment, direction, timeout) -> {
         timeouts.add(timeout);
         return answer;
-    }, new RunnerSettings(Duration.ofSeconds(5), Duration.ofSeconds(30), 8, Duration.ofMillis(100)),
+    }, new RunnerSettings(Duration.ofSeconds(5), Duration.ofSeconds(30), 8, Duration.ofMillis(100),
+            Duration.ofMinutes(10)),
             Duration.ofMillis(500), clock);
 
     @Test

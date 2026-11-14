@@ -17,7 +17,16 @@ public interface SagaAction {
 
     /**
      * After {@code failure} on the {@code attempts}-th try: the move that gives up, or empty to retry after the
-     * back-off. A failure that is not retryable must give up.
+     * back-off. A failure that is not retryable gives up, unless the action is one §6.2 retries until the ledger
+     * answers (settle, release, confirm, cancel): those never give up and {@link #opensStuckCase} instead.
      */
     Optional<StepOutcome.Moved> giveUp(Payment payment, int attempts, StepOutcome.TechnicalFailure failure);
+
+    /**
+     * A ledger action retried until the ledger answers (specs/11-payment-orchestrator.md §6.2): pending for
+     * {@code tpe.runner.stuck-after}, it opens one {@code LEDGER_ACTION_STUCK} case and goes on retrying.
+     */
+    default boolean opensStuckCase() {
+        return false;
+    }
 }
