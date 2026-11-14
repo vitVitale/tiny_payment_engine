@@ -49,9 +49,9 @@ class PayeeVerificationIT extends PaymentApiStack {
                          "payeeOrganisationId":null}""".formatted(DEBTOR, PAYEE))));
     }
 
-    /** UC-02 1a. */
+    /** API-AC-06, the verification half (UC-02 1a); the id stays pending until its XML half exists. */
     @Test
-    void API_AC_06_anInvalidPayeeIbanIsRefusedWithoutAskingVopService() {
+    void anInvalidPayeeIbanIsRefusedWithoutAskingVopService() {
         ResponseEntity<JsonNode> response = verify(Tokens.customer(VERIFY, DEBTOR),
                 request("DE00200200200000000001"));
 
