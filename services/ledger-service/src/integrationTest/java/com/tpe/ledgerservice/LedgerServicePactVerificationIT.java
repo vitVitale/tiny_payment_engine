@@ -27,6 +27,7 @@ import java.nio.charset.StandardCharsets;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.atomic.AtomicLong;
 import org.apache.hc.core5.http.HttpRequest;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.TestTemplate;
@@ -57,6 +58,9 @@ class LedgerServicePactVerificationIT extends LedgerStack {
 
     private static final String STATE_ACTOR = "pact-state";
     private static final JsonMapper JSON = JsonMapper.builder().build();
+
+    /** Account numbers no account of the ledger has: its own sequence counts up from 1, far below these. */
+    private static final AtomicLong UNUSED_ACCOUNT_NUMBERS = new AtomicLong(9_900_000_000L);
 
     @Autowired
     AccountService accounts;
@@ -142,9 +146,7 @@ class LedgerServicePactVerificationIT extends LedgerStack {
 
     @State("hold is ACTIVE and the payee account is OPEN")
     Map<String, Object> holdIsActiveAndThePayeeAccountIsOpen(Map<String, Object> parameters) {
-        Map<String, Object> hold = new HashMap<>(activeHold(amount(parameters, "amountMinor")));
-        hold.put("creditorIban", openAccount().iban().value());
-        return hold;
+        return withPayee(activeHold(amount(parameters, "amountMinor")), openAccount().iban().value());
     }
 
     @State("hold is SETTLED on-us")
@@ -153,6 +155,82 @@ class LedgerServicePactVerificationIT extends LedgerStack {
         settlements.settleOnUs(UUID.fromString((String) hold.get("holdId")),
                 new Iban((String) hold.get("creditorIban")));
         return hold;
+    }
+
+    @State("no account has the payer IBAN")
+    Map<String, Object> noAccountHasThePayerIban() {
+        return Map.of("debtorIban", unusedIban(), "holdId", UUID.randomUUID().toString());
+    }
+
+    @State("payer account is BLOCKED")
+    Map<String, Object> payerAccountIsBlocked() {
+        Account payer = openAccount();
+        accounts.block(payer.accountId(), BlockReason.OPERATOR, null, stateCaller());
+        return Map.of("debtorIban", payer.iban().value(), "holdId", UUID.randomUUID().toString());
+    }
+
+    @State("payer account is CLOSED")
+    Map<String, Object> payerAccountIsClosed() {
+        Account payer = openAccount();
+        accounts.close(payer.accountId(), STATE_ACTOR);
+        return Map.of("debtorIban", payer.iban().value(), "holdId", UUID.randomUUID().toString());
+    }
+
+    /** A row the customer-number constraint never saw, as after a migration that added it NOT VALID (12 §5). */
+    @State("payer account has no customer number")
+    Map<String, Object> payerAccountHasNoCustomerNumber(Map<String, Object> parameters) {
+        Account payer = fundedAccount(amount(parameters, "availableMinor"));
+        String constraint = jdbc.sql("""
+                SELECT conname FROM pg_constraint
+                 WHERE conrelid = 'accounts'::regclass AND pg_get_constraintdef(oid) LIKE '%customer_id IS NOT NULL%'""")
+                .query(String.class).single();
+        jdbc.sql("ALTER TABLE accounts DROP CONSTRAINT " + constraint).update();
+        try {
+            jdbc.sql("UPDATE accounts SET customer_id = NULL WHERE account_id = ?").param(payer.accountId()).update();
+        } finally {
+            jdbc.sql("ALTER TABLE accounts ADD CONSTRAINT " + constraint
+                    + " CHECK (kind = 'TECHNICAL' OR customer_id IS NOT NULL) NOT VALID").update();
+        }
+        return Map.of("debtorIban", payer.iban().value(), "holdId", UUID.randomUUID().toString());
+    }
+
+    /** The release came first and left a tombstone (ADR-009). */
+    @State("hold was released")
+    Map<String, Object> holdWasReleased(Map<String, Object> parameters) {
+        Account payer = fundedAccount(amount(parameters, "availableMinor"));
+        UUID holdId = UUID.randomUUID();
+        holds.release(holdId);
+        return Map.of("debtorIban", payer.iban().value(), "holdId", holdId.toString());
+    }
+
+    @State("no hold has the id")
+    Map<String, Object> noHoldHasTheId() {
+        return Map.of("holdId", UUID.randomUUID().toString());
+    }
+
+    @State("hold is ACTIVE and no account has the payee IBAN")
+    Map<String, Object> holdIsActiveAndNoAccountHasThePayeeIban(Map<String, Object> parameters) {
+        return withPayee(activeHold(amount(parameters, "amountMinor")), unusedIban());
+    }
+
+    @State("hold is ACTIVE and the payee account is BLOCKED")
+    Map<String, Object> holdIsActiveAndThePayeeAccountIsBlocked(Map<String, Object> parameters) {
+        Account payee = openAccount();
+        accounts.block(payee.accountId(), BlockReason.OPERATOR, null, stateCaller());
+        return withPayee(activeHold(amount(parameters, "amountMinor")), payee.iban().value());
+    }
+
+    @State("hold is ACTIVE and the payee account is CLOSED")
+    Map<String, Object> holdIsActiveAndThePayeeAccountIsClosed(Map<String, Object> parameters) {
+        Account payee = openAccount();
+        accounts.close(payee.accountId(), STATE_ACTOR);
+        return withPayee(activeHold(amount(parameters, "amountMinor")), payee.iban().value());
+    }
+
+    @State("hold is SETTLED on-us to another payee")
+    Map<String, Object> holdIsSettledOnUsToAnotherPayee(Map<String, Object> parameters) {
+        Map<String, Object> hold = holdIsSettledOnUs(parameters);
+        return withPayee(hold, openAccount().iban().value());
     }
 
     @State("caller is a compliance officer")
@@ -217,6 +295,24 @@ class LedgerServicePactVerificationIT extends LedgerStack {
         UUID holdId = UUID.randomUUID();
         holds.create(new CreateHold(holdId, payer.iban(), amountMinor, "EUR", holdId, "TPEPACTSTATE"));
         return Map.of("debtorIban", payer.iban().value(), "holdId", holdId.toString());
+    }
+
+    private static Map<String, Object> withPayee(Map<String, Object> hold, String creditorIban) {
+        Map<String, Object> state = new HashMap<>(hold);
+        state.put("creditorIban", creditorIban);
+        return state;
+    }
+
+    /** A valid IBAN of the own bank code that no account has: {@code DE} + mod 97-10 check digits + BBAN. */
+    private static String unusedIban() {
+        String bban = "10010010" + String.format("%010d", UNUSED_ACCOUNT_NUMBERS.incrementAndGet());
+        // "DE00" moved behind the BBAN, letters as 10..35: D = 13, E = 14
+        String digits = bban + "131400";
+        int remainder = 0;
+        for (int i = 0; i < digits.length(); i++) {
+            remainder = (remainder * 10 + (digits.charAt(i) - '0')) % 97;
+        }
+        return "DE" + String.format("%02d", 98 - remainder) + bban;
     }
 
     private Account fundedAccount(long amountMinor) {

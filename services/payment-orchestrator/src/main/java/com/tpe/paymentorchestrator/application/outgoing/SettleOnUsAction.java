@@ -12,11 +12,11 @@ import java.time.Duration;
 import java.util.Optional;
 
 /**
- * {@code SETTLE_ON_US} (specs/11-payment-orchestrator.md §6.2, UC-04 4a): one ledger entry Dr payer / Cr payee →
- * {@code SETTLED} with its {@code booking_entry_id}; {@code PaymentSettled} with {@code onUs = true} goes into the
- * outbox in the same transaction. The call has no deadline: once the hold exists the money moves. A technical
- * failure is retried until the ledger answers; the payee refusals and the {@code LEDGER_ACTION_STUCK} case come with
- * #73.
+ * {@code SETTLE_ON_US} (specs/11-payment-orchestrator.md §6.2, UC-04 4a, 4a-1): one ledger entry Dr payer / Cr payee
+ * → {@code SETTLED} with its {@code booking_entry_id}; {@code PaymentSettled} with {@code onUs = true} goes into the
+ * outbox in the same transaction. A refused payee ({@code AC01} / {@code AC04} / {@code AC06}) rejects the payment
+ * and the hold, still {@code ACTIVE}, is released next. The call has no deadline: a technical failure is retried
+ * until the ledger answers, and a {@code LEDGER_ACTION_STUCK} case is opened after {@code stuck-after}.
  */
 public class SettleOnUsAction implements SagaAction {
 
@@ -46,6 +46,9 @@ public class SettleOnUsAction implements SagaAction {
             case LedgerAnswer.Done<Ledger.SettledOnUs> done -> new StepOutcome.Moved(payment.settledOnUs(
                     done.value().journalEntryId(), done.value().creditorAccountId(), clock.instant()),
                     "SETTLED_ON_US", null);
+            case LedgerAnswer.Refused<Ledger.SettledOnUs> refused -> new StepOutcome.Moved(
+                    payment.rejected(refused.refusal().reason(), PendingAction.RELEASE_HOLD, clock.instant()),
+                    "SETTLE_ON_US_REFUSED", refused.refusal().cause());
             case LedgerAnswer.Unavailable<Ledger.SettledOnUs> unavailable ->
                     new StepOutcome.TechnicalFailure(unavailable.detail(), unavailable.retryable());
         };
@@ -55,5 +58,10 @@ public class SettleOnUsAction implements SagaAction {
     @Override
     public Optional<StepOutcome.Moved> giveUp(Payment payment, int attempts, StepOutcome.TechnicalFailure failure) {
         return Optional.empty();
+    }
+
+    @Override
+    public boolean opensStuckCase() {
+        return true;
     }
 }

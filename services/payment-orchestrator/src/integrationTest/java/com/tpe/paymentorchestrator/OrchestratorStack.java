@@ -19,6 +19,8 @@ import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.web.client.RestClient;
 import org.testcontainers.kafka.KafkaContainer;
 import org.testcontainers.postgresql.PostgreSQLContainer;
+import tools.jackson.databind.json.JsonMapper;
+import tools.jackson.databind.node.ObjectNode;
 
 /**
  * The service on a random port against PostgreSQL and Kafka of the compose stack's versions
@@ -42,6 +44,8 @@ public abstract class OrchestratorStack {
     /** ledger-service (specs/20-testing-strategy.md §1, §10.4). */
     protected static final WireMockServer LEDGER = new WireMockServer(WireMockConfiguration.options().dynamicPort());
 
+    private static final JsonMapper JSON = JsonMapper.builder().build();
+
     /** The example hold of P-04, whose path a ledger mapping names; {@link #ledgerAnswers} widens it to any hold. */
     private static final String EXAMPLE_HOLD = "/v1/holds/0192f0e4-7b1c-7cc3-a1b2-0000000000a1/";
 
@@ -59,6 +63,23 @@ public abstract class OrchestratorStack {
     protected static void riskAnswers(String name) {
         RISK.resetMappings();
         RISK.addStubMapping(StubMapping.buildFrom(mapping("risk-service", name)));
+    }
+
+    /**
+     * risk-service answers the payer's assessment ({@code OUTGOING}) as {@code outgoing} says and the payee's
+     * ({@code INCOMING}, UC-04 4a) as {@code incoming}: the same checked mappings, each narrowed to its direction.
+     */
+    protected static void riskAnswers(String outgoing, String incoming) {
+        RISK.resetMappings();
+        RISK.addStubMapping(StubMapping.buildFrom(inDirection(mapping("risk-service", outgoing), "OUTGOING")));
+        RISK.addStubMapping(StubMapping.buildFrom(inDirection(mapping("risk-service", incoming), "INCOMING")));
+    }
+
+    private static String inDirection(String mapping, String direction) {
+        ObjectNode tree = (ObjectNode) JSON.readTree(mapping);
+        ObjectNode pattern = ((ObjectNode) tree.get("request")).putArray("bodyPatterns").addObject();
+        pattern.putObject("matchesJsonPath").put("expression", "$.direction").put("equalTo", direction);
+        return JSON.writeValueAsString(tree);
     }
 
     /**

@@ -131,6 +131,21 @@ public record Payment(
                 Objects.requireNonNull(at, "at"));
     }
 
+    /**
+     * The compensation of a rejected payment is done (§6.2 {@code RELEASE_HOLD}): still {@code REJECTED}, nothing left
+     * to do, so its final event follows.
+     *
+     * @throws IllegalStateException unless the payment is rejected and waits for its compensation
+     */
+    public Payment compensated() {
+        if (state != PaymentState.REJECTED || pendingAction == null) {
+            throw new IllegalStateException("nothing to compensate for " + this);
+        }
+        return new Payment(paymentId, direction, state, reasonCode, onUs, commandId, clientId, requestHash, txId,
+                uetr, endToEndId, amount, debtor, creditor, remittance, vopReference, vopResult, acceptedAt, sendBy,
+                deadlineAt, null, finalisedAt, debtorAccountId, creditorAccountId, bookingEntryId, traceContext);
+    }
+
     private Payment moveTo(PaymentState to, StatusReason reason, PendingAction next, Instant finalised) {
         PaymentStateMachine.require(direction, state, to);
         return new Payment(paymentId, direction, to, reason, onUs, commandId, clientId, requestHash, txId, uetr,

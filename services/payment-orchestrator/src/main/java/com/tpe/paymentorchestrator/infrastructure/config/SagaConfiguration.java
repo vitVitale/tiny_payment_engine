@@ -8,6 +8,7 @@ import com.tpe.paymentorchestrator.application.ledger.Ledger;
 import com.tpe.paymentorchestrator.application.outgoing.AssessPayeeRiskAction;
 import com.tpe.paymentorchestrator.application.outgoing.AssessRiskAction;
 import com.tpe.paymentorchestrator.application.outgoing.CreateHoldAction;
+import com.tpe.paymentorchestrator.application.outgoing.ReleaseHoldAction;
 import com.tpe.paymentorchestrator.application.outgoing.SettleOnUsAction;
 import com.tpe.paymentorchestrator.application.payments.Payments;
 import com.tpe.paymentorchestrator.application.risk.RiskAssessments;
@@ -16,6 +17,7 @@ import com.tpe.paymentorchestrator.application.runner.SagaAction;
 import com.tpe.paymentorchestrator.application.runner.SagaRunner;
 import com.tpe.paymentorchestrator.application.runner.SagaTelemetry;
 import com.tpe.paymentorchestrator.application.runner.StepApplier;
+import com.tpe.paymentorchestrator.domain.payment.OutgoingTimings;
 import com.tpe.paymentorchestrator.infrastructure.ledger.HttpLedger;
 import com.tpe.paymentorchestrator.infrastructure.risk.HttpRiskAssessments;
 import com.tpe.paymentorchestrator.infrastructure.telemetry.MicrometerSagaTelemetry;
@@ -52,7 +54,8 @@ class SagaConfiguration {
 
     @Bean
     RunnerSettings runnerSettings(RunnerProperties runner) {
-        return new RunnerSettings(runner.lease(), runner.maxBackoff(), runner.maxConcurrency(), runner.safetyMargin());
+        return new RunnerSettings(runner.lease(), runner.maxBackoff(), runner.maxConcurrency(), runner.safetyMargin(),
+                runner.stuckAfter());
     }
 
     @Bean
@@ -73,8 +76,8 @@ class SagaConfiguration {
 
     @Bean
     CreateHoldAction createHoldAction(Ledger ledger, RunnerSettings settings, LedgerProperties properties,
-            Clock clock) {
-        return new CreateHoldAction(ledger, settings, properties.timeout(), clock);
+            OutgoingTimings timings, Clock clock) {
+        return new CreateHoldAction(ledger, settings, properties.timeout(), timings.holdGiveUpMargin(), clock);
     }
 
     @Bean
@@ -87,6 +90,12 @@ class SagaConfiguration {
     SettleOnUsAction settleOnUsAction(Ledger ledger, RunnerSettings settings, LedgerProperties properties,
             Clock clock) {
         return new SettleOnUsAction(ledger, settings, properties.timeout(), clock);
+    }
+
+    @Bean
+    ReleaseHoldAction releaseHoldAction(Ledger ledger, RunnerSettings settings, LedgerProperties properties,
+            Clock clock) {
+        return new ReleaseHoldAction(ledger, settings, properties.timeout(), clock);
     }
 
     @Bean
@@ -124,7 +133,8 @@ class SagaConfiguration {
 
     /** {@code tpe.runner.*} (§7). */
     @ConfigurationProperties("tpe.runner")
-    record RunnerProperties(Duration lease, Duration maxBackoff, int maxConcurrency, Duration safetyMargin) {}
+    record RunnerProperties(Duration lease, Duration maxBackoff, int maxConcurrency, Duration safetyMargin,
+            Duration stuckAfter) {}
 
     /** {@code tpe.clients.risk.*} (§7). */
     @ConfigurationProperties("tpe.clients.risk")

@@ -26,6 +26,8 @@ tpe:
     max-concurrency: 256
     # what a remote call leaves before its deadline (send_by, answer_deadline)
     safety-margin: 100ms
+    # a ledger action retried forever opens a LEDGER_ACTION_STUCK case after this long
+    stuck-after: 10m
   clients:
     risk:
       base-url: http://risk-service:8084

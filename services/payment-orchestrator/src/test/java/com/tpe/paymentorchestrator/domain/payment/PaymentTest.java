@@ -110,6 +110,27 @@ class PaymentTest {
         assertThat(settled.reasonCode()).isNull();
     }
 
+    @Test
+    void aReleasedHoldLeavesTheRejectionWithNothingToDo() {
+        Instant at = ACCEPTED.plusMillis(900);
+        Payment rejected = submitted(true).riskChecked().fundsReserved(UUID.randomUUID())
+                .rejected(ReasonCode.AC06, PendingAction.RELEASE_HOLD, at);
+
+        Payment released = rejected.compensated();
+
+        assertThat(released.state()).isEqualTo(PaymentState.REJECTED);
+        assertThat(released.reasonCode()).isEqualTo(ReasonCode.AC06);
+        assertThat(released.pendingAction()).isNull();
+        assertThat(released.finalisedAt()).isEqualTo(at);
+    }
+
+    @Test
+    void onlyARejectionWaitingForItsCompensationIsCompensated() {
+        assertThatThrownBy(() -> submitted().compensated()).isInstanceOf(IllegalStateException.class);
+        assertThatThrownBy(() -> submitted().rejected(ReasonCode.FR01, null, ACCEPTED).compensated())
+                .isInstanceOf(IllegalStateException.class);
+    }
+
     private static Payment submitted() {
         return submitted(false);
     }

@@ -135,7 +135,9 @@ public class SagaRunner implements AutoCloseable {
                 Optional<StepOutcome.Moved> giveUp = action.giveUp(payment, claim.attempts(), failure);
                 if (giveUp.isEmpty()) {
                     Instant after = clock.instant();
-                    applier.retry(claim, after.plus(settings.backoff(claim.attempts())), after);
+                    boolean stuck = action.opensStuckCase() && settings.stuck(claim.actionSince(), after);
+                    applier.retry(claim, after.plus(settings.backoff(claim.attempts())), after,
+                            stuck ? failure : null);
                     result = Result.RETRY;
                     return;
                 }
@@ -153,7 +155,8 @@ public class SagaRunner implements AutoCloseable {
             return false;
         }
         Payment next = moved.next();
-        if (next.state() == PaymentState.REJECTED) {
+        // counted when the payment enters REJECTED, not again when its compensation is done
+        if (next.state() == PaymentState.REJECTED && claim.state() != PaymentState.REJECTED) {
             span.rejected(next, moved.rejection());
             telemetry.rejected(next, moved.rejection());
         }
