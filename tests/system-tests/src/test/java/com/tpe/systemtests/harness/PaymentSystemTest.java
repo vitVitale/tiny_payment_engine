@@ -16,9 +16,11 @@ import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.stream.Collectors;
 import org.awaitility.core.ConditionTimeoutException;
 import org.junit.jupiter.api.AfterEach;
+import tools.jackson.databind.JsonNode;
 
 /**
  * A system test of payments on the compose stack: payment-api, payment-orchestrator, risk-service and vop-service beside
@@ -33,9 +35,14 @@ import org.junit.jupiter.api.AfterEach;
  */
 public abstract class PaymentSystemTest extends LedgerSystemTest {
 
+    /** A back-office operator of the ledger: opens, funds, blocks and closes the tests' accounts. */
+    protected static final String OPERATOR = MockIssuer.staff("systest-operator", "BACKOFFICE_OPERATOR");
+
     private static final TopicRecorder RECORDER;
     private static final JsonHttp PAYMENT_API;
+    private static final JsonHttp LEDGER;
     private static final URI VOP;
+    private static final URI ORCHESTRATOR;
 
     static {
         var topics = new ArrayList<>(List.of(TopicRecorder.PAYMENTS_EVENTS, TopicRecorder.CSM_OUTBOUND_COMMANDS));
@@ -44,11 +51,12 @@ public abstract class PaymentSystemTest extends LedgerSystemTest {
         URI ledger = ServiceProcess.of(ServiceJar.LEDGER).baseUrl();
         URI risk = ServiceProcess.of(ServiceJar.RISK).baseUrl();
         VOP = ServiceProcess.of(ServiceJar.VOP).baseUrl();
-        URI orchestrator = ServiceProcess.of(ServiceJar.ORCHESTRATOR, Map.of(
+        LEDGER = new JsonHttp(ledger);
+        ORCHESTRATOR = ServiceProcess.of(ServiceJar.ORCHESTRATOR, Map.of(
                 "tpe.clients.risk.base-url", risk.toString(),
                 "tpe.clients.ledger.base-url", ledger.toString())).baseUrl();
         PAYMENT_API = new JsonHttp(ServiceProcess.of(ServiceJar.PAYMENT_API, Map.of(
-                "tpe.clients.orchestrator.base-url", orchestrator.toString(),
+                "tpe.clients.orchestrator.base-url", ORCHESTRATOR.toString(),
                 "tpe.clients.vop.base-url", VOP.toString())).baseUrl());
     }
 
@@ -114,6 +122,119 @@ public abstract class PaymentSystemTest extends LedgerSystemTest {
     /** The recorder of the payment topics. */
     protected static TopicRecorder topics() {
         return RECORDER;
+    }
+
+    /**
+     * A customer of ours: an account opened and funded with {@code fundedMinor} (none when 0), and a customer-channel
+     * token that owns it with every customer scope.
+     */
+    protected Party customer(long fundedMinor) {
+        TestData.Customer customer = TestData.newCustomer();
+        Response opened = open(OPERATOR, customer);
+        assertThat(opened.status()).as("open: %s", opened.body()).isEqualTo(201);
+        UUID account = UUID.fromString(opened.body().get("accountId").asString());
+        String iban = opened.body().get("iban").asString();
+        if (fundedMinor > 0) {
+            Response funded = ledger().fund(OPERATOR, account, fundedMinor);
+            assertThat(funded.status()).as("fund: %s", funded.body()).isEqualTo(200);
+        }
+        return new Party(customer.name(), account, iban, MockIssuer.customer("systest-" + account, iban,
+                CustomerScope.VOP_VERIFY, CustomerScope.PAYMENTS_WRITE, CustomerScope.PAYMENTS_READ));
+    }
+
+    /** A customer as a test pays from or to it: holder name, ledger account, IBAN, and its channel token. */
+    public record Party(String name, UUID account, String iban, String token) {}
+
+    /**
+     * {@code POST /v1/payee-verifications} by {@code payer} until vop-service answers {@code result}: its projection of
+     * {@code accounts.events} follows the ledger within {@link Bounds#eventDelivery()}. Every call issues a new
+     * reference; the last one's response is returned.
+     */
+    protected JsonNode verified(Party payer, String payeeIban, String payeeName, String result) {
+        var last = new AtomicReference<Response>();
+        try {
+            await().atMost(Bounds.eventDelivery()).pollInterval(Duration.ofMillis(250)).until(() -> {
+                last.set(PAYMENT_API.post(payer.token(), "/v1/payee-verifications", Map.of(
+                        "debtorIban", payer.iban(), "payeeIban", payeeIban, "payeeName", payeeName)));
+                return last.get().status() == 201 && result.equals(last.get().body().get("result").asString());
+            });
+        } catch (ConditionTimeoutException e) {
+            throw new AssertionError("payee verification never answered " + result + "; last: " + last.get(), e);
+        }
+        return last.get().body();
+    }
+
+    /** {@code payer} pays {@code amount} EUR (a decimal string) to {@code payeeIban} with the VoP reference. */
+    protected Response pay(Party payer, String payeeIban, String payeeName, String amount, String vopReference) {
+        return initiate(payer.token(), Map.of(
+                "endToEndId", "SYSTEST-" + Long.toHexString(System.nanoTime()),
+                "debtor", Map.of("name", payer.name(), "iban", payer.iban()),
+                "creditor", Map.of("name", payeeName, "iban", payeeIban),
+                "amount", Map.of("value", amount, "currency", "EUR"),
+                "vopReference", vopReference));
+    }
+
+    /** As {@link #pay}, asserted {@code 202}; the payment's id. */
+    protected UUID initiated(Party payer, String payeeIban, String payeeName, String amount, String vopReference) {
+        Response accepted = pay(payer, payeeIban, payeeName, amount, vopReference);
+        assertThat(accepted.status()).as("%s", accepted.body()).isEqualTo(202);
+        return UUID.fromString(accepted.body().get("paymentId").asString());
+    }
+
+    /** {@code GET /v1/payments/{id}} as {@code payer} once it is no longer {@code PDNG}: what the customer sees. */
+    protected JsonNode finalStatus(Party payer, UUID payment) {
+        var status = new AtomicReference<JsonNode>();
+        await().atMost(Bounds.paymentFinal()).pollInterval(Duration.ofMillis(100)).until(() -> {
+            status.set(PAYMENT_API.get(payer.token(), "/v1/payments/" + payment).body());
+            return status.get() != null && !"PDNG".equals(status.get().get("status").asString());
+        });
+        return status.get();
+    }
+
+    /** The ledger's hold of {@code payment} ({@code GET /v1/holds/{holdId}}, the hold id being the payment's). */
+    protected static Response hold(UUID payment) {
+        return LEDGER.get(null, "/v1/holds/" + payment);
+    }
+
+    /**
+     * {@code tpe.payment.rejected{direction=OUTGOING,reason}} of the orchestrator now, per {@code cause}: taken before a
+     * payment, then {@link RejectedCount#assertTaggedOnce assert}ed after it. The counter is shared, so the check is that
+     * the expected cause moved and the other one did not: a rejection of this payment under the wrong tag fails it,
+     * whatever another test class rejects meanwhile under the right one.
+     */
+    protected static RejectedCount rejectedOutgoing(String reason) {
+        return new RejectedCount(reason, rejected(reason, "BUSINESS"), rejected(reason, "TECHNICAL"));
+    }
+
+    /** The counts of a reason under {@code BUSINESS} and {@code TECHNICAL} at one moment. */
+    public record RejectedCount(String reason, double business, double technical) {
+
+        /** The reason was counted under {@code cause} since this snapshot, and not under the other cause. */
+        public void assertTaggedOnce(String cause) {
+            RejectedCount now = rejectedOutgoing(reason);
+            boolean business = cause.equals("BUSINESS");
+            assertThat(business ? now.business() : now.technical())
+                    .as("tpe.payment.rejected{reason=%s,cause=%s}", reason, cause)
+                    .isGreaterThan(business ? business() : technical());
+            assertThat(business ? now.technical() : now.business())
+                    .as("tpe.payment.rejected{reason=%s} under the other cause", reason)
+                    .isEqualTo(business ? technical() : business());
+        }
+    }
+
+    private static double rejected(String reason, String cause) {
+        return Scrape.value(ORCHESTRATOR, "tpe_payment_rejected_total",
+                Map.of("direction", "OUTGOING", "reason", reason, "cause", cause));
+    }
+
+    /** The ledger's available balance of {@code party}'s account, in minor units. */
+    protected static long available(Party party) {
+        return ledger().account(OPERATOR, party.account()).body().get("availableBalanceMinor").asLong();
+    }
+
+    /** The ledger's booked balance of {@code party}'s account, in minor units. */
+    protected static long booked(Party party) {
+        return ledger().account(OPERATOR, party.account()).body().get("bookedBalanceMinor").asLong();
     }
 
     /** {@code POST /v1/payments} as JSON; an accepted payment joins the checks. */

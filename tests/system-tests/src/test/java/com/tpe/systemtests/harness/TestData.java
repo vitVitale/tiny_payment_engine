@@ -1,5 +1,8 @@
 package com.tpe.systemtests.harness;
 
+import java.math.BigInteger;
+import java.util.Arrays;
+import java.util.Locale;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
@@ -32,6 +35,100 @@ public final class TestData {
     /** The names given out and the IBANs remembered in this JVM so far. */
     public static Set<String> personalData() {
         return Set.copyOf(PERSONAL_DATA);
+    }
+
+    /**
+     * A misspelling of {@code name} that vop-service answers {@code CLOSE_MATCH}: the name with letters of its last word
+     * replaced from the end until its score lies in the middle of the band (13 §6.2: ≥ 0.85, < 0.95). The scenario
+     * still asserts what vop-service answers; this only picks the input. Personal data from now on.
+     */
+    public static String closeMatchOf(String name) {
+        char[] letters = name.toCharArray();
+        for (int i = letters.length - 1; i > name.lastIndexOf(' '); i--) {
+            letters[i] = letters[i] == 'x' ? 'y' : 'x';
+            String misspelt = new String(letters);
+            double score = nameScore(name, misspelt);
+            if (score >= 0.87 && score <= 0.93) {
+                PERSONAL_DATA.add(misspelt);
+                return misspelt;
+            }
+        }
+        throw new IllegalArgumentException("no close match for a name of " + name.length() + " characters");
+    }
+
+    /**
+     * The name score of vop-service (13 §6.2) for the names the tests generate: lower-cased, whitespace collapsed,
+     * punctuation a separator, Jaro-Winkler on the token-sorted and on the unsorted strings, the higher one. Leaves out
+     * what generated names never have (diacritics, legal forms, titles).
+     */
+    static double nameScore(String holder, String input) {
+        String a = normalised(holder);
+        String b = normalised(input);
+        return Math.max(jaroWinkler(a, b), jaroWinkler(sortedTokens(a), sortedTokens(b)));
+    }
+
+    /**
+     * IBAN {@code DE.. 10010010 99........}: our bank code, a valid checksum, an account number the ledger never gives
+     * (its sequence is far from 9.9 billion). Personal data from now on, as every IBAN a test uses.
+     */
+    public static String unknownOwnIban() {
+        var random = ThreadLocalRandom.current();
+        String bban = "10010010" + "99" + "%08d".formatted(random.nextInt(100_000_000));
+        int check = 98 - new BigInteger(bban + "131400").mod(BigInteger.valueOf(97)).intValue();
+        String iban = "DE" + "%02d".formatted(check) + bban;
+        PERSONAL_DATA.add(iban);
+        return iban;
+    }
+
+    private static String normalised(String name) {
+        return name.toLowerCase(Locale.ROOT).replaceAll("\\p{Punct}", " ").trim().replaceAll("\\s+", " ");
+    }
+
+    private static String sortedTokens(String name) {
+        return String.join(" ", Arrays.stream(name.split(" ")).sorted().toList());
+    }
+
+    /** Jaro-Winkler with the usual prefix scale 0.1 over at most 4 characters. */
+    private static double jaroWinkler(String a, String b) {
+        if (a.equals(b)) {
+            return 1.0;
+        }
+        int window = Math.max(0, Math.max(a.length(), b.length()) / 2 - 1);
+        boolean[] matchedA = new boolean[a.length()];
+        boolean[] matchedB = new boolean[b.length()];
+        int matches = 0;
+        for (int i = 0; i < a.length(); i++) {
+            for (int j = Math.max(0, i - window); j < Math.min(b.length(), i + window + 1); j++) {
+                if (!matchedB[j] && a.charAt(i) == b.charAt(j)) {
+                    matchedA[i] = true;
+                    matchedB[j] = true;
+                    matches++;
+                    break;
+                }
+            }
+        }
+        if (matches == 0) {
+            return 0.0;
+        }
+        int transpositions = 0;
+        for (int i = 0, j = 0; i < a.length(); i++) {
+            if (matchedA[i]) {
+                while (!matchedB[j]) {
+                    j++;
+                }
+                if (a.charAt(i) != b.charAt(j)) {
+                    transpositions++;
+                }
+                j++;
+            }
+        }
+        double m = matches;
+        double jaro = (m / a.length() + m / b.length() + (m - transpositions / 2.0) / m) / 3.0;
+        int prefix = 0;
+        while (prefix < Math.min(4, Math.min(a.length(), b.length())) && a.charAt(prefix) == b.charAt(prefix)) {
+            prefix++;
+        }
+        return jaro + prefix * 0.1 * (1.0 - jaro);
     }
 
     /** A bank customer: the core system's customer number and the holder's name (SEPA character set, ≤ 70). */
