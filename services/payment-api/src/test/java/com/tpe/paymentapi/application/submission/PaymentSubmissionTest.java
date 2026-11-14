@@ -199,5 +199,10 @@ class PaymentSubmissionTest {
             submitted.add(command);
             return answers.removeFirst();
         }
+
+        @Override
+        public Read payment(PaymentId paymentId) {
+            throw new AssertionError("the submission never reads a payment");
+        }
     }
 }

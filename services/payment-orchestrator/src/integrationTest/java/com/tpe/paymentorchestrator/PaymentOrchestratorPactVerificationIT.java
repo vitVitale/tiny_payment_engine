@@ -14,11 +14,13 @@ import org.junit.jupiter.api.TestTemplate;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
+import tools.jackson.databind.JsonNode;
 
 /**
  * payment-orchestrator verifies every collected pact that names it (specs/20-testing-strategy.md §10.3): P-01 of
  * payment-api, against the running service with the default bank directory. Every state gives the interaction a new
- * {@code commandId}, so repeated runs never meet each other's payments. Runs only with {@code -Ppact-verify}.
+ * {@code commandId} or {@code paymentId}, so repeated runs never meet each other's payments. Runs only with
+ * {@code -Ppact-verify}.
  */
 @Provider("payment-orchestrator")
 @PactVerification
@@ -58,6 +60,17 @@ class PaymentOrchestratorPactVerificationIT extends OrchestratorStack {
         return Map.of("commandId", commandId);
     }
 
+    /** The interaction's payment, submitted through the API as payment-api did; the state gives its id. */
+    @State("an outgoing payment exists")
+    Map<String, Object> anOutgoingPaymentExists(Map<String, Object> parameters) {
+        return Map.of("paymentId", submit(UUID.randomUUID().toString(), request(parameters)));
+    }
+
+    @State("no payment exists for the paymentId")
+    Map<String, Object> noPaymentExistsForThePaymentId() {
+        return Map.of("paymentId", UUID.randomUUID().toString());
+    }
+
     /** deploy/config/bank-directory.yml has only the own bank and one peer; the interaction names another. */
     @State("the creditor's bank is not in the directory")
     Map<String, Object> theCreditorsBankIsNotInTheDirectory() {
@@ -69,13 +82,15 @@ class PaymentOrchestratorPactVerificationIT extends OrchestratorStack {
         return new LinkedHashMap<>((Map<String, Object>) parameters.get("request"));
     }
 
-    private void submit(String commandId, Map<String, Object> request) {
+    /** @return the new payment's id */
+    private String submit(String commandId, Map<String, Object> request) {
         request.put("commandId", commandId);
-        ResponseEntity<String> response = http().post().uri("/v1/payments").contentType(MediaType.APPLICATION_JSON)
-                .body(request).retrieve().toEntity(String.class);
+        ResponseEntity<JsonNode> response = http().post().uri("/v1/payments").contentType(MediaType.APPLICATION_JSON)
+                .body(request).retrieve().toEntity(JsonNode.class);
         if (response.getStatusCode().value() != 201) {
             throw new IllegalStateException("the state's submit answered " + response.getStatusCode() + " "
                     + response.getBody());
         }
+        return response.getBody().get("paymentId").asString();
     }
 }

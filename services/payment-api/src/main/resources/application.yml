@@ -18,9 +18,15 @@ tpe:
     orchestrator:
       base-url: http://payment-orchestrator:8081
       timeout: 1s
+      status-timeout: 300ms
     vop:
       base-url: http://vop-service:8083
       check-timeout: 300ms
+  api:
+    # specs/10-payment-api.md §5.1, §6
+    idempotency:
+      retention: 24h
+      in-progress-takeover: 10s
   observability:
     inbound:
       # a channel's traceparent becomes a span link, never the parent (ADR-014, specs/26-observability.md §5.3)

@@ -216,7 +216,7 @@ the client.
 | `spring.security.oauth2.resourceserver.jwt.issuer-uri` | mock issuer in `local` |
 | `tpe.api.idempotency.retention` | `24h` |
 | `tpe.api.idempotency.in-progress-takeover` | `10s` |
-| `tpe.clients.orchestrator.base-url`, `.timeout` | `http://payment-orchestrator:8081`, `1s` |
+| `tpe.clients.orchestrator.base-url`, `.timeout`, `.status-timeout` | `http://payment-orchestrator:8081`, `1s`, `300ms` |
 | `tpe.clients.vop.base-url`, `.check-timeout` | `http://vop-service:8083` (`https://` in `prod`, [ADR-016](../architecture/decisions/ADR-016-tls-inside-the-cluster.md)), `300ms` |
 | `tpe.api.rate-limit.clients.<client_id>` | per channel, set at onboarding ([ADR-018](../architecture/decisions/ADR-018-rate-limiting.md)) |
 | `tpe.api.rate-limit.payments-per-subject` | `30/1m` |

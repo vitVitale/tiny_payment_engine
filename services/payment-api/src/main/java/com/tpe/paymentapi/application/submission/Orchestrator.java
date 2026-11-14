@@ -1,16 +1,34 @@
 package com.tpe.paymentapi.application.submission;
 
 import com.tpe.contracts.payment.PaymentAccepted;
+import com.tpe.contracts.payment.PaymentState;
 import com.tpe.contracts.payment.SubmitPayment;
+import com.tpe.paymentdomain.PaymentId;
+import com.tpe.paymentdomain.TxId;
 
-/** payment-orchestrator's {@code POST /v1/payments} (specs/11-payment-orchestrator.md §3.1, 10 §4). */
+/**
+ * payment-orchestrator's {@code POST /v1/payments} and {@code GET /v1/payments/{paymentId}}
+ * (specs/11-payment-orchestrator.md §3.1, 10 §4).
+ */
 public interface Orchestrator {
 
     /** One attempt; retries are the caller's (specs/00-engineering-baseline.md §8). */
     Answer submit(SubmitPayment command);
 
-    /** What the orchestrator answered, or that it could not be asked. */
+    /** One attempt; retries are the caller's. */
+    Read payment(PaymentId paymentId);
+
+    /** What the orchestrator answered a submit, or that it could not be asked. */
     sealed interface Answer {}
+
+    /** What the orchestrator answered a status read, or that it could not be asked. */
+    sealed interface Read {}
+
+    /** {@code 200}: the payment's state now, what the idempotency guard's replay refreshes (10 §5.1). */
+    record Found(PaymentState state, TxId txId) implements Read {}
+
+    /** {@code 404 PAYMENT_NOT_FOUND}. */
+    record NotFound() implements Read {}
 
     /**
      * {@code 201} or {@code 200}: the payment of this {@code commandId} (UC-01 6, 6a).
@@ -29,5 +47,5 @@ public interface Orchestrator {
     record CreditorAgentNotReachable() implements Answer {}
 
     /** Not reached, no answer in time, or a {@code 5xx}. */
-    record Unavailable(Failure failure, String why) implements Answer {}
+    record Unavailable(Failure failure, String why) implements Answer, Read {}
 }

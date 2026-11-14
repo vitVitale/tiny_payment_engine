@@ -5,6 +5,7 @@ import static com.tpe.paymentapi.api.Problems.problem;
 import com.tpe.paymentapi.api.payment.IdempotencyKeyException;
 import com.tpe.paymentapi.api.security.DebtorAccountNotOwnedException;
 import com.tpe.paymentapi.api.security.InvalidTokenClaimsException;
+import com.tpe.paymentapi.application.idempotency.IdempotencyKeyInProgressException;
 import com.tpe.paymentapi.application.submission.IdempotencyKeyReusedException;
 import com.tpe.paymentapi.application.submission.OrchestratorUnavailableException;
 import com.tpe.paymentapi.application.submission.UnexpectedAnswerException;
@@ -73,7 +74,13 @@ class ApiProblems extends ResponseEntityExceptionHandler {
         return problem(HttpStatus.UNPROCESSABLE_CONTENT, "VOP_REQUIRED", e.problem());
     }
 
-    /** Without the stored-response guard it is the orchestrator that finds the reuse (UC-01 2b). */
+    @ExceptionHandler
+    ProblemDetail idempotencyKeyInProgress(IdempotencyKeyInProgressException e) {
+        return problem(HttpStatus.CONFLICT, "IDEMPOTENCY_KEY_IN_PROGRESS",
+                "A request with the Idempotency-Key is being processed; retry later with the same key");
+    }
+
+    /** Found by the guard, or by the orchestrator when the key's stored response is gone (UC-01 2b). */
     @ExceptionHandler
     ProblemDetail idempotencyKeyReused(IdempotencyKeyReusedException e) {
         LOG.warn("422 IDEMPOTENCY_KEY_REUSED: {}", e.getMessage());
