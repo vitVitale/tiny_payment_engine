@@ -25,9 +25,14 @@ public final class JsonHttp {
 
     /** {@code POST path} with {@code body} as JSON. */
     public Response post(String authorization, String path, Map<String, ?> body) {
+        return post(authorization, path, body, "systest-" + UUID.randomUUID());
+    }
+
+    /** {@code POST path} with {@code body} as JSON and {@code idempotencyKey}, e.g. a retry's. */
+    public Response post(String authorization, String path, Map<String, ?> body, String idempotencyKey) {
         var request = HttpRequest.newBuilder(baseUrl.resolve(path))
                 .header("Content-Type", "application/json")
-                .header("Idempotency-Key", "systest-" + UUID.randomUUID())
+                .header("Idempotency-Key", idempotencyKey)
                 .POST(HttpRequest.BodyPublishers.ofString(JSON.writeValueAsString(body)));
         authorize(request, authorization);
         return send(request.build());

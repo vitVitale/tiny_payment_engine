@@ -68,6 +68,21 @@ class ServiceProcessTest {
         assertThat(ServiceProcess.of(service)).isSameAs(process);
     }
 
+    /** E2E-O-16: a second payment-api, calling the orchestrator through a proxy, beside the one every test uses. */
+    @Test
+    void aNamedInstanceIsASecondProcessOfTheSameJarWithItsOwnLog() throws Exception {
+        var service = new ServiceJar("fake-service-d", fakeJar(jars.resolve("d"), "fake-service-d-1.0.jar").getParent());
+
+        ServiceProcess first = ServiceProcess.of(service);
+        ServiceProcess second = ServiceProcess.of("fake-service-d-proxied", service, Map.of("tpe.x", "y"));
+
+        assertThat(second).isNotSameAs(first);
+        assertThat(second.baseUrl().getPort()).isNotEqualTo(first.baseUrl().getPort());
+        assertThat(get(second, "/args")).contains("--tpe.x=y");
+        assertThat(Path.of("target", "fake-service-d-proxied-systemtest.log")).exists();
+        assertThat(ServiceProcess.of("fake-service-d-proxied", service, Map.of())).isSameAs(second);
+    }
+
     @Test
     void aServiceWithoutAJarNamesTheBuildCommandAndTheProperty() {
         var service = ServiceJar.inRepository("no-such-service");
