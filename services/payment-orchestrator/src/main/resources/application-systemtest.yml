@@ -1,0 +1,7 @@
+# Profile systemtest (specs/20-testing-strategy.md §2.1): short deadlines keep the system tests fast, in the order of
+# the production values (hold-give-up-margin < send-by-offset < deadline-offset), so the same races occur.
+tpe:
+  outgoing:
+    send-by-offset: 3s
+    deadline-offset: 6s
+    hold-give-up-margin: 1s

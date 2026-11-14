@@ -73,9 +73,10 @@ jobs:
           cache: maven
       - name: Start infrastructure
         run: docker compose -f deploy/docker-compose.yml up -d --wait postgres kafka oauth2
-      # the ledger system tests (E2E-A-01) start the service from its jar; its own tests run in the build job
-      - name: Package ledger-service
-        run: ./mvnw -B -pl services/ledger-service -am package -DskipTests
+      # the system tests (E2E-A-01, the @smoke E2E-O-02) start the services from their jars; their own tests run in
+      # the build job
+      - name: Package the services
+        run: ./mvnw -B -pl services/ledger-service,services/risk-service,services/vop-service,services/payment-orchestrator,services/payment-api -am package -DskipTests
       - name: Smoke check and system tests
         run: ./mvnw -B -pl tests/system-tests -am verify -Dtpe.local-stack=true
       - name: Compose logs
@@ -84,6 +85,10 @@ jobs:
       - name: Service logs
         if: failure()
         run: tail -n +1 tests/system-tests/target/*-systemtest.log || true
+      # a failed system test's payment transitions, ledger entries and records (specs/20-testing-strategy.md §2)
+      - name: Debug bundles
+        if: failure()
+        run: tail -n +1 tests/system-tests/target/debug-bundles/*.txt || true
 
   # OBS-AC-01 … -04 against the compose observability profile, on main builds (specs/26-observability.md §13)
   observability-stack:

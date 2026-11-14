@@ -21,4 +21,14 @@ class TestDataTest {
             assertThat(new PartyName(customer.name()).value()).isEqualTo(customer.name());
         });
     }
+
+    /** INV-14 scans the logs for every name and IBAN the tests used. */
+    @Test
+    void theNamesGivenOutAndTheIbansRememberedArePersonalDataToScanFor() {
+        TestData.Customer customer = TestData.newCustomer();
+        TestData.rememberIban("DE36100100100000000099");
+
+        assertThat(TestData.personalData()).contains(customer.name(), "DE36100100100000000099")
+                .doesNotContain(customer.customerId());
+    }
 }

@@ -26,4 +26,30 @@ class BoundsTest {
         assertThat(ServiceProfile.ledger().duration("tpe.ledger.snapshot.interval")).contains(Duration.ofSeconds(5));
         assertThat(ServiceProfile.ledger().duration("tpe.ledger.idempotency.retention")).contains(Duration.ofDays(30));
     }
+
+    /** 20 §2.1: a payment is final by the orchestrator's deadline of the systemtest profile, 6 s, not 20 s. */
+    @Test
+    void aPaymentIsFinalByTheOrchestratorsSystemTestDeadlinePlusEventDelivery() {
+        ServiceProfile orchestrator = ServiceProfile.systemtest(ServiceJar.ORCHESTRATOR);
+
+        assertThat(orchestrator.duration("tpe.outgoing.deadline-offset")).contains(Duration.ofSeconds(6));
+        assertThat(Bounds.paymentFinal()).isEqualTo(Duration.ofSeconds(6).plus(Bounds.eventDelivery(orchestrator)));
+    }
+
+    @Test
+    void anActionIsOverdueAfterTheOrchestratorsLeaseAndLongestBackoff() {
+        assertThat(Bounds.actionOverdue()).isEqualTo(Duration.ofSeconds(35));
+    }
+
+    /** 20 §2.1: the systemtest profile keeps the order of the production values, so the same races occur. */
+    @Test
+    void theOrchestratorsSystemTestTimingsKeepTheProductionOrder() {
+        ServiceProfile orchestrator = ServiceProfile.systemtest(ServiceJar.ORCHESTRATOR);
+        Duration margin = orchestrator.duration("tpe.outgoing.hold-give-up-margin").orElseThrow();
+        Duration sendBy = orchestrator.duration("tpe.outgoing.send-by-offset").orElseThrow();
+        Duration deadline = orchestrator.duration("tpe.outgoing.deadline-offset").orElseThrow();
+
+        assertThat(margin).isLessThan(sendBy);
+        assertThat(sendBy).isLessThan(deadline);
+    }
 }
