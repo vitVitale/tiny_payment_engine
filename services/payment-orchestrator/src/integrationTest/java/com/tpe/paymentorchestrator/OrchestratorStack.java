@@ -8,6 +8,8 @@ import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
+import org.junit.jupiter.api.AfterEach;
+import org.springframework.beans.factory.config.BeanPostProcessor;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.boot.test.web.server.LocalServerPort;
@@ -116,6 +118,17 @@ public abstract class OrchestratorStack {
         MutableClock mutableClock() {
             return CLOCK;
         }
+
+        /** Off until a test asks for a crash or a hold ({@link ActionInterference}). */
+        @Bean
+        static BeanPostProcessor actionInterference() {
+            return ActionInterference.wrapper();
+        }
+    }
+
+    @AfterEach
+    void stopInterfering() {
+        ActionInterference.reset();
     }
 
     @LocalServerPort

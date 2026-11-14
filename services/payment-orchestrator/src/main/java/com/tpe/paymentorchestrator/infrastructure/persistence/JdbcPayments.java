@@ -15,6 +15,7 @@ import com.tpe.paymentdomain.Uetr;
 import com.tpe.paymentdomain.UuidV7Generator;
 import com.tpe.paymentorchestrator.application.payments.Payments;
 import com.tpe.paymentorchestrator.application.payments.ActionClaim;
+import com.tpe.paymentorchestrator.application.payments.LockedPayment;
 import com.tpe.paymentorchestrator.domain.payment.ExceptionCaseType;
 import com.tpe.paymentorchestrator.domain.payment.PayeeVerification;
 import com.tpe.paymentorchestrator.domain.payment.Payment;
@@ -151,6 +152,34 @@ class JdbcPayments implements Payments {
     }
 
     @Override
+    public void markTimerFired(long timerId) {
+        jdbc.sql("UPDATE payment_timers SET status = 'FIRED' WHERE timer_id = ? AND status = 'SCHEDULED'")
+                .param(timerId)
+                .update();
+    }
+
+    @Override
+    public Optional<LockedPayment> lockForTimer(PaymentId paymentId) {
+        return jdbc.sql("SELECT " + COLUMNS + ", version, csm_outcome FROM payments WHERE payment_id = ? FOR UPDATE")
+                .param(paymentId.value())
+                .query((rs, n) -> new LockedPayment(payment(rs, n), rs.getLong("version"),
+                        rs.getString("csm_outcome") != null))
+                .optional();
+    }
+
+    @Override
+    public void applyTimer(LockedPayment locked, Payment next, boolean finalEventEmitted, Instant now) {
+        int updated = store(next, finalEventEmitted, now, "payment_id = :paymentId AND version = :version")
+                .param("paymentId", next.paymentId().value())
+                .param("version", locked.version())
+                .update();
+        if (updated != 1) {
+            // the row is locked by this transaction, so its version cannot have moved
+            throw new IllegalStateException("payment " + next.paymentId().value() + " changed under its lock");
+        }
+    }
+
+    @Override
     public Optional<ActionClaim> claim(PaymentId paymentId, Set<PendingAction> actions, Instant now,
             Instant leaseUntil) {
         if (actions.isEmpty()) {
@@ -175,6 +204,18 @@ class JdbcPayments implements Payments {
 
     @Override
     public boolean applyStep(ActionClaim claim, Payment next, boolean finalEventEmitted, Instant now) {
+        return store(next, finalEventEmitted, now, """
+                        payment_id = :paymentId AND state = :claimedState AND pending_action = :claimedAction
+                          AND version = :version""")
+                .param("paymentId", claim.paymentId().value())
+                .param("claimedState", claim.state().name())
+                .param("claimedAction", claim.action().name())
+                .param("version", claim.version())
+                .update() == 1;
+    }
+
+    /** The next state, action and ledger ids of a payment; a new action is due, and pending since, {@code now}. */
+    private JdbcClient.StatementSpec store(Payment next, boolean finalEventEmitted, Instant now, String where) {
         return jdbc.sql("""
                         UPDATE payments
                         SET state = :state, reason_code = :reasonCode, pending_action = :pendingAction,
@@ -184,8 +225,7 @@ class JdbcPayments implements Payments {
                             booking_entry_id = :bookingEntryId,
                             final_event_emitted = final_event_emitted OR :finalEventEmitted,
                             version = version + 1, updated_at = :now
-                        WHERE payment_id = :paymentId AND state = :claimedState AND pending_action = :claimedAction
-                          AND version = :version""")
+                        WHERE\s""" + where)
                 .param("state", next.state().name())
                 .param("reasonCode", next.reasonCode() == null ? null : next.reasonCode().code())
                 .param("pendingAction", next.pendingAction() == null ? null : next.pendingAction().name())
@@ -195,12 +235,7 @@ class JdbcPayments implements Payments {
                 .param("creditorAccountId", next.creditorAccountId())
                 .param("bookingEntryId", next.bookingEntryId())
                 .param("finalEventEmitted", finalEventEmitted)
-                .param("now", timestamp(now))
-                .param("paymentId", claim.paymentId().value())
-                .param("claimedState", claim.state().name())
-                .param("claimedAction", claim.action().name())
-                .param("version", claim.version())
-                .update() == 1;
+                .param("now", timestamp(now));
     }
 
     @Override
