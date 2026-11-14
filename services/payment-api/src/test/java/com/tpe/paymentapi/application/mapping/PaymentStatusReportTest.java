@@ -66,6 +66,24 @@ class PaymentStatusReportTest {
         });
     }
 
+    /** API-AC-06, the XML half: the rejection of a pain.001 that failed validation. */
+    @Test
+    void aFileRejectionIsRjctFf01OfTheOriginalMessage() {
+        String xml = report.fileRejection("CLIENT-MSG-0042", MSG_ID, NOW);
+
+        assertThat(new XsdValidator().validate(xml)).isEmpty();
+        var document = codec.unmarshal(xml, Document.class).getCstmrPmtStsRpt();
+        assertThat(document.getGrpHdr().getMsgId()).isEqualTo(MSG_ID.value());
+        assertThat(document.getGrpHdr().getCreDtTm().toString()).isEqualTo("2026-11-14T10:00:05.250Z");
+        var group = document.getOrgnlGrpInfAndSts();
+        assertThat(group.getOrgnlMsgId()).isEqualTo("CLIENT-MSG-0042");
+        assertThat(group.getOrgnlMsgNmId()).isEqualTo("pain.001.001.09");
+        assertThat(group.getGrpSts()).isEqualTo("RJCT");
+        assertThat(group.getStsRsnInf()).singleElement()
+                .satisfies(reason -> assertThat(reason.getRsn().getCd()).isEqualTo("FF01"));
+        assertThat(document.getOrgnlPmtInfAndSts()).isEmpty();
+    }
+
     @Test
     void aRejectedPaymentIsRjctWithItsReasonCode() {
         String xml = report.of(payment(PaymentState.REJECTED, ReasonCode.AM04), MSG_ID, NOW);

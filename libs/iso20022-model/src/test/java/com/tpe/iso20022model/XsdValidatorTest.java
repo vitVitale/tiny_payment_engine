@@ -132,4 +132,32 @@ class XsdValidatorTest {
         assertThat(validator.validate(golden("invalid/pacs.008.001.08-invalid.xml"))).isNotEmpty();
         assertThat(validator.validate(golden("pacs.002.001.10.xml"))).isEmpty();
     }
+
+    @Test
+    void aDocumentOfTheExpectedVersionIsValidatedAgainstItsSchema() {
+        assertThat(validator.validate(golden("pain.001.001.09.xml"), "pain.001.001.09")).isEmpty();
+        assertThat(validator.validate(golden("invalid/pacs.008.001.08-invalid.xml"), "pacs.008.001.08"))
+                .extracting(Violation::code).contains("cvc-pattern-valid");
+    }
+
+    @Test
+    void aSupportedDocumentOfAnotherVersionThanTheExpectedOneIsAnUnsupportedNamespace() {
+        assertThat(validator.validate(golden("pain.002.001.10.xml"), "pain.001.001.09")).singleElement()
+                .satisfies(violation -> {
+                    assertThat(violation.code()).isEqualTo(XsdValidator.UNSUPPORTED_NAMESPACE);
+                    assertThat(violation.message()).contains("pain.002.001.10");
+                });
+    }
+
+    @Test
+    void aDoctypeIsRejectedWhateverTheExpectedVersion() {
+        String xml = """
+                <?xml version="1.0"?>
+                <!DOCTYPE Document [<!ENTITY e "x">]>
+                <Document xmlns="urn:iso:std:iso:20022:tech:xsd:pain.001.001.09">&e;</Document>
+                """;
+
+        assertThat(validator.validate(xml, "pain.001.001.09")).extracting(Violation::code)
+                .containsExactly(XsdValidator.DOCTYPE_DISALLOWED);
+    }
 }

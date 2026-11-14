@@ -1,5 +1,6 @@
 package com.tpe.paymentapi.api.payment;
 
+import com.tpe.iso20022model.CanonicalXml;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
@@ -13,7 +14,9 @@ import tools.jackson.databind.node.ObjectNode;
  * The {@code request_hash} of the idempotency guard (specs/10-payment-api.md §5.1): hex SHA-256 of the method, a
  * space, the path, a newline and the JSON body as the service read it, re-serialised with object properties sorted at
  * every level and no whitespace. A retry that differs only in property order, whitespace or fields the API ignores is
- * the same request.
+ * the same request. An XML body is its Canonical XML without comments, followed by a newline and the
+ * {@code VoP-Reference} header, which carries what the JSON body's {@code vopReference} does: a retry that differs only
+ * in comments, the declaration, attribute order or quoting is the same request.
  */
 final class RequestHash {
 
@@ -24,7 +27,19 @@ final class RequestHash {
     }
 
     String of(String method, String path, Object body) {
-        String canonical = json.writeValueAsString(sorted(json.valueToTree(body)));
+        return sha256(method, path, json.writeValueAsString(sorted(json.valueToTree(body))));
+    }
+
+    /**
+     * @param xml a document {@code XsdValidator} has accepted
+     * @param vopReference the header, {@code null} when absent
+     */
+    String ofXml(String method, String path, String xml, String vopReference) {
+        String reference = vopReference == null ? "" : "\nVoP-Reference: " + vopReference;
+        return sha256(method, path, CanonicalXml.of(xml) + reference);
+    }
+
+    private static String sha256(String method, String path, String canonical) {
         try {
             byte[] digest = MessageDigest.getInstance("SHA-256")
                     .digest((method + " " + path + "\n" + canonical).getBytes(StandardCharsets.UTF_8));
