@@ -1,9 +1,34 @@
 spring:
   application:
     name: payment-api
+  config:
+    import: ${tpe.bank-directory.location:classpath:bank-directory.yml}
+  # spring.security.oauth2.resourceserver.jwt.issuer-uri is the environment's (specs/10-payment-api.md §6); without it
+  # the service does not start
 
 management:
   endpoint:
     health:
       probes:
         enabled: true
+
+tpe:
+  clients:
+    # specs/10-payment-api.md §4, §6
+    orchestrator:
+      base-url: http://payment-orchestrator:8081
+      timeout: 1s
+    vop:
+      base-url: http://vop-service:8083
+      check-timeout: 300ms
+  observability:
+    inbound:
+      # a channel's traceparent becomes a span link, never the parent (ADR-014, specs/26-observability.md §5.3)
+      link-paths:
+        - /v1/payments
+        - /v1/payments/**
+        - /v1/payee-verifications
+
+springdoc:
+  # a stable document to check in (specs/00-engineering-baseline.md §7)
+  writer-with-order-by-keys: true

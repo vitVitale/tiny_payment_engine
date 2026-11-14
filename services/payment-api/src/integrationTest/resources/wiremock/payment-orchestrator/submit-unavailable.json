@@ -1,0 +1,12 @@
+{
+  "request": {
+    "method": "POST",
+    "url": "/v1/payments"
+  },
+  "response": {
+    "status": 503
+  },
+  "metadata": {
+    "pact": "fault"
+  }
+}

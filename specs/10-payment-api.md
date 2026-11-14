@@ -73,6 +73,8 @@ Processing order (UC-01 1–8):
 5. Derive `commandId = CommandId.derive(client_id, Idempotency-Key)`; call orchestrator `POST /v1/payments` with the
    check's `result` as `vopResult`.
 6. Orchestrator `201` or `200` → store response for the key, return `202` (same body in both cases, UC-01 6a).
+   Orchestrator `409 COMMAND_CONFLICT` → `422 IDEMPOTENCY_KEY_REUSED` (the key's `commandId` has a payment for
+   another request: UC-01 2b, found by the orchestrator); `422 CREDITOR_AGENT_NOT_REACHABLE` is passed on.
 7. Orchestrator timeout / `5xx` / connect failure → delete the in-progress key, `503 ORCHESTRATOR_UNAVAILABLE`
    with `Retry-After: 1` (UC-01 5a).
 
@@ -118,6 +120,8 @@ the 5 s responder timeout and returns `NOT_POSSIBLE`, so payment-api only sees a
 | 400 | `VALIDATION_FAILED` | field errors in `errors[]` (codes below) |
 | 400 | `IDEMPOTENCY_KEY_MISSING` / `IDEMPOTENCY_KEY_INVALID` | header absent / malformed |
 | 400 | `UNSUPPORTED_MEDIA_TYPE_VARIANT` | XML with more than one transaction, wrong `pain.001` version |
+| 401 | `UNAUTHORIZED` | no valid Bearer token; with `WWW-Authenticate` (RFC 6750) |
+| 403 | `FORBIDDEN` | the token lacks the endpoint's scope (`WWW-Authenticate` `insufficient_scope`) or a `client_id` |
 | 403 | `DEBTOR_ACCOUNT_NOT_OWNED` | UC-01 1a |
 | 404 | `PAYMENT_NOT_FOUND` | UC-07 1a |
 | 409 | `IDEMPOTENCY_KEY_IN_PROGRESS` | same key currently being processed |
@@ -126,6 +130,7 @@ the 5 s responder timeout and returns `NOT_POSSIBLE`, so payment-api only sees a
 | 422 | `CREDITOR_AGENT_NOT_REACHABLE` | creditor bank not in directory or not SCT Inst reachable |
 | 429 | `RATE_LIMITED` | over a per-client or per-subject limit, with `Retry-After` ([00 §12.3](00-engineering-baseline.md#123-production-requirements) SEC-04, limits in [Q-33](40-open-questions.md#q-33-rate-limits)) |
 | 503 | `ORCHESTRATOR_UNAVAILABLE`, `VOP_UNAVAILABLE` | with `Retry-After` |
+| 500 | `INTERNAL_ERROR` | a downstream service answered outside its contract (a bug on one side, logged) |
 
 Field error codes: `INVALID_IBAN`, `INVALID_BIC`, `INVALID_AMOUNT` (≤ 0, > 2 decimals, > 999 999 999.99),
 `UNSUPPORTED_CURRENCY`, `INVALID_CHARACTERS` (outside the SEPA set), `TOO_LONG`, `REQUIRED`,
@@ -140,7 +145,7 @@ For XML clients a failed validation additionally offers a `pain.002` with `RJCT 
 |---|---|---|---|
 | orchestrator submit | `POST /v1/payments` | 1 s | 1 retry on connect failure only (idempotent by `commandId`) |
 | orchestrator status | `GET /v1/payments/{id}` | 300 ms | 1 |
-| vop reference check | `POST /v1/verifications/{vopReference}/check` | 300 ms | 1 |
+| vop reference check | `POST /v1/verifications/{vopReference}/check` | 300 ms | 1 on connect failure, timeout, `502` / `503` / `504` |
 | vop verify | `POST /v1/verifications` | 5.5 s | 0 |
 
 ## 5. Behaviour
@@ -188,7 +193,8 @@ CREATE TABLE payment_rejections (            -- pain.002 FF01 for XML clients
 - JSON: Bean Validation on request records + `payment-domain` value objects (`Iban`, `Bic`, `Money.parse`,
   `PartyName`, `RemittanceInformation`, SEPA character set).
 - XML: `XsdValidator` for `pain.001.001.09`, then the same domain validation on the mapped values.
-- `creditor.bic`, if given, must match the directory BIC for the creditor IBAN's bank code (`INVALID_BIC`).
+- `creditor.bic`, if given, must match the directory BIC for the creditor IBAN's bank code, compared by institution
+  (BIC8: `PEERDEFF` matches `PEERDEFFXXX`) (`INVALID_BIC`).
 - `BankDirectory.lookup(creditor.iban)` must exist and be `sctInstReachable` (`422 CREDITOR_AGENT_NOT_REACHABLE`).
 - `debtor.iban ≠ creditor.iban` (`SAME_DEBTOR_AND_CREDITOR`).
 
@@ -196,7 +202,8 @@ CREATE TABLE payment_rejections (            -- pain.002 FF01 for XML clients
 
 `POST /v1/verifications/{vopReference}/check` with `{ debtorIban, payeeIban, payeeName }`. vop-service answers
 `200 { "valid": true, "result": "MATCH" }` or `200 { "valid": false, "problem": "EXPIRED" | "MISMATCH" | "UNKNOWN" }`.
-`valid = false` → `422 VOP_REQUIRED` with `problem` in `detail`. The payer may proceed with any VoP *result*
+`valid = false` → `422 VOP_REQUIRED` with `problem` in `detail`; a payment without `vopReference` is
+`422 VOP_REQUIRED` with `detail` `MISSING`, without a call. The payer may proceed with any VoP *result*
 (`NO_MATCH`, `NOT_POSSIBLE` included, UC-02 6a); only a valid, matching *reference* is required. The `result` of a
 valid check is passed on as `vopResult` in `SubmitPayment`: the fraud rules weigh it
 ([14 §6.1](14-risk-service.md#61-fraud-rules-mvp-rule-set), `NEW_PAYEE_HIGH_AMOUNT`). It is taken from the check, never from
@@ -210,7 +217,7 @@ the client.
 | `tpe.api.idempotency.retention` | `24h` |
 | `tpe.api.idempotency.in-progress-takeover` | `10s` |
 | `tpe.clients.orchestrator.base-url`, `.timeout` | `http://payment-orchestrator:8081`, `1s` |
-| `tpe.clients.vop.base-url` | `http://vop-service:8083` (`https://` in `prod`, [ADR-016](../architecture/decisions/ADR-016-tls-inside-the-cluster.md)) |
+| `tpe.clients.vop.base-url`, `.check-timeout` | `http://vop-service:8083` (`https://` in `prod`, [ADR-016](../architecture/decisions/ADR-016-tls-inside-the-cluster.md)), `300ms` |
 | `tpe.api.rate-limit.clients.<client_id>` | per channel, set at onboarding ([ADR-018](../architecture/decisions/ADR-018-rate-limiting.md)) |
 | `tpe.api.rate-limit.payments-per-subject` | `30/1m` |
 | `tpe.api.rate-limit.verifications-per-subject` | `20/10m`, `100/1d` |

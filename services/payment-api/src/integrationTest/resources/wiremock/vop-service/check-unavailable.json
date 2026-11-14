@@ -1,0 +1,12 @@
+{
+  "request": {
+    "method": "POST",
+    "url": "/v1/verifications/VOP-01JABCDEFGHJKMNPQRSTVW0001/check"
+  },
+  "response": {
+    "status": 503
+  },
+  "metadata": {
+    "pact": "fault"
+  }
+}

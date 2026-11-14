@@ -1,0 +1,19 @@
+{
+  "request": {
+    "method": "POST",
+    "url": "/v1/payments"
+  },
+  "response": {
+    "status": 422,
+    "headers": {
+      "Content-Type": "application/problem+json"
+    },
+    "jsonBody": {
+      "type": "https://tpe.example/problems/creditor-agent-not-reachable",
+      "title": "Unprocessable Content",
+      "status": 422,
+      "detail": "The creditor's bank is not reachable for SCT Inst",
+      "code": "CREDITOR_AGENT_NOT_REACHABLE"
+    }
+  }
+}

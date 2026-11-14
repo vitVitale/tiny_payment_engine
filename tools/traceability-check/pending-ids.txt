@@ -2,13 +2,11 @@
 # Ids of the specs whose work is not delivered yet: no test carries them (for P-nn / M-nn: not both a consumer
 # pact test and a provider verification). The list only shrinks: remove an id once its test exists; an id may be
 # added only in the change that adds it to the specs. One id per line.
-API-AC-01
 API-AC-02
 API-AC-03
 API-AC-04
 API-AC-05
 API-AC-06
-API-AC-07
 API-AC-08
 API-AC-09
 API-AC-10
@@ -129,8 +127,6 @@ ORC-AC-24
 ORC-AC-25
 ORC-AC-26
 ORC-AC-27
-P-01
-P-02
 P-05
 P-06
 P-07
