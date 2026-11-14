@@ -111,6 +111,7 @@ class OnUsRefusalIT extends OrchestratorStack {
         riskAnswers("allow");
         ledgerAnswers("create-hold-unavailable", "release-released");
         double before = rejected("MS03", "TECHNICAL");
+        long transitionsBefore = lastTransitionId();
 
         UUID paymentId = submit();
 
@@ -123,7 +124,9 @@ class OnUsRefusalIT extends OrchestratorStack {
         // the hold may exist: the release frees it, or tombstones it if it never came (ADR-009)
         assertThat(releaseCalls(paymentId)).hasSize(1);
         assertThat(finalEvents(paymentId)).containsExactly("PaymentRejected|MS03");
-        assertThat(rejected("MS03", "TECHNICAL")).isEqualTo(before + 1);
+        // moving the clock lets payments other tests left waiting for their hold give up as well: each counts once
+        await().atMost(AWAIT).untilAsserted(() -> assertThat(rejected("MS03", "TECHNICAL"))
+                .isEqualTo(before + rejectedMs03Since(transitionsBefore)));
     }
 
     @Test
@@ -188,6 +191,19 @@ class OnUsRefusalIT extends OrchestratorStack {
                         SELECT message_type || '|' || (payload ->> 'reasonCode') FROM outbox
                         WHERE topic = 'payments.events' AND message_key = ? ORDER BY id""")
                 .param(paymentId.toString()).query(String.class).list();
+    }
+
+    private long lastTransitionId() {
+        return jdbc.sql("SELECT coalesce(max(id), 0) FROM payment_transitions").query(Long.class).single();
+    }
+
+    /** Outgoing payments that entered {@code REJECTED MS03} after the transition {@code id}. */
+    private long rejectedMs03Since(long id) {
+        return jdbc.sql("""
+                        SELECT count(*) FROM payment_transitions t JOIN payments p USING (payment_id)
+                        WHERE t.id > ? AND t.to_state = 'REJECTED' AND t.from_state <> 'REJECTED'
+                          AND t.reason_code = 'MS03' AND p.direction = 'OUTGOING'""")
+                .param(id).query(Long.class).single();
     }
 
     private List<String> cases(UUID paymentId) {
