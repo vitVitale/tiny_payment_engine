@@ -40,7 +40,7 @@ class AssessRiskActionTest {
     private final List<Duration> timeouts = new ArrayList<>();
     private RiskAnswer answer;
 
-    private final AssessRiskAction action = new AssessRiskAction((payment, timeout) -> {
+    private final AssessRiskAction action = new AssessRiskAction((payment, direction, timeout) -> {
         timeouts.add(timeout);
         return answer;
     }, new RunnerSettings(Duration.ofSeconds(5), Duration.ofSeconds(30), 8, Duration.ofMillis(100)),

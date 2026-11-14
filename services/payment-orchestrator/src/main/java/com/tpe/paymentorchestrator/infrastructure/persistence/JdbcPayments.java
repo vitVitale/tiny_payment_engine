@@ -43,7 +43,8 @@ class JdbcPayments implements Payments {
             payment_id, direction, state, reason_code, on_us, command_id, client_id, request_hash, tx_id, uetr,
             end_to_end_id, amount_minor, currency, debtor_name, debtor_iban, debtor_agent_bic, creditor_name,
             creditor_iban, creditor_agent_bic, remittance, vop_reference, vop_result, accepted_at, send_by,
-            deadline_at, pending_action, finalised_at, trace_context""";
+            deadline_at, pending_action, finalised_at, debtor_account_id, creditor_account_id, booking_entry_id,
+            trace_context""";
 
     private final JdbcClient jdbc;
 
@@ -59,7 +60,8 @@ class JdbcPayments implements Payments {
                                 :txId, CAST(:uetr AS UUID), :endToEndId, :amountMinor, :currency, :debtorName,
                                 :debtorIban, :debtorAgentBic, :creditorName, :creditorIban, :creditorAgentBic,
                                 :remittance, :vopReference, :vopResult, :acceptedAt, :sendBy, :deadlineAt,
-                                :pendingAction, :finalisedAt, :traceContext, :acceptedAt, :now, :now)
+                                :pendingAction, :finalisedAt, :debtorAccountId, :creditorAccountId, :bookingEntryId,
+                                :traceContext, :acceptedAt, :now, :now)
                         ON CONFLICT (command_id) DO NOTHING""")
                 .param("paymentId", payment.paymentId().value())
                 .param("direction", payment.direction().name())
@@ -88,6 +90,9 @@ class JdbcPayments implements Payments {
                 .param("deadlineAt", timestamp(payment.deadlineAt()))
                 .param("pendingAction", payment.pendingAction() == null ? null : payment.pendingAction().name())
                 .param("finalisedAt", timestamp(payment.finalisedAt()))
+                .param("debtorAccountId", payment.debtorAccountId())
+                .param("creditorAccountId", payment.creditorAccountId())
+                .param("bookingEntryId", payment.bookingEntryId())
                 .param("traceContext", payment.traceContext())
                 .param("now", timestamp(now))
                 .update() == 1;
@@ -164,6 +169,8 @@ class JdbcPayments implements Payments {
                         UPDATE payments
                         SET state = :state, reason_code = :reasonCode, pending_action = :pendingAction,
                             next_action_at = :nextActionAt, action_attempts = 0, finalised_at = :finalisedAt,
+                            debtor_account_id = :debtorAccountId, creditor_account_id = :creditorAccountId,
+                            booking_entry_id = :bookingEntryId,
                             final_event_emitted = final_event_emitted OR :finalEventEmitted,
                             version = version + 1, updated_at = :now
                         WHERE payment_id = :paymentId AND state = :claimedState AND pending_action = :claimedAction
@@ -173,6 +180,9 @@ class JdbcPayments implements Payments {
                 .param("pendingAction", next.pendingAction() == null ? null : next.pendingAction().name())
                 .param("nextActionAt", next.pendingAction() == null ? null : timestamp(now))
                 .param("finalisedAt", timestamp(next.finalisedAt()))
+                .param("debtorAccountId", next.debtorAccountId())
+                .param("creditorAccountId", next.creditorAccountId())
+                .param("bookingEntryId", next.bookingEntryId())
                 .param("finalEventEmitted", finalEventEmitted)
                 .param("now", timestamp(now))
                 .param("paymentId", claim.paymentId().value())
@@ -226,6 +236,9 @@ class JdbcPayments implements Payments {
                 instant(rs, "deadline_at"),
                 pendingAction == null ? null : PendingAction.valueOf(pendingAction),
                 instant(rs, "finalised_at"),
+                rs.getObject("debtor_account_id", UUID.class),
+                rs.getObject("creditor_account_id", UUID.class),
+                rs.getObject("booking_entry_id", UUID.class),
                 rs.getString("trace_context"));
     }
 

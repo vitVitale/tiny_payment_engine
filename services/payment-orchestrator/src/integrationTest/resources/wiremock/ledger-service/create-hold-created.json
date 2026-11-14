@@ -1,0 +1,17 @@
+{
+  "request": {
+    "method": "POST",
+    "url": "/v1/holds"
+  },
+  "response": {
+    "status": 201,
+    "headers": {
+      "Content-Type": "application/json"
+    },
+    "jsonBody": {
+      "holdId": "0192f0e4-7b1c-7cc3-a1b2-0000000000a1",
+      "accountId": "0192f0e4-7b1c-7cc3-a1b2-0000000000b1",
+      "status": "ACTIVE"
+    }
+  }
+}

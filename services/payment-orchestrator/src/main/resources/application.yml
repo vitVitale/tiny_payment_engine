@@ -33,6 +33,9 @@ tpe:
         # UC-04 2c, UC-06 3
         outgoing: 500ms
         incoming: 300ms
+    ledger:
+      base-url: http://ledger-service:8082
+      timeout: 1s
 
 springdoc:
   # a stable document to check in (specs/00-engineering-baseline.md §7)

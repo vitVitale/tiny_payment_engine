@@ -12,8 +12,8 @@ import org.springframework.transaction.annotation.Transactional;
 
 /**
  * The second transaction of a step (specs/11-payment-orchestrator.md §6.2, ADR-008): applies the outcome only while
- * the payment is still as claimed, records the transition, and writes the final event when the payment became final
- * with nothing left to undo.
+ * the payment is still as claimed, records the transition if the state changed, and writes the final event when the
+ * payment became final with nothing left to undo.
  */
 @Component
 public class StepApplier {
@@ -38,11 +38,15 @@ public class StepApplier {
                     claim.action());
             return false;
         }
-        payments.recordTransition(next.paymentId(), claim.state(), next.state(), next.reasonCode(), moved.cause(),
-                now);
         if (finalEvent) {
             finalEvents.emit(next);
         }
+        if (next.state() == claim.state()) {
+            // a step within the state, e.g. the payee assessed: no transition
+            return true;
+        }
+        payments.recordTransition(next.paymentId(), claim.state(), next.state(), next.reasonCode(), moved.cause(),
+                now);
         // one line per state transition (specs/26-observability.md §4.3); no parties or amounts
         LOG.info("payment {} txId {} {} -> {} ({}){}", next.paymentId().value(), next.txId().value(), claim.state(),
                 next.state(), moved.cause(), next.reasonCode() == null ? "" : " " + next.reasonCode().code());

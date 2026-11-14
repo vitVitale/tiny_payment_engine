@@ -51,7 +51,7 @@ public class AssessRiskAction implements SagaAction {
             // asking again only gets closer to send_by
             return new StepOutcome.TechnicalFailure("no time left before send_by", false);
         }
-        RiskAnswer answer = risk.assess(payment, readTimeout.get());
+        RiskAnswer answer = risk.assess(payment, payment.direction(), readTimeout.get());
         Instant now = clock.instant();
         return switch (answer) {
             case RiskAnswer.Allow allow -> new StepOutcome.Moved(payment.riskChecked(), "RISK_ALLOW", null);

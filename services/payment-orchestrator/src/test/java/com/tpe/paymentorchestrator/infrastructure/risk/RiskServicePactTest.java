@@ -142,74 +142,79 @@ class RiskServicePactTest {
     @Test
     @PactTestFor(pactMethod = "outgoingAllow")
     void PACT_P03_anAllowedPaymentIsAllowed(MockServer server) {
-        assertThat(client(server).assess(ALLOW.payment(PaymentDirection.OUTGOING, PayeeVerification.MATCH), TIMEOUT))
+        assertThat(assess(server, ALLOW.payment(PaymentDirection.OUTGOING, PayeeVerification.MATCH)))
                 .isEqualTo(new RiskAnswer.Allow());
     }
 
     @Test
     @PactTestFor(pactMethod = "outgoingDenyByAFraudRule")
     void PACT_P03_aFraudRuleDeniesWithFr01(MockServer server) {
-        assertThat(client(server).assess(FRAUD.payment(PaymentDirection.OUTGOING, PayeeVerification.MATCH), TIMEOUT))
+        assertThat(assess(server, FRAUD.payment(PaymentDirection.OUTGOING, PayeeVerification.MATCH)))
                 .isEqualTo(new RiskAnswer.Deny(ReasonCode.FR01));
     }
 
     @Test
     @PactTestFor(pactMethod = "outgoingDenyBySanctions")
     void PACT_P03_aSanctionsHitDeniesWithRr04(MockServer server) {
-        assertThat(client(server).assess(SANCTIONS.payment(PaymentDirection.OUTGOING, PayeeVerification.MATCH),
-                TIMEOUT)).isEqualTo(new RiskAnswer.Deny(ReasonCode.RR04));
+        assertThat(assess(server, SANCTIONS.payment(PaymentDirection.OUTGOING, PayeeVerification.MATCH)))
+                .isEqualTo(new RiskAnswer.Deny(ReasonCode.RR04));
     }
 
     @Test
     @PactTestFor(pactMethod = "outgoingReview")
     void PACT_P03_aReviewIsAReview(MockServer server) {
-        assertThat(client(server).assess(REVIEW.payment(PaymentDirection.OUTGOING, PayeeVerification.NO_MATCH),
-                TIMEOUT)).isEqualTo(new RiskAnswer.Review());
+        assertThat(assess(server, REVIEW.payment(PaymentDirection.OUTGOING, PayeeVerification.NO_MATCH)))
+                .isEqualTo(new RiskAnswer.Review());
     }
 
     @Test
     @PactTestFor(pactMethod = "outgoingReplayed")
     void PACT_P03_aReplayedAssessmentAnswersTheStoredDecision(MockServer server) {
-        assertThat(client(server).assess(REPLAYED.payment(PaymentDirection.OUTGOING, PayeeVerification.MATCH),
-                TIMEOUT)).isEqualTo(new RiskAnswer.Deny(ReasonCode.FR01));
+        assertThat(assess(server, REPLAYED.payment(PaymentDirection.OUTGOING, PayeeVerification.MATCH)))
+                .isEqualTo(new RiskAnswer.Deny(ReasonCode.FR01));
     }
 
     @Test
     @PactTestFor(pactMethod = "incomingAllow")
     void PACT_P03_anAllowedIncomingPaymentIsAllowed(MockServer server) {
-        assertThat(client(server).assess(INCOMING_ALLOW.payment(PaymentDirection.INCOMING, null), TIMEOUT))
+        assertThat(assess(server, INCOMING_ALLOW.payment(PaymentDirection.INCOMING, null)))
                 .isEqualTo(new RiskAnswer.Allow());
     }
 
     @Test
     @PactTestFor(pactMethod = "incomingDenyByAFraudRule")
     void PACT_P03_aFraudRuleDeniesAnIncomingPayment(MockServer server) {
-        assertThat(client(server).assess(INCOMING_FRAUD.payment(PaymentDirection.INCOMING, null), TIMEOUT))
+        assertThat(assess(server, INCOMING_FRAUD.payment(PaymentDirection.INCOMING, null)))
                 .isEqualTo(new RiskAnswer.Deny(ReasonCode.FR01));
     }
 
     @Test
     @PactTestFor(pactMethod = "incomingDenyBySanctions")
     void PACT_P03_aSanctionsHitDeniesAnIncomingPaymentWithRr04(MockServer server) {
-        assertThat(client(server).assess(INCOMING_SANCTIONS.payment(PaymentDirection.INCOMING, null), TIMEOUT))
+        assertThat(assess(server, INCOMING_SANCTIONS.payment(PaymentDirection.INCOMING, null)))
                 .isEqualTo(new RiskAnswer.Deny(ReasonCode.RR04));
     }
 
     @Test
     @PactTestFor(pactMethod = "incomingReview")
     void PACT_P03_anIncomingReviewIsAReview(MockServer server) {
-        assertThat(client(server).assess(INCOMING_REVIEW.payment(PaymentDirection.INCOMING, null), TIMEOUT))
+        assertThat(assess(server, INCOMING_REVIEW.payment(PaymentDirection.INCOMING, null)))
                 .isEqualTo(new RiskAnswer.Review());
     }
 
     @Test
     @PactTestFor(pactMethod = "incomingReplayed")
     void PACT_P03_aReplayedIncomingAssessmentAnswersTheStoredDecision(MockServer server) {
-        assertThat(client(server).assess(INCOMING_REPLAYED.payment(PaymentDirection.INCOMING, null), TIMEOUT))
+        assertThat(assess(server, INCOMING_REPLAYED.payment(PaymentDirection.INCOMING, null)))
                 .isEqualTo(new RiskAnswer.Deny(ReasonCode.FR01));
     }
 
     private static final Duration TIMEOUT = Duration.ofSeconds(5);
+
+    /** In the payment's own direction, as {@code ASSESS_RISK} asks. */
+    private static RiskAnswer assess(MockServer server, Payment payment) {
+        return client(server).assess(payment, payment.direction(), TIMEOUT);
+    }
 
     private static HttpRiskAssessments client(MockServer server) {
         JsonMapper json = JsonMapper.builder().addModule(new ContractsModule()).build();
@@ -303,7 +308,8 @@ class RiskServicePactTest {
                     new PaymentParty(new PartyName("Max Mustermann"), new Iban(creditorIban()),
                             new Bic("PEERDEFFXXX")),
                     new RemittanceInformation("Invoice 42"), "VOP-1", vopResult, accepted,
-                    accepted.plusSeconds(10), accepted.plusSeconds(20), PendingAction.ASSESS_RISK, null, null);
+                    accepted.plusSeconds(10), accepted.plusSeconds(20), PendingAction.ASSESS_RISK, null, null, null,
+                    null, null);
         }
 
         /** {@code DE} + mod 97-10 check digits + bank code + a 10-digit account number. */

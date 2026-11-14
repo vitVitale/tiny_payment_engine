@@ -13,13 +13,18 @@ import com.tpe.ledgerservice.application.account.AccountService;
 import com.tpe.ledgerservice.application.account.Caller;
 import com.tpe.ledgerservice.application.account.OpenAccount;
 import com.tpe.ledgerservice.application.posting.FundingService;
+import com.tpe.ledgerservice.application.reservation.CreateHold;
+import com.tpe.ledgerservice.application.reservation.HoldService;
+import com.tpe.ledgerservice.application.reservation.SettlementService;
 import com.tpe.ledgerservice.domain.account.Account;
 import com.tpe.ledgerservice.domain.account.BlockReason;
 import com.tpe.ledgerservice.domain.account.CustomerId;
 import com.tpe.ledgerservice.domain.account.Holder;
 import com.tpe.ledgerservice.domain.account.HolderType;
+import com.tpe.paymentdomain.Iban;
 import com.tpe.testsupport.pact.PactVerification;
 import java.nio.charset.StandardCharsets;
+import java.util.HashMap;
 import java.util.Map;
 import java.util.UUID;
 import org.apache.hc.core5.http.HttpRequest;
@@ -32,11 +37,13 @@ import tools.jackson.core.type.TypeReference;
 import tools.jackson.databind.json.JsonMapper;
 
 /**
- * ledger-service verifies every collected pact that names it (specs/20-testing-strategy.md §10.3): P-10, the account
- * calls of the system-test harness, and M-04, the {@code accounts.events} snapshots its projections read. Runs only
+ * ledger-service verifies every collected pact that names it (specs/20-testing-strategy.md §10.3): P-04, the
+ * orchestrator's holds, P-10, the account calls of the system-test harness, and M-04, the {@code accounts.events}
+ * snapshots its projections read. Runs only
  * with {@code -Ppact-verify}, against this commit's pacts and the last release's ({@link PactVerification}).
  *
- * <p>States seed accounts through the application services and hand the new account's id to the request path. The
+ * <p>States seed accounts and holds through the application services and hand the new account's id or IBAN and a
+ * fresh hold id to the request. The
  * pact's {@code Authorization} is the consumer's example: each request carries a token of this JVM's key instead, of a
  * back-office operator unless a {@code caller is …} state names another caller. Each request also gets a fresh
  * {@code Idempotency-Key}, so the example key of one interaction never replays another's response.
@@ -58,6 +65,12 @@ class LedgerServicePactVerificationIT extends LedgerStack {
     FundingService funding;
 
     @Autowired
+    HoldService holds;
+
+    @Autowired
+    SettlementService settlements;
+
+    @Autowired
     JdbcClient jdbc;
 
     private String caller;
@@ -72,7 +85,7 @@ class LedgerServicePactVerificationIT extends LedgerStack {
 
     @TestTemplate
     @ExtendWith(PactVerificationSpringProvider.class)
-    void PACT_P10_PACT_M04_verify(PactVerificationContext context) {
+    void PACT_P04_PACT_P10_PACT_M04_verify(PactVerificationContext context) {
         context.verifyInteraction();
     }
 
@@ -114,6 +127,32 @@ class LedgerServicePactVerificationIT extends LedgerStack {
         var reason = BlockReason.valueOf((String) parameters.get("reason"));
         accounts.block(account.accountId(), reason, null, stateCaller());
         return Map.of("accountId", account.accountId().toString());
+    }
+
+    @State("account is OPEN with available balance")
+    Map<String, Object> accountIsOpenWithAvailableBalance(Map<String, Object> parameters) {
+        Account payer = fundedAccount(amount(parameters, "availableMinor"));
+        return Map.of("debtorIban", payer.iban().value(), "holdId", UUID.randomUUID().toString());
+    }
+
+    @State("hold is ACTIVE")
+    Map<String, Object> holdIsActive(Map<String, Object> parameters) {
+        return activeHold(amount(parameters, "amountMinor"));
+    }
+
+    @State("hold is ACTIVE and the payee account is OPEN")
+    Map<String, Object> holdIsActiveAndThePayeeAccountIsOpen(Map<String, Object> parameters) {
+        Map<String, Object> hold = new HashMap<>(activeHold(amount(parameters, "amountMinor")));
+        hold.put("creditorIban", openAccount().iban().value());
+        return hold;
+    }
+
+    @State("hold is SETTLED on-us")
+    Map<String, Object> holdIsSettledOnUs(Map<String, Object> parameters) {
+        Map<String, Object> hold = holdIsActiveAndThePayeeAccountIsOpen(parameters);
+        settlements.settleOnUs(UUID.fromString((String) hold.get("holdId")),
+                new Iban((String) hold.get("creditorIban")));
+        return hold;
     }
 
     @State("caller is a compliance officer")
@@ -170,6 +209,24 @@ class LedgerServicePactVerificationIT extends LedgerStack {
                 .query((rs, row) -> new MessageAndMetadata(rs.getString(1).getBytes(StandardCharsets.UTF_8),
                         JSON.readValue(rs.getString(2), new TypeReference<Map<String, Object>>() {})))
                 .single();
+    }
+
+    /** An {@code ACTIVE} hold of {@code amountMinor} on a funded payer: its id and the payer's IBAN. */
+    private Map<String, Object> activeHold(long amountMinor) {
+        Account payer = fundedAccount(amountMinor);
+        UUID holdId = UUID.randomUUID();
+        holds.create(new CreateHold(holdId, payer.iban(), amountMinor, "EUR", holdId, "TPEPACTSTATE"));
+        return Map.of("debtorIban", payer.iban().value(), "holdId", holdId.toString());
+    }
+
+    private Account fundedAccount(long amountMinor) {
+        Account account = openAccount();
+        funding.fund(account.accountId(), amountMinor, "EUR", STATE_ACTOR);
+        return account;
+    }
+
+    private static long amount(Map<String, Object> parameters, String name) {
+        return ((Number) parameters.get(name)).longValue();
     }
 
     private static Caller stateCaller() {
