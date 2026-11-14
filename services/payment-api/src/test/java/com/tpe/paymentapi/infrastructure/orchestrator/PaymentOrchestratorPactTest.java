@@ -24,6 +24,7 @@ import com.tpe.paymentdomain.Money;
 import com.tpe.paymentdomain.PartyName;
 import com.tpe.paymentdomain.PaymentId;
 import com.tpe.paymentdomain.RemittanceInformation;
+import com.tpe.paymentdomain.TxId;
 import java.time.Instant;
 import java.util.Currency;
 import java.util.LinkedHashMap;
@@ -38,8 +39,8 @@ import tools.jackson.databind.json.JsonMapper;
 /**
  * P-01, payment-api → payment-orchestrator {@code POST /v1/payments} (specs/20-testing-strategy.md §10.1): every
  * answer payment-api maps, through the real {@link HttpOrchestrator}. Verified by payment-orchestrator's
- * {@code PaymentOrchestratorPactVerificationIT} with {@code -Ppact-verify}; the status interactions come with the
- * status query.
+ * {@code PaymentOrchestratorPactVerificationIT} with {@code -Ppact-verify}. {@code GET /v1/payments/{id}} as the
+ * idempotency guard's replay reads it (10 §5.1); the status query adds the interactions it maps.
  */
 @ExtendWith(PactConsumerTestExt.class)
 @PactTestFor(providerName = PaymentOrchestratorPactTest.PROVIDER, pactVersion = PactSpecVersion.V4)
@@ -66,6 +67,8 @@ class PaymentOrchestratorPactTest {
     private static final String EXISTS = "a payment exists for the commandId";
     private static final String CONFLICT = "a payment for another request exists for the commandId";
     private static final String NOT_IN_DIRECTORY = "the creditor's bank is not in the directory";
+    private static final String PAYMENT_EXISTS = "an outgoing payment exists";
+    private static final String NO_PAYMENT = "no payment exists for the paymentId";
 
     @Pact(consumer = CONSUMER)
     V4Pact newPayment(PactDslWithProvider builder) {
@@ -124,6 +127,51 @@ class PaymentOrchestratorPactTest {
                 .toPact(V4Pact.class);
     }
 
+    @Pact(consumer = CONSUMER)
+    V4Pact paymentStatus(PactDslWithProvider builder) {
+        return builder.given(PAYMENT_EXISTS, submitted(CREDITOR))
+                .uponReceiving("status: an outgoing payment")
+                .method("GET").pathFromProviderState(HttpOrchestrator.PAYMENTS + "/${paymentId}",
+                        HttpOrchestrator.PAYMENTS + "/" + PAYMENT_ID)
+                .willRespondWith()
+                .status(200)
+                .matchHeader("Content-Type", "application/json.*", "application/json")
+                .body(newJsonBody(body -> {
+                    body.stringMatcher("paymentId", UUID_FORMAT, PAYMENT_ID);
+                    body.stringMatcher("state", STATES, "SETTLED");
+                    body.stringType("txId", "TPE01JABCDEFGHJKMNPQRSTVW0101");
+                    body.stringMatcher("acceptedAt", INSTANT, ACCEPTED_AT);
+                }).build())
+                .toPact(V4Pact.class);
+    }
+
+    @Pact(consumer = CONSUMER)
+    V4Pact unknownPayment(PactDslWithProvider builder) {
+        return builder.given(NO_PAYMENT)
+                .uponReceiving("status: no payment of the id")
+                .method("GET").pathFromProviderState(HttpOrchestrator.PAYMENTS + "/${paymentId}",
+                        HttpOrchestrator.PAYMENTS + "/" + PAYMENT_ID)
+                .willRespondWith()
+                .status(404)
+                .matchHeader("Content-Type", "application/problem\\+json.*", "application/problem+json")
+                .body(newJsonBody(body -> body.stringValue("code", "PAYMENT_NOT_FOUND")).build())
+                .toPact(V4Pact.class);
+    }
+
+    @Test
+    @PactTestFor(pactMethod = "paymentStatus")
+    void PACT_P01_theStatusOfAPaymentIsItsCurrentState(MockServer server) {
+        assertThat(client(server).payment(new PaymentId(UUID.fromString(PAYMENT_ID))))
+                .isEqualTo(new Orchestrator.Found(PaymentState.SETTLED, new TxId("TPE01JABCDEFGHJKMNPQRSTVW0101")));
+    }
+
+    @Test
+    @PactTestFor(pactMethod = "unknownPayment")
+    void PACT_P01_theStatusOfAnUnknownPaymentIsNotFound(MockServer server) {
+        assertThat(client(server).payment(new PaymentId(UUID.fromString(PAYMENT_ID))))
+                .isEqualTo(new Orchestrator.NotFound());
+    }
+
     @Test
     @PactTestFor(pactMethod = "newPayment")
     void PACT_P01_aNewPaymentIsCreated(MockServer server) {
@@ -155,11 +203,12 @@ class PaymentOrchestratorPactTest {
 
     private static HttpOrchestrator client(MockServer server) {
         JsonMapper json = JsonMapper.builder().addModule(new ContractsModule()).build();
-        return new HttpOrchestrator(RestClient.builder()
+        RestClient client = RestClient.builder()
                 .baseUrl(server.getUrl())
                 .configureMessageConverters(converters -> converters.withJsonConverter(
                         new JacksonJsonHttpMessageConverter(json)))
-                .build());
+                .build();
+        return new HttpOrchestrator(client, client);
     }
 
     private static SubmitPayment command(String creditorIban) {

@@ -44,6 +44,11 @@ public final class Tokens {
         return bearer(claims(CLIENT, scope, List.of(accounts)).build(), KEYS);
     }
 
+    /** A customer of channel {@code clientId}, who may debit {@code account}. */
+    public static String ofClient(String clientId, String scope, String account) {
+        return bearer(claims(clientId, scope, List.of(account)).build(), KEYS);
+    }
+
     /** As the channel's customer, but without the {@code client_id} claim. */
     public static String withoutClientId(String scope, String account) {
         return bearer(claims(null, scope, List.of(account)).build(), KEYS);

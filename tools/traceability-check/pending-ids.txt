@@ -3,13 +3,9 @@
 # pact test and a provider verification). The list only shrinks: remove an id once its test exists; an id may be
 # added only in the change that adds it to the specs. One id per line.
 API-AC-02
-API-AC-03
-API-AC-04
 API-AC-05
 API-AC-06
-API-AC-08
 API-AC-09
-API-AC-10
 API-AC-11
 CH-01
 CH-02

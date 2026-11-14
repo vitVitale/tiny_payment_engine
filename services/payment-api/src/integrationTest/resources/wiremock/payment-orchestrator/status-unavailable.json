@@ -1,0 +1,12 @@
+{
+  "request": {
+    "method": "GET",
+    "urlPathPattern": "/v1/payments/[0-9a-f-]{36}"
+  },
+  "response": {
+    "status": 503
+  },
+  "metadata": {
+    "pact": "fault"
+  }
+}

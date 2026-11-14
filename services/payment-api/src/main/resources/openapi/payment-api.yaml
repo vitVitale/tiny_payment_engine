@@ -31,7 +31,8 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/PaymentResponse"
-          description: Accepted; Location is the payment's status
+          description: Accepted; Location is the payment's status. The same key and
+            body again answer the same payment with its current status
         "400":
           content:
             application/problem+json:
@@ -51,6 +52,13 @@ paths:
               schema:
                 $ref: "#/components/schemas/ProblemDetail"
           description: "Scope payments:write missing, or DEBTOR_ACCOUNT_NOT_OWNED"
+        "409":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ProblemDetail"
+          description: "IDEMPOTENCY_KEY_IN_PROGRESS: a request with the key is being\
+            \ processed"
         "422":
           content:
             application/problem+json:
