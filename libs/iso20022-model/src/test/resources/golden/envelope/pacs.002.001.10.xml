@@ -49,6 +49,13 @@
                         <BICFI>TPEBDEFFXXX</BICFI>
                     </FinInstnId>
                 </InstdAgt>
+                <OrgnlTxRef>
+                    <DbtrAgt>
+                        <FinInstnId>
+                            <BICFI>TPEBDEFFXXX</BICFI>
+                        </FinInstnId>
+                    </DbtrAgt>
+                </OrgnlTxRef>
             </TxInfAndSts>
         </FIToFIPmtStsRpt>
     </Document>
