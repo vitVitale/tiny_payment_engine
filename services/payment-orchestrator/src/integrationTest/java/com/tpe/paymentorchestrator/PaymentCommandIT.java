@@ -235,6 +235,16 @@ class PaymentCommandIT extends OrchestratorStack {
         return request;
     }
 
+    @Test
+    void aBodyOfAnotherMediaTypeIs415WithItsCode() {
+        ResponseEntity<String> response = http().post().uri("/v1/payments").contentType(MediaType.TEXT_PLAIN)
+                .body("hello").retrieve().toEntity(String.class);
+
+        assertThat(response.getStatusCode().value()).isEqualTo(415);
+        assertThat(response.getHeaders().getContentType()).isEqualTo(MediaType.APPLICATION_PROBLEM_JSON);
+        assertThat(JSON.readTree(response.getBody()).get("code").asString()).isEqualTo("UNSUPPORTED_MEDIA_TYPE");
+    }
+
     private ResponseEntity<String> submit(Map<String, Object> request) {
         return http().post().uri("/v1/payments").contentType(MediaType.APPLICATION_JSON)
                 .body(JSON.writeValueAsString(request)).retrieve().toEntity(String.class);

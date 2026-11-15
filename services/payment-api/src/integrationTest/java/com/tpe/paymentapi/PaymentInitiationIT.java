@@ -228,6 +228,18 @@ class PaymentInitiationIT extends PaymentApiStack {
     }
 
     @Test
+    void aBodyNeitherJsonNorXmlIs415WithItsCode() {
+        ResponseEntity<JsonNode> response = http().post().uri("/v1/payments")
+                .header(HttpHeaders.AUTHORIZATION, Tokens.customer(WRITE, DEBTOR))
+                .header("Idempotency-Key", "key-text")
+                .contentType(MediaType.TEXT_PLAIN).body("hello")
+                .retrieve().toEntity(JsonNode.class);
+
+        assertProblem(response, 415, "UNSUPPORTED_MEDIA_TYPE");
+        assertNothingAsked();
+    }
+
+    @Test
     void aCreditorBankOutsideTheDirectoryIsNotReachable() {
         ResponseEntity<JsonNode> response = initiate("key-unknown-bank", payment(p -> {
             Map<String, Object> creditor = (Map<String, Object>) p.get("creditor");

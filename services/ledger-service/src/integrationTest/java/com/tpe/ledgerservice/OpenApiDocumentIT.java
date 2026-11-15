@@ -26,9 +26,14 @@ class OpenApiDocumentIT extends LedgerStack {
         ObjectNode document = (ObjectNode) json.readTree(served);
         // the random port of this test
         document.remove("servers");
-        String generated = json.writerWithDefaultPrettyPrinter().writeValueAsString(document) + "\n";
+        // LF on every OS: the pretty printer ends lines with the platform's separator, and a Windows checkout may turn
+        // the file's LF into CRLF (core.autocrlf); neither is a change of the document
+        String generated = json.writerWithDefaultPrettyPrinter().writeValueAsString(document).replace("\r\n", "\n")
+                + "\n";
 
-        String checkedIn = Files.exists(CHECKED_IN) ? Files.readString(CHECKED_IN, StandardCharsets.UTF_8) : "";
+        String checkedIn = Files.exists(CHECKED_IN)
+                ? Files.readString(CHECKED_IN, StandardCharsets.UTF_8).replace("\r\n", "\n")
+                : "";
         if (!generated.equals(checkedIn)) {
             Files.createDirectories(CHECKED_IN.getParent());
             Files.writeString(CHECKED_IN, generated, StandardCharsets.UTF_8);

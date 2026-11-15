@@ -236,6 +236,18 @@ class AccountApiIT extends LedgerStack {
     }
 
     @Test
+    void aLookupWithoutIbanIs400ValidationFailed() {
+        // Spring MVC refuses the unmatched params = "iban" condition itself, without a body of its own
+        var response = http().get().uri("/v1/accounts?customerId={id}", customerId())
+                .header(AUTHORIZATION, operator("op-1"))
+                .retrieve().toEntity(JsonNode.class);
+
+        assertThat(response.getStatusCode().value()).isEqualTo(400);
+        assertProblem(response, "VALIDATION_FAILED");
+        assertThat(response.getBody().get("errors")).isEmpty();
+    }
+
+    @Test
     void withoutAValidTokenEveryEndpointIs401Unauthenticated() {
         // a real signature over other claims
         String[] parts = StaffTokens.token("op-1", "COMPLIANCE_OFFICER").split("\\.");

@@ -12,6 +12,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import tools.jackson.databind.JsonNode;
@@ -193,6 +194,16 @@ class AssessmentIT extends RiskStack {
         body.put("remittanceInformation", "Invoice 7");
         body.put("vopResult", "MATCH");
         return body;
+    }
+
+    @Test
+    void aBodyOfAnotherMediaTypeIs415WithItsCode() {
+        ResponseEntity<JsonNode> response = http().post().uri("/v1/risk/assessments")
+                .header("Content-Type", "text/plain").body("hello").retrieve().toEntity(JsonNode.class);
+
+        assertThat(response.getStatusCode().value()).isEqualTo(415);
+        assertThat(response.getHeaders().getContentType()).isEqualTo(MediaType.APPLICATION_PROBLEM_JSON);
+        assertThat(response.getBody().get("code").asString()).isEqualTo("UNSUPPORTED_MEDIA_TYPE");
     }
 
     ResponseEntity<JsonNode> assess(Map<String, Object> body) {
