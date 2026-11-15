@@ -14,6 +14,12 @@
     <artifactId>iso20022-model</artifactId>
 
     <dependencies>
+        <!-- the builders take payment-domain types (specs/01-shared-libraries.md §2.2) -->
+        <dependency>
+            <groupId>com.tpe</groupId>
+            <artifactId>payment-domain</artifactId>
+            <version>${project.version}</version>
+        </dependency>
         <dependency>
             <groupId>jakarta.xml.bind</groupId>
             <artifactId>jakarta.xml.bind-api</artifactId>
@@ -21,6 +27,10 @@
         <dependency>
             <groupId>org.glassfish.jaxb</groupId>
             <artifactId>jaxb-runtime</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>net.jqwik</groupId>
+            <artifactId>jqwik</artifactId>
         </dependency>
     </dependencies>
 
