@@ -7,3 +7,14 @@ management:
     health:
       probes:
         enabled: true
+
+# specs/17-csm-simulator.md §4
+tpe:
+  sim:
+    gateway-url: http://csm-gateway:8085
+    own-bic: TIPSXXXXXXX
+    beneficiary-delay: 300ms
+    answer-timeout: 6s
+    timeout-deadline: 20s
+    # how often the timeline runs what is due; adds at most this much to every scheduled answer
+    tick: 5ms
