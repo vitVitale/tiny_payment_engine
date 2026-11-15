@@ -25,8 +25,21 @@ State is in memory; restart = clean slate. Single instance.
 ### 3.1 CSM transport
 
 - `POST /csm/v1/messages` — from csm-gateway (envelope). Responds `202` and processes asynchronously.
-  Deduplicates by `MsgId` (a retried `pacs.008` is processed once).
-- Sends to csm-gateway `POST {tpe.sim.gateway-url}/csm/v1/inbound`.
+  Deduplicates by `MsgId` (a retried `pacs.008` is processed once; the retry is journalled as a duplicate).
+  An envelope that is not a valid CSM envelope (unparsable, or a part failing its XSD), or a `pacs.008` the simulator
+  cannot read (e.g. not EUR), is `400 INVALID_ENVELOPE` with the failing part and its violation codes in `errors`,
+  logged at `ERROR`, and neither journalled nor marked processed. csm-gateway validates before it sends, so this only
+  happens on a bug: the simulator is a test oracle (SIM-AC-02).
+- Sends to csm-gateway `POST {tpe.sim.gateway-url}/csm/v1/inbound` (UTF-8 `application/xml`; connect 200 ms, read
+  1 s). A send the gateway does not take is logged, not repeated and not journalled (the CSM's own retries are out of
+  scope; an investigation recovers the status). Its `pacs.002` goes from the CSM (`tpe.sim.own-bic`, `InstgAgt`) to
+  the `DbtrAgt` of the `pacs.008` (`InstdAgt`), with `OrgnlTxRef/DbtrAgt`.
+- Timing reads the simulator's own injected clock (component tests replace it with a `MutableClock`): each piece of
+  work is due at an instant and runs as of that instant, whenever the timeline worker (every `tpe.sim.tick`) finds
+  it. `REJECT` answers at once; `DELAY:<ms>` is `ACCEPT` with `<ms>` as the beneficiary delay; a beneficiary answer
+  that would come after the time-out deadline is a time-out (`RJCT AB05` at the deadline, no settlement). A settled
+  transfer is settled at the instant its `pacs.002 ACSC` is sent (the beneficiary's acceptance and the CSM's
+  settlement are one step here).
 
 ### 3.2 Scheme behaviour
 
@@ -98,6 +111,20 @@ seeded counterparty BIC as `DbtrAgt` unless the request gives `txId` / `debtorAg
 Default scenario (no explicit one): `ACCEPT` with `beneficiaryDelay` 300 ms. Amount-based shortcuts for manual
 testing: cents `.91` → `REJECT:AC01`, `.92` → `REJECT:AC04`, `.93` → `TIMEOUT`, `.94` → `SILENT`.
 
+Bodies (JSON; a request the simulator cannot act on is `400` with a problem detail; writes answer `204`):
+
+- `PUT /sim/v1/counterparty-accounts`: `[ { "iban": "…", "holderName": "…" } ]`, replacing all accounts. The bank
+  code is not a separate field: it is the one the IBAN carries.
+- `PUT /sim/v1/scenarios/{creditorIban}`: `{ "scenario": "REJECT:AC04" }`; a reason code is four characters.
+- `GET /sim/v1/received?txId=`: `[ { "kind": "RECEIVED" | "SENT", "messageType": "pacs.008.001.08", "msgId",
+  "at", "duplicate", "envelope" } ]`, oldest first.
+- `GET /sim/v1/settlements?since=`: `[ { "txId", "debtorAgentBic", "direction": "OUTGOING" | "INCOMING",
+  "amountMinor", "settledAt" } ]`, oldest first; `since` is inclusive and optional.
+
+The tracer bullet (#104) plays `ACCEPT`, `REJECT:<code>`, `TIMEOUT` and `DELAY:<ms>`; the other scenarios, incoming
+payments and investigations follow in later work and are refused with `400` until then. Until `SILENT` exists, the
+`.94` amount shortcut is not applied (such a payment is `ACCEPT`).
+
 ## 4. Configuration
 
 | Property | Default |
@@ -107,6 +134,7 @@ testing: cents `.91` → `REJECT:AC01`, `.92` → `REJECT:AC04`, `.93` → `TIME
 | `tpe.sim.beneficiary-delay` | `300ms` |
 | `tpe.sim.answer-timeout` | `6s` |
 | `tpe.sim.timeout-deadline` | `20s` (the scheme time-out deadline used wherever this spec says "+ 20s") |
+| `tpe.sim.tick` | `5ms` (how often due work runs; at most this much is added to a scheduled answer) |
 
 ## 5. Acceptance criteria
 

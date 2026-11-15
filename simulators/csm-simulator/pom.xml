@@ -14,9 +14,24 @@
     <artifactId>csm-simulator</artifactId>
 
     <dependencies>
+        <!-- all XML through iso20022-model (specs/17-csm-simulator.md §2) -->
+        <dependency>
+            <groupId>com.tpe</groupId>
+            <artifactId>iso20022-model</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>com.tpe</groupId>
+            <artifactId>payment-domain</artifactId>
+            <version>${project.version}</version>
+        </dependency>
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-webmvc</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-restclient</artifactId>
         </dependency>
         <dependency>
             <groupId>org.springframework.boot</groupId>
@@ -30,6 +45,24 @@
         <dependency>
             <groupId>com.tpe</groupId>
             <artifactId>test-support</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <!-- MutableClock (specs/20-testing-strategy.md §2) -->
+        <dependency>
+            <groupId>com.tpe</groupId>
+            <artifactId>payment-domain</artifactId>
+            <type>test-jar</type>
+            <scope>test</scope>
+        </dependency>
+        <!-- csm-gateway's inbound endpoint in component tests -->
+        <dependency>
+            <groupId>org.wiremock</groupId>
+            <artifactId>wiremock-standalone</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.awaitility</groupId>
+            <artifactId>awaitility</artifactId>
             <scope>test</scope>
         </dependency>
     </dependencies>
