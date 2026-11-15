@@ -14,6 +14,7 @@ import org.springframework.http.HttpStatusCode;
 import org.springframework.http.ProblemDetail;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
+import org.springframework.web.ErrorResponse;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.context.request.WebRequest;
@@ -87,6 +88,10 @@ class ApiProblems extends ResponseEntityExceptionHandler {
     @Override
     protected ResponseEntity<Object> handleExceptionInternal(Exception e, Object body, HttpHeaders headers,
             HttpStatusCode status, WebRequest request) {
+        // most of Spring MVC's own handlers pass no body: the exception carries it
+        if (body == null && e instanceof ErrorResponse response) {
+            body = response.getBody();
+        }
         if (body instanceof ProblemDetail problem) {
             HttpStatus known = HttpStatus.resolve(status.value());
             String code = known == HttpStatus.BAD_REQUEST ? VALIDATION_FAILED

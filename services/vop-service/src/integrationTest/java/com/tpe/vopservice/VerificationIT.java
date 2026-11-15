@@ -15,6 +15,7 @@ import java.util.Map;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import tools.jackson.databind.JsonNode;
@@ -141,6 +142,16 @@ class VerificationIT extends VopStack {
         assertThat(badIban.getStatusCode().value()).isEqualTo(400);
         assertThat(badIban.getBody().get("errors").toString())
                 .contains("{\"field\":\"payeeIban\",\"code\":\"INVALID_IBAN\"}");
+    }
+
+    @Test
+    void aBodyOfAnotherMediaTypeIs415WithItsCode() {
+        ResponseEntity<JsonNode> response = http().post().uri("/v1/verifications")
+                .header("Content-Type", "text/plain").body("hello").retrieve().toEntity(JsonNode.class);
+
+        assertThat(response.getStatusCode().value()).isEqualTo(415);
+        assertThat(response.getHeaders().getContentType()).isEqualTo(MediaType.APPLICATION_PROBLEM_JSON);
+        assertThat(response.getBody().get("code").asString()).isEqualTo("UNSUPPORTED_MEDIA_TYPE");
     }
 
     private String holder(String name) {
