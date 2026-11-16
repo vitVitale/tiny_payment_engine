@@ -335,7 +335,7 @@ Listener transaction: validate → inbox → load payment by `(direction, debtor
 | | `REJECTED` | `CONTRADICTING_CSM_OUTCOME` case (UC-04 8a) |
 | `CreditTransferRejected` OUTGOING | `SENT_TO_CSM`, `INVESTIGATING` | `REJECTED` with received reason, next `RELEASE_HOLD` (UC-04 6a) |
 | | `REJECTED` | no-op · `SETTLED` → contradiction case |
-| `CreditTransferNotSent` | `SENT_TO_CSM`, `INVESTIGATING` | `REJECTED AB03`, next `RELEASE_HOLD` (UC-04 5a, UC-05 2a) |
+| `CreditTransferNotSent` | `SENT_TO_CSM`, `INVESTIGATING` | `REJECTED` with the event's `reasonCode` (`AB03`, or `FF01` for an invalid `pacs.008`), next `RELEASE_HOLD` (UC-04 5a, UC-05 2a) |
 | `CreditTransferSettled` INCOMING | `ACCEPTED`, `INVESTIGATING`, `ACCEPT_REQUESTED` | `csm_outcome = SETTLED`, next `CONFIRM_CREDIT` (UC-06 9) |
 | | `REJECTED` | contradiction case |
 | `CreditTransferRejected` INCOMING | `ACCEPTED`, `INVESTIGATING`, `ACCEPT_REQUESTED` | `REJECTED` with reason, next `CANCEL_CREDIT` (UC-06 8a) |

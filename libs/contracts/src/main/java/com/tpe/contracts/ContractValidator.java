@@ -66,7 +66,9 @@ public final class ContractValidator {
                     checkPaymentIdMatchesDirection(rejected.direction(), rejected.paymentId(), violations);
             case CreditTransferNotSent notSent -> {
                 rejectOtherDirection(notSent.direction(), Direction.OUTGOING, violations);
-                if (notSent.reasonCode() != null && notSent.reasonCode() != ReasonCode.AB03) {
+                // AB03: sendBy passed; FF01: the built pacs.008 failed its XSD (15 §6.1)
+                if (notSent.reasonCode() != null && notSent.reasonCode() != ReasonCode.AB03
+                        && notSent.reasonCode() != ReasonCode.FF01) {
                     violations.add(new Violation("reasonCode", ContractViolationException.NOT_ALLOWED));
                 }
             }

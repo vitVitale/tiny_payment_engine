@@ -7,8 +7,9 @@ import com.tpe.paymentdomain.TxId;
 import java.time.Instant;
 
 /**
- * Gateway → orchestrator on {@code csm.inbound.events}: an outgoing credit transfer was not sent by {@code sendBy}
- * (specs/02-messaging-contracts.md §4). Always {@code OUTGOING}; {@code reasonCode} is always {@code AB03}.
+ * Gateway → orchestrator on {@code csm.inbound.events}: an outgoing credit transfer was not sent
+ * (specs/02-messaging-contracts.md §4). Always {@code OUTGOING}; {@code reasonCode} is {@code AB03} ({@code sendBy}
+ * passed) or {@code FF01} (the {@code pacs.008} built for it failed its XSD, specs/15-csm-gateway.md §6.1).
  */
 @Contract(type = "CreditTransferNotSent", version = 1)
 public record CreditTransferNotSent(

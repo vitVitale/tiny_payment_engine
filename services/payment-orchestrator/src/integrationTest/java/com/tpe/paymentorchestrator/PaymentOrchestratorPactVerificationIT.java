@@ -9,6 +9,7 @@ import com.tpe.testsupport.pact.PactVerification;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.UUID;
+import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.TestTemplate;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -28,12 +29,22 @@ import tools.jackson.databind.JsonNode;
 @PactVerification
 class PaymentOrchestratorPactVerificationIT extends OrchestratorStack {
 
+    /** The description of csm-gateway's M-01 interaction, skipped until the orchestrator sends it. */
+    private static final String M01_SEND_CREDIT_TRANSFER = "SendCreditTransfer:";
+
     @Autowired
     private JdbcClient jdbc;
 
-    /** risk-service answers 503, so a submitted payment stays where a state puts it. */
+    /**
+     * risk-service answers 503, so a submitted payment stays where a state puts it. M-01, csm-gateway's
+     * {@code SendCreditTransfer}, is skipped, not passed: the orchestrator does not send it yet; its verification comes
+     * with E2E-O-01 (#112), and M-01 stays in the pending ids until then.
+     */
     @BeforeEach
     void target(PactVerificationContext context) {
+        Assumptions.assumeFalse(context.getInteraction().isAsynchronousMessage()
+                        && context.getInteraction().getDescription().startsWith(M01_SEND_CREDIT_TRANSFER),
+                "M-01 SendCreditTransfer is verified with E2E-O-01 (#112)");
         riskAnswers("unavailable");
         context.setTarget(new HttpTestTarget("localhost", port));
     }
