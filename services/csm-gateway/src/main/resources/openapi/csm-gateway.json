@@ -1,0 +1,265 @@
+{
+  "openapi" : "3.1.0",
+  "info" : {
+    "title" : "OpenAPI definition",
+    "version" : "v0"
+  },
+  "paths" : {
+    "/csm/v1/inbound" : {
+      "post" : {
+        "operationId" : "receive",
+        "requestBody" : {
+          "content" : {
+            "application/xml" : {
+              "schema" : {
+                "type" : "string",
+                "format" : "byte"
+              }
+            },
+            "text/xml" : {
+              "schema" : {
+                "type" : "string",
+                "format" : "byte"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "202" : {
+            "description" : "Journalled"
+          },
+          "400" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description" : "The envelope cannot be parsed"
+          }
+        },
+        "summary" : "A message from the CSM (envelope with pacs.002 or pacs.008)",
+        "tags" : [ "csm-inbound-controller" ]
+      }
+    },
+    "/v1/journal" : {
+      "get" : {
+        "operationId" : "journal",
+        "parameters" : [ {
+          "in" : "query",
+          "name" : "txId",
+          "required" : true,
+          "schema" : {
+            "type" : "string"
+          }
+        }, {
+          "in" : "query",
+          "name" : "debtorAgentBic",
+          "required" : false,
+          "schema" : {
+            "type" : "string"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "type" : "array",
+                  "items" : {
+                    "$ref" : "#/components/schemas/JournalView"
+                  }
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "tags" : [ "admin-controller" ]
+      }
+    },
+    "/v1/transactions/{txId}" : {
+      "get" : {
+        "operationId" : "transactions",
+        "parameters" : [ {
+          "in" : "path",
+          "name" : "txId",
+          "required" : true,
+          "schema" : {
+            "type" : "string"
+          }
+        }, {
+          "in" : "query",
+          "name" : "debtorAgentBic",
+          "required" : false,
+          "schema" : {
+            "type" : "string"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "type" : "array",
+                  "items" : {
+                    "$ref" : "#/components/schemas/TransactionView"
+                  }
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "tags" : [ "admin-controller" ]
+      }
+    }
+  },
+  "components" : {
+    "schemas" : {
+      "JournalView" : {
+        "type" : "object",
+        "properties" : {
+          "at" : {
+            "type" : "string",
+            "format" : "date-time"
+          },
+          "debtorAgentBic" : {
+            "type" : "string"
+          },
+          "direction" : {
+            "type" : "string"
+          },
+          "id" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "messageType" : {
+            "type" : "string"
+          },
+          "msgId" : {
+            "type" : "string"
+          },
+          "note" : {
+            "type" : "string"
+          },
+          "transmitStatus" : {
+            "type" : "string"
+          },
+          "txId" : {
+            "type" : "string"
+          },
+          "valid" : {
+            "type" : "boolean"
+          },
+          "validationErrors" : {
+            "type" : "array",
+            "items" : {
+              "type" : "string"
+            }
+          },
+          "xml" : {
+            "type" : "string"
+          }
+        }
+      },
+      "ProblemDetail" : {
+        "type" : "object",
+        "properties" : {
+          "detail" : {
+            "type" : "string"
+          },
+          "instance" : {
+            "type" : "string",
+            "format" : "uri"
+          },
+          "properties" : {
+            "type" : "object",
+            "additionalProperties" : { }
+          },
+          "status" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "title" : {
+            "type" : "string"
+          },
+          "type" : {
+            "type" : "string",
+            "format" : "uri"
+          }
+        }
+      },
+      "TransactionView" : {
+        "type" : "object",
+        "properties" : {
+          "acceptedAt" : {
+            "type" : "string",
+            "format" : "date-time"
+          },
+          "deadlineAt" : {
+            "type" : "string",
+            "format" : "date-time"
+          },
+          "debtorAgentBic" : {
+            "type" : "string"
+          },
+          "deliveredAt" : {
+            "type" : "string",
+            "format" : "date-time"
+          },
+          "direction" : {
+            "type" : "string"
+          },
+          "finalAt" : {
+            "type" : "string",
+            "format" : "date-time"
+          },
+          "finalReason" : {
+            "type" : "string"
+          },
+          "finalStatus" : {
+            "type" : "string"
+          },
+          "journalledAt" : {
+            "type" : "string",
+            "format" : "date-time"
+          },
+          "msgId" : {
+            "type" : "string"
+          },
+          "notSentReason" : {
+            "type" : "string"
+          },
+          "paymentId" : {
+            "type" : "string",
+            "format" : "uuid"
+          },
+          "sendBy" : {
+            "type" : "string",
+            "format" : "date-time"
+          },
+          "sendStatus" : {
+            "type" : "string"
+          },
+          "transmitAttempts" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "transmitStatus" : {
+            "type" : "string"
+          },
+          "txId" : {
+            "type" : "string"
+          },
+          "uetr" : {
+            "type" : "string",
+            "format" : "uuid"
+          }
+        }
+      }
+    }
+  }
+}

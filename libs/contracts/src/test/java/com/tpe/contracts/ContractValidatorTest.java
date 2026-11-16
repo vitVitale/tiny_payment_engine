@@ -197,9 +197,12 @@ class ContractValidatorTest {
     }
 
     @Test
-    void notSentReasonIsAlwaysAb03() {
+    void notSentReasonIsAb03OrFf01() {
         CreditTransferNotSent n = Samples.creditTransferNotSent();
 
+        assertThatCode(() -> ContractValidator.validate(new CreditTransferNotSent(n.txId(), n.debtorAgentBic(),
+                n.direction(), n.paymentId(), ReasonCode.FF01, n.sendBy(), n.decidedAt())))
+                .doesNotThrowAnyException();
         assertViolations(new CreditTransferNotSent(n.txId(), n.debtorAgentBic(), n.direction(), n.paymentId(),
                 ReasonCode.AC04, n.sendBy(), n.decidedAt()),
                 new Violation("reasonCode", ContractViolationException.NOT_ALLOWED));

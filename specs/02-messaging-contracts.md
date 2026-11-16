@@ -98,7 +98,7 @@ Dedup key at the orchestrator: `<debtorAgentBic>:<txId>:<type>:<outcome>` where 
 | `AnswerSent` v1 | INCOMING | `status` (`ACCP`\|`RJCT`), `reasonCode` (RJCT only), `decidedBy` (`VERDICT`\|`DEADLINE`), `sentAt` | `<status>` |
 | `CreditTransferSettled` v1 | both | `paymentId` (outgoing only), `settledAt`, `source` (`STATUS_REPORT`\|`INVESTIGATION`) | `SETTLED` |
 | `CreditTransferRejected` v1 | both | `paymentId` (outgoing only), `reasonCode`, `rejectedAt`, `source` | `REJECTED-<reason>` |
-| `CreditTransferNotSent` v1 | OUTGOING | `paymentId`, `reasonCode` (`AB03`), `sendBy`, `decidedAt` | `NOT_SENT` |
+| `CreditTransferNotSent` v1 | OUTGOING | `paymentId`, `reasonCode` (`AB03`: `sendBy` passed; `FF01`: the built `pacs.008` failed its XSD, [15 §6.1](15-csm-gateway.md#61-outgoing-sendcredittransfer)), `sendBy`, `decidedAt` | `NOT_SENT` |
 
 Notes:
 
@@ -198,6 +198,6 @@ exists; notification-service does not notify on it ([16 §6](16-notification-ser
 | `AnswerSent` | gateway: answer committed | orchestrator: `ACCEPTED` or `REJECTED` + cancel pending credit |
 | `CreditTransferSettled` | gateway: `pacs.002 ACSC` (status report or investigation answer) | orchestrator: settle hold / confirm pending credit |
 | `CreditTransferRejected` | gateway: `pacs.002 RJCT`, or "unknown" after the deadline | orchestrator: release hold / cancel pending credit |
-| `CreditTransferNotSent` | gateway: send-by passed, or status request for a never-sent message | orchestrator: release hold, `REJECTED AB03` |
+| `CreditTransferNotSent` | gateway: send-by passed, an invalid `pacs.008`, or status request for a never-sent message | orchestrator: release hold, `REJECTED` with its `reasonCode` |
 | `PaymentSettled` / `PaymentRejected` | orchestrator: final state + ledger effect done | notification: webhooks / `camt.054` |
 | `Account*` | ledger: account lifecycle change | vop / risk: upsert holder projection |
