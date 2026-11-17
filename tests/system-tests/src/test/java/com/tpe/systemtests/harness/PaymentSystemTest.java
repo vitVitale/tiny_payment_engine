@@ -12,6 +12,7 @@ import java.math.BigDecimal;
 import java.net.URI;
 import java.sql.Connection;
 import java.sql.SQLException;
+import java.sql.Timestamp;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -72,8 +73,13 @@ public abstract class PaymentSystemTest extends LedgerSystemTest {
         SIMULATOR = new SimulatorControl(simulator);
         // once at suite start, never during a run (20 §2)
         SIMULATOR.reset();
+        // a test stops it (E2E-O-21): on Windows by terminating it, so its consumer never leaves the group and the
+        // restarted one is assigned nothing until the old one's session times out; the broker's shortest session
+        // bounds that, a 1 s heartbeat keeps a frozen one (E2E-O-12, about 4 s) in its group
         CSM_GATEWAY = ServiceProcess.of(ServiceJar.CSM_GATEWAY, Map.of(
-                "tpe.csm.base-url", simulator.toString()), gatewayPort);
+                "tpe.csm.base-url", simulator.toString(),
+                "spring.kafka.consumer.properties.session.timeout.ms", "6000",
+                "spring.kafka.consumer.heartbeat-interval", "1s"), gatewayPort);
         GATEWAY_ADMIN = new JsonHttp(CSM_GATEWAY.baseUrl());
         VOP = ServiceProcess.of(ServiceJar.VOP, Map.of(
                 "tpe.bank-directory.location", BankDirectoryFile.withSimulator(simulator))).baseUrl();
@@ -213,6 +219,9 @@ public abstract class PaymentSystemTest extends LedgerSystemTest {
     /** A payee at another PSP: holder name and IBAN. */
     public record Payee(String name, String iban) {}
 
+    /** What {@link #paidToPeer} pays: 123.45 EUR. */
+    protected static final long PEER_PAYMENT_MINOR = 12_345;
+
     /**
      * The payee verified, then {@code payer} pays it 123.45 EUR under {@code endToEndId}; the payment's id. vop-service
      * cannot ask a peer bank's responder yet (its {@code NoCounterpartyVop} until the VoP remote track, 13 §6.1 step
@@ -220,11 +229,17 @@ public abstract class PaymentSystemTest extends LedgerSystemTest {
      * this amount; with the remote client the simulator's responder answers {@code MATCH} for the account
      * {@link #peerPayee} seeded.
      */
-    /** What {@link #paidToPeer} pays: 123.45 EUR. */
-    protected static final long PEER_PAYMENT_MINOR = 12_345;
-
     protected UUID paidToPeer(Party payer, Payee payee, String endToEndId) {
-        JsonNode verification = verified(payer, payee.iban(), payee.name(), "NOT_POSSIBLE");
+        return paidToPeer(payer, payee, endToEndId, verifiedPeer(payer, payee));
+    }
+
+    /** The VoP reference {@link #paidToPeer} pays on: taken before an outage, which then starts at the submit. */
+    protected String verifiedPeer(Party payer, Payee payee) {
+        return verified(payer, payee.iban(), payee.name(), "NOT_POSSIBLE").get("vopReference").asString();
+    }
+
+    /** As {@link #paidToPeer(Party, Payee, String)} on a reference {@link #verifiedPeer} took before. */
+    protected UUID paidToPeer(Party payer, Payee payee, String endToEndId, String vopReference) {
         Response accepted = initiate(payer.token(), Map.of(
                 "endToEndId", endToEndId,
                 "debtor", Map.of("name", payer.name(), "iban", payer.iban()),
@@ -232,23 +247,64 @@ public abstract class PaymentSystemTest extends LedgerSystemTest {
                 "amount", Map.of("value", BigDecimal.valueOf(PEER_PAYMENT_MINOR, 2).toPlainString(),
                         "currency", "EUR"),
                 "remittanceInformation", endToEndId + " to another PSP",
-                "vopReference", verification.get("vopReference").asString()));
+                "vopReference", vopReference));
         assertThat(accepted.status()).as("%s", accepted.body()).isEqualTo(202);
         return UUID.fromString(accepted.body().get("paymentId").asString());
     }
 
     /** The payment's row in the orchestrator, as far as the CSM side needs it. */
-    public record OrchestratorPayment(String txId, Instant acceptedAt, String state) {}
+    public record OrchestratorPayment(String txId, Instant acceptedAt, String state, Instant sendBy,
+            Instant deadlineAt) {}
 
-    /** The orchestrator's {@code txId}, acceptance and state of {@code payment}, now. */
+    /** The orchestrator's {@code txId}, acceptance, state, {@code sendBy} and deadline of {@code payment}, now. */
     protected static OrchestratorPayment orchestratorPayment(UUID payment) throws SQLException {
         try (var orchestrator = LocalDatabases.payments(); var statement = orchestrator.prepareStatement(
-                "SELECT tx_id, accepted_at, state FROM payments WHERE payment_id = ?")) {
+                "SELECT tx_id, accepted_at, state, send_by, deadline_at FROM payments WHERE payment_id = ?")) {
             statement.setObject(1, payment);
             try (var rs = statement.executeQuery()) {
                 rs.next();
-                return new OrchestratorPayment(rs.getString(1), rs.getTimestamp(2).toInstant(), rs.getString(3));
+                return new OrchestratorPayment(rs.getString(1), rs.getTimestamp(2).toInstant(), rs.getString(3),
+                        instant(rs.getTimestamp(4)), instant(rs.getTimestamp(5)));
             }
+        }
+    }
+
+    private static Instant instant(Timestamp timestamp) {
+        return timestamp == null ? null : timestamp.toInstant();
+    }
+
+    /** The messages of {@code messageType} (e.g. {@code pacs.008.001.08}) the CSM received for the payment. */
+    protected static List<CsmInvariants.SimulatorMessage> csmReceived(UUID payment, String messageType)
+            throws SQLException {
+        return SIMULATOR.received(orchestratorPayment(payment).txId()).stream()
+                .filter(message -> message.kind().equals("RECEIVED") && message.messageType().equals(messageType))
+                .toList();
+    }
+
+    /** The payment's {@code OPEN} exception case of {@code type}; {@code null} if none. */
+    protected static UUID openCase(UUID payment, String type) throws SQLException {
+        try (var orchestrator = LocalDatabases.payments(); var statement = orchestrator.prepareStatement(
+                "SELECT case_id FROM exception_cases WHERE payment_id = ? AND type = ? AND status = 'OPEN'")) {
+            statement.setObject(1, payment);
+            statement.setString(2, type);
+            try (var rs = statement.executeQuery()) {
+                return rs.next() ? rs.getObject(1, UUID.class) : null;
+            }
+        }
+    }
+
+    /** The notes csm-gateway's journal has for the transaction, e.g. {@code duplicate status}. */
+    protected static List<String> gatewayNotes(String txId) throws SQLException {
+        try (var gateway = LocalDatabases.csm(); var statement = gateway.prepareStatement(
+                "SELECT note FROM message_journal WHERE tx_id = ? AND note IS NOT NULL ORDER BY id")) {
+            statement.setString(1, txId);
+            var notes = new ArrayList<String>();
+            try (var rs = statement.executeQuery()) {
+                while (rs.next()) {
+                    notes.add(rs.getString(1));
+                }
+            }
+            return notes;
         }
     }
 

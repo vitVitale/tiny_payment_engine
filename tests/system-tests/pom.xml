@@ -21,6 +21,13 @@
             <version>${project.version}</version>
             <scope>test</scope>
         </dependency>
+        <!-- a contradicting pacs.002 injected through the simulator (E2E-O-14, StatusReports) -->
+        <dependency>
+            <groupId>com.tpe</groupId>
+            <artifactId>iso20022-model</artifactId>
+            <version>${project.version}</version>
+            <scope>test</scope>
+        </dependency>
         <!-- local profiles check (LocalProfilesTest) -->
         <dependency>
             <groupId>org.yaml</groupId>

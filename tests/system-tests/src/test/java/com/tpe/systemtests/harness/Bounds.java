@@ -102,6 +102,14 @@ public final class Bounds {
                 .plus(HARNESS);
     }
 
+    /**
+     * From a {@code pacs.002} taken by csm-gateway to the orchestrator having handled its event: the gateway's outbox
+     * delivers it as any outbox event is (E2E-O-14's late contradicting report).
+     */
+    public static Duration csmEventHandled() {
+        return eventDelivery(ServiceProfile.systemtest(ServiceJar.CSM_GATEWAY));
+    }
+
     /** {@link #eventDelivery(ServiceProfile)} of ledger-service as the harness runs it. */
     public static Duration eventDelivery() {
         return eventDelivery(ServiceProfile.ledger());

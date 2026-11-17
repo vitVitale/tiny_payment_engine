@@ -75,6 +75,51 @@ public final class SimulatorControl {
         return settlements;
     }
 
+    /**
+     * The envelopes of {@code messageType} (e.g. {@code pacs.002.001.10}) the simulator sent for {@code txId}, oldest
+     * first, as XML.
+     */
+    public List<String> sentEnvelopes(String txId, String messageType) {
+        var envelopes = new ArrayList<String>();
+        for (JsonNode message : get("/sim/v1/received?txId=" + URLEncoder.encode(txId, StandardCharsets.UTF_8))) {
+            if (message.get("kind").asString().equals("SENT")
+                    && message.get("messageType").asString().equals(messageType)) {
+                envelopes.add(message.get("envelope").asString());
+            }
+        }
+        return envelopes;
+    }
+
+    /**
+     * The CSM transport's state for every transfer (17 §3.5): {@code DOWN}, {@code RESET} or {@code UP}. Shared by every
+     * test of the JVM, so a test that takes it down brings it {@code UP} again however it ends.
+     */
+    public void outage(String mode) {
+        send("POST", "/sim/v1/outage", Map.of("mode", mode), 204);
+    }
+
+    /**
+     * Sends {@code xml} to csm-gateway as the CSM would, as it is ({@code POST /sim/v1/incoming-payments/raw}); the
+     * HTTP status the gateway answered.
+     */
+    public int sendRaw(String xml) {
+        var request = HttpRequest.newBuilder(baseUrl.resolve("/sim/v1/incoming-payments/raw"))
+                .header("Content-Type", "application/xml").POST(HttpRequest.BodyPublishers.ofString(xml)).build();
+        try (var http = HttpClient.newHttpClient()) {
+            var response = http.send(request, HttpResponse.BodyHandlers.ofString());
+            if (response.statusCode() != 200) {
+                throw new IllegalStateException("POST " + request.uri() + " answered " + response.statusCode() + ": "
+                        + response.body());
+            }
+            return JSON.readTree(response.body()).get("gatewayStatus").asInt();
+        } catch (IOException e) {
+            throw new IllegalStateException("POST " + request.uri() + " failed", e);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new IllegalStateException(e);
+        }
+    }
+
     /** {@code GET /sim/v1/received?txId=} as the simulator answers it, for the debug bundle. */
     public String receivedLog(String txId) {
         return get("/sim/v1/received?txId=" + URLEncoder.encode(txId, StandardCharsets.UTF_8)).toString();

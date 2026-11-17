@@ -8,8 +8,10 @@ import java.io.InputStream;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import java.net.http.HttpTimeoutException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Duration;
 import java.util.Map;
 import java.util.jar.Attributes;
 import java.util.jar.JarEntry;
@@ -113,6 +115,27 @@ class ServiceProcessTest {
         assertThat(ServiceProcess.of(service)).isSameAs(process);
     }
 
+    /**
+     * csm-gateway down for less than a cold start (E2E-O-12): a frozen process keeps its port and answers nothing until
+     * it is thawed, then carries on as it was.
+     */
+    @Test
+    void aFrozenServiceAnswersNothingUntilItIsThawed() throws Exception {
+        var service = new ServiceJar("fake-service-g", fakeJar(jars.resolve("g"), "fake-service-g-1.0.jar").getParent());
+        ServiceProcess process = ServiceProcess.of(service);
+
+        process.freeze();
+        try {
+            assertThat(process.isRunning()).isTrue();
+            assertThatThrownBy(() -> get(process, "/args", Duration.ofMillis(500)))
+                    .isInstanceOf(HttpTimeoutException.class);
+        } finally {
+            process.thaw();
+        }
+
+        assertThat(get(process, "/args", Duration.ofSeconds(5))).contains("--server.port=");
+    }
+
     @Test
     void aServiceWithoutAJarNamesTheBuildCommandAndTheProperty() {
         var service = ServiceJar.inRepository("no-such-service");
@@ -131,6 +154,14 @@ class ServiceProcessTest {
     private static String get(ServiceProcess process, String path) throws IOException, InterruptedException {
         try (var http = HttpClient.newHttpClient()) {
             return http.send(HttpRequest.newBuilder(process.baseUrl().resolve(path)).GET().build(),
+                    HttpResponse.BodyHandlers.ofString()).body();
+        }
+    }
+
+    private static String get(ServiceProcess process, String path, Duration timeout)
+            throws IOException, InterruptedException {
+        try (var http = HttpClient.newHttpClient()) {
+            return http.send(HttpRequest.newBuilder(process.baseUrl().resolve(path)).timeout(timeout).GET().build(),
                     HttpResponse.BodyHandlers.ofString()).body();
         }
     }

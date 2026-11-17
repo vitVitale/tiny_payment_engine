@@ -3,7 +3,6 @@ package com.tpe.systemtests.payments;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.awaitility.Awaitility.await;
 
-import com.tpe.invariantchecker.CsmInvariants.SimulatorMessage;
 import com.tpe.systemtests.harness.Bounds;
 import com.tpe.systemtests.harness.LocalDatabases;
 import com.tpe.systemtests.harness.PaymentSystemTest;
@@ -12,8 +11,6 @@ import com.tpe.systemtests.harness.ServiceJar;
 import com.tpe.systemtests.harness.ServiceProfile;
 import java.sql.SQLException;
 import java.time.Duration;
-import java.util.ArrayList;
-import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
@@ -66,7 +63,7 @@ class InvestigationIT extends PaymentSystemTest {
         assertThat(settled.get("status").asString()).as("%s", settled).isEqualTo("ACSC");
         assertThat(transitions(payment)).contains(INTO_INVESTIGATION).last()
                 .isEqualTo("INVESTIGATING|SETTLED|HOLD_SETTLED");
-        assertThat(received(payment, PACS_028)).isNotEmpty();
+        assertThat(csmReceived(payment, PACS_028)).isNotEmpty();
         assertThat(postings(payer.account(), payment)).containsExactly("PAYMENT_OUT DR " + PEER_PAYMENT_MINOR);
         assertThat(available(payer)).isEqualTo(FUNDED_MINOR - PEER_PAYMENT_MINOR);
     }
@@ -85,7 +82,7 @@ class InvestigationIT extends PaymentSystemTest {
         rejected.assertTaggedOnce("EXTERNAL");
         assertThat(transitions(payment)).contains(INTO_INVESTIGATION).last()
                 .isEqualTo("INVESTIGATING|REJECTED|CSM_REJECTED");
-        assertThat(received(payment, PACS_028)).isNotEmpty();
+        assertThat(csmReceived(payment, PACS_028)).isNotEmpty();
         assertReleasedAndNeverSettled(payer, payment);
     }
 
@@ -119,14 +116,14 @@ class InvestigationIT extends PaymentSystemTest {
         Payee payee = peerPayee("SILENT+INVESTIGATION_SILENT");
         UUID payment = paidToPeer(payer, payee, "E2E-O-11 retry");
         UUID caseId = awaitUnresolvedCase(payer, payment);
-        int asked = received(payment, PACS_028).size();
+        int asked = csmReceived(payment, PACS_028).size();
 
         simulator().scenario(payee.iban(), "SILENT");
         assertThat(resolve(caseId, Map.of("resolution", "RETRY_INVESTIGATION")).status()).isEqualTo(200);
 
         assertThat(finalStatus(payer, payment, Bounds.statusRequestAnswered()).get("status").asString())
                 .isEqualTo("ACSC");
-        assertThat(received(payment, PACS_028)).as("a new pacs.028 reached the CSM").hasSizeGreaterThan(asked);
+        assertThat(csmReceived(payment, PACS_028)).as("a new pacs.028 reached the CSM").hasSizeGreaterThan(asked);
         assertThat(postings(payer.account(), payment)).containsExactly("PAYMENT_OUT DR " + PEER_PAYMENT_MINOR);
     }
 
@@ -170,27 +167,15 @@ class InvestigationIT extends PaymentSystemTest {
         assertThat(investigating.get("internalState").asString()).isEqualTo("INVESTIGATING");
 
         await().atMost(Bounds.investigationUnresolved()).pollInterval(Duration.ofMillis(250))
-                .until(() -> openCase(payment) != null);
+                .until(() -> openCase(payment, "UNRESOLVED_INVESTIGATION") != null);
         assertThat(status(payer, payment).get("status").asString()).isEqualTo("PDNG");
         assertThat(hold(payment).body().get("status").asString()).isEqualTo("ACTIVE");
-        assertThat(received(payment, PACS_028)).as("status requests retried").hasSizeGreaterThan(1);
-        return openCase(payment);
+        assertThat(csmReceived(payment, PACS_028)).as("status requests retried").hasSizeGreaterThan(1);
+        return openCase(payment, "UNRESOLVED_INVESTIGATION");
     }
 
     private static Response resolve(UUID caseId, Map<String, String> body) {
         return caseApi().post(OPERATOR, "/v1/exception-cases/" + caseId + "/resolve", body);
-    }
-
-    /** The payment's {@code OPEN} {@code UNRESOLVED_INVESTIGATION} case; {@code null} if none. */
-    private static UUID openCase(UUID payment) throws SQLException {
-        try (var orchestrator = LocalDatabases.payments(); var statement = orchestrator.prepareStatement("""
-                SELECT case_id FROM exception_cases
-                 WHERE payment_id = ? AND type = 'UNRESOLVED_INVESTIGATION' AND status = 'OPEN'""")) {
-            statement.setObject(1, payment);
-            try (var rs = statement.executeQuery()) {
-                return rs.next() ? rs.getObject(1, UUID.class) : null;
-            }
-        }
     }
 
     private void assertRejected(Party payer, UUID payment, String reason) {
@@ -218,27 +203,4 @@ class InvestigationIT extends PaymentSystemTest {
             }
         }
     }
-
-    /** The notes csm-gateway's journal has for the transaction, e.g. {@code duplicate status}. */
-    private static List<String> gatewayNotes(String txId) throws SQLException {
-        try (var gateway = LocalDatabases.csm(); var statement = gateway.prepareStatement(
-                "SELECT note FROM message_journal WHERE tx_id = ? AND note IS NOT NULL ORDER BY id")) {
-            statement.setString(1, txId);
-            var notes = new ArrayList<String>();
-            try (var rs = statement.executeQuery()) {
-                while (rs.next()) {
-                    notes.add(rs.getString(1));
-                }
-            }
-            return notes;
-        }
-    }
-
-    /** The messages of {@code messageType} the CSM received for the payment's transaction. */
-    private static List<SimulatorMessage> received(UUID payment, String messageType) throws SQLException {
-        return simulator().received(orchestratorPayment(payment).txId()).stream()
-                .filter(message -> message.kind().equals("RECEIVED") && message.messageType().equals(messageType))
-                .toList();
-    }
-
 }
