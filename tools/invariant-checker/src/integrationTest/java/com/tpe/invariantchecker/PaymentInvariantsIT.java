@@ -117,6 +117,16 @@ class PaymentInvariantsIT {
     }
 
     @Test
+    void INV_3_aPaymentToAnotherPspSettledOnUsFails() throws SQLException {
+        UUID payment = payment("OUTGOING", "SETTLED", false, 300);
+        UUID payer = customer();
+        hold(payment, payer, "SETTLED", entry("ON_US", payment, posting(payer, "DR", 300),
+                posting(customer(), "CR", 300)));
+
+        assertViolation(PaymentInvariants.holdsMatchOutcomes(payments, ledger, List.of(payment)), "INV-3", payment);
+    }
+
+    @Test
     void INV_3_aRejectedPaymentWhoseHoldWasSettledFails() throws SQLException {
         UUID payment = payment("OUTGOING", "REJECTED", false, 300);
         UUID payer = customer();

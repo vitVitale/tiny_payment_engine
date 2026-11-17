@@ -19,6 +19,11 @@ tpe:
     send-by-offset: 10s
     deadline-offset: 20s
     hold-give-up-margin: 2s
+  incoming:
+    # specs/11-payment-orchestrator.md §7 (read by the incoming flow, M4); settlement-overdue > the CSM's beneficiary
+    # delay (specs/20-testing-strategy.md §2.1)
+    verdict-give-up-margin: 1s
+    settlement-overdue: 30s
   investigation:
     # specs/11-payment-orchestrator.md §6.4, §7, UC-05: delays between status requests, the last repeats
     backoff: 5s,15s,60s,300s

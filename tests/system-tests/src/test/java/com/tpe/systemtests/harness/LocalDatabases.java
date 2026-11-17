@@ -19,6 +19,11 @@ public final class LocalDatabases {
         return DriverManager.getConnection(POSTGRES + "ledger", "ledger", "ledger-local");
     }
 
+    /** csm-gateway's. */
+    public static Connection csm() throws SQLException {
+        return DriverManager.getConnection(POSTGRES + "csm", "csm", "csm-local");
+    }
+
     /** payment-orchestrator's. */
     public static Connection payments() throws SQLException {
         return DriverManager.getConnection(POSTGRES + "payments", "payments", "payments-local");

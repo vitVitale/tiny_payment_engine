@@ -10,19 +10,22 @@ import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.StandardOpenOption;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.TreeMap;
+import java.util.concurrent.TimeUnit;
 import org.awaitility.core.ConditionTimeoutException;
 
 /**
  * A service as a process of this JVM's Java, from its jar ({@link ServiceJar}), in profiles {@code local} (the compose
  * stack of specs/00-engineering-baseline.md §13) and {@code systemtest} (the short intervals of
- * specs/20-testing-strategy.md §2.1), on a free port. Started once per test JVM, on first use, and stopped when the JVM
- * exits; its output goes to {@code target/<name>-systemtest.log}.
+ * specs/20-testing-strategy.md §2.1), on a free port or one reserved before. Started once per test JVM, on first use,
+ * and stopped when the JVM exits; its output goes to {@code target/<name>-systemtest.log}. A test may {@link #stop}
+ * it and {@link #start} it again: the same port and properties, the log appended to.
  */
 public final class ServiceProcess {
 
@@ -32,16 +35,26 @@ public final class ServiceProcess {
     /** Spring Boot startup with Flyway on a cold JVM; not a business time, so not in the profile. */
     private static final Duration STARTUP = Duration.ofSeconds(90);
 
+    /** A graceful shutdown: the service's own drain, not a business time. */
+    private static final Duration SHUTDOWN = Duration.ofSeconds(30);
+
     private static final Map<String, ServiceProcess> RUNNING = new HashMap<>();
 
     private final String name;
+    private final ServiceJar service;
+    private final Map<String, String> properties;
+    private final int port;
     private final URI baseUrl;
     private final Path log;
+    private Process process;
 
-    private ServiceProcess(String name, URI baseUrl, Path log) {
+    private ServiceProcess(String name, ServiceJar service, Map<String, String> properties, int port) {
         this.name = name;
-        this.baseUrl = baseUrl;
-        this.log = log;
+        this.service = service;
+        this.properties = new TreeMap<>(properties);
+        this.port = port;
+        this.baseUrl = URI.create("http://localhost:" + port);
+        this.log = Path.of("target", name + "-systemtest.log");
     }
 
     /** The running {@code service}, started on first use. */
@@ -55,7 +68,15 @@ public final class ServiceProcess {
      * process whatever properties it gives, so a service's neighbours are started before it.
      */
     public static synchronized ServiceProcess of(ServiceJar service, Map<String, String> properties) {
-        return of(service.name(), service, properties);
+        return of(service.name(), service, properties, 0);
+    }
+
+    /**
+     * As {@link #of(ServiceJar, Map)} on {@code port}, reserved with {@link #freePort} before: for two services that
+     * call each other, one is told the other's port before that one starts.
+     */
+    public static synchronized ServiceProcess of(ServiceJar service, Map<String, String> properties, int port) {
+        return of(service.name(), service, properties, port);
     }
 
     /**
@@ -63,56 +84,94 @@ public final class ServiceProcess {
      * port and its own log, {@code target/<instance>-systemtest.log}.
      */
     public static synchronized ServiceProcess of(String instance, ServiceJar service, Map<String, String> properties) {
-        return RUNNING.computeIfAbsent(instance, name -> start(name, service, properties));
+        return of(instance, service, properties, 0);
+    }
+
+    private static ServiceProcess of(String instance, ServiceJar service, Map<String, String> properties, int port) {
+        return RUNNING.computeIfAbsent(instance, name -> {
+            var started = new ServiceProcess(name, service, properties, port == 0 ? freePort() : port);
+            started.start();
+            return started;
+        });
     }
 
     public URI baseUrl() {
         return baseUrl;
     }
 
-    private static ServiceProcess start(String instance, ServiceJar service, Map<String, String> properties) {
+    public synchronized boolean isRunning() {
+        return process != null && process.isAlive();
+    }
+
+    /**
+     * Stops the process as a pod is stopped (SIGTERM where the OS has it; on Windows the process is terminated), and
+     * waits until it has exited.
+     */
+    public synchronized void stop() {
+        if (!isRunning()) {
+            return;
+        }
+        process.destroy();
+        try {
+            if (!process.waitFor(SHUTDOWN.toMillis(), TimeUnit.MILLISECONDS)) {
+                process.destroyForcibly().waitFor();
+            }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new IllegalStateException(e);
+        }
+    }
+
+    /** Starts the process unless it runs, and waits until it is ready: its port and properties of the first start. */
+    public synchronized void start() {
+        if (isRunning()) {
+            return;
+        }
         Path jar = service.locate();
-        int port = freePort();
-        Path log = Path.of("target", instance + "-systemtest.log");
         String java = Path.of(System.getProperty("java.home"), "bin", "java").toString();
-        Process process;
         try {
             Files.createDirectories(log.getParent());
             var command = new ArrayList<>(List.of(java, "-jar", jar.toString(),
                     "--spring.profiles.active=" + String.join(",", PROFILES), "--server.port=" + port));
-            new TreeMap<>(properties).forEach((key, value) -> command.add("--" + key + "=" + value));
+            properties.forEach((key, value) -> command.add("--" + key + "=" + value));
+            boolean restart = process != null;
+            if (!restart) {
+                Files.deleteIfExists(log);
+            }
+            Files.writeString(log, (restart ? "\n==== restarted\n" : ""), StandardOpenOption.CREATE,
+                    StandardOpenOption.APPEND);
             process = new ProcessBuilder(command)
                     .redirectErrorStream(true)
-                    .redirectOutput(log.toFile())
+                    .redirectOutput(ProcessBuilder.Redirect.appendTo(log.toFile()))
                     .start();
         } catch (IOException e) {
             throw new IllegalStateException("cannot start " + jar, e);
         }
-        Runtime.getRuntime().addShutdownHook(new Thread(process::destroy));
-        var started = new ServiceProcess(instance, URI.create("http://localhost:" + port), log);
-        started.awaitReady(process);
-        return started;
+        Process started = process;
+        Runtime.getRuntime().addShutdownHook(new Thread(started::destroy));
+        awaitReady(started);
     }
 
-    private void awaitReady(Process process) {
+    private void awaitReady(Process started) {
         var readiness = HttpRequest.newBuilder(baseUrl.resolve("/actuator/health/readiness")).GET().build();
         try (var http = HttpClient.newHttpClient()) {
             await().atMost(STARTUP).pollInterval(Duration.ofMillis(250)).ignoreExceptionsInstanceOf(IOException.class)
                     .until(() -> {
-                        if (!process.isAlive()) {
-                            throw new IllegalStateException(name + " exited with " + process.exitValue()
+                        if (!started.isAlive()) {
+                            throw new IllegalStateException(name + " exited with " + started.exitValue()
                                     + "; see " + log.toAbsolutePath());
                         }
                         return http.send(readiness, HttpResponse.BodyHandlers.discarding()).statusCode() == 200;
                     });
         } catch (ConditionTimeoutException e) {
-            process.destroy();
+            started.destroy();
             throw new IllegalStateException(name + " not ready within " + STARTUP + "; see " + log.toAbsolutePath(),
                     e);
         }
     }
 
-    private static int freePort() {
+    /** A port free now, to start a service on later ({@link #of(ServiceJar, Map, int)}). */
+    public static int freePort() {
         try (var socket = new ServerSocket(0)) {
             return socket.getLocalPort();
         } catch (IOException e) {

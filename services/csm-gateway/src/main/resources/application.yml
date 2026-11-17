@@ -20,6 +20,10 @@ tpe:
     base-url: http://csm-simulator:8090
     # the CSM's BIC: the instructed agent of the pacs.028 the gateway sends (§6.6)
     bic: TIPSXXXXXXX
+    # an incoming payment's answer is due this long after receipt, and sent until this window after it (§7; read by
+    # the incoming flow, M4); with the window within the CSM's answer timeout (specs/20-testing-strategy.md §2.1)
+    answer-deadline-offset: 5s
+    answer-transmit-window: 1s
     transmit:
       # a claimed transmission is not taken again before this (§6.5)
       lease: 2s

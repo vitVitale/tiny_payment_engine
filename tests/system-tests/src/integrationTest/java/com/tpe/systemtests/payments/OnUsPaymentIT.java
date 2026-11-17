@@ -93,17 +93,6 @@ class OnUsPaymentIT extends PaymentSystemTest {
                 .as("no pacs.008").isEmpty();
     }
 
-    /** The account's postings of {@code payment}, as {@code <entryType> <side> <amountMinor>}. */
-    private List<String> postings(UUID account, UUID payment) {
-        JsonNode page = ledger().entries(OPERATOR, account).body();
-        return page.get("postings").valueStream()
-                .filter(posting -> posting.hasNonNull("paymentId")
-                        && payment.toString().equals(posting.get("paymentId").asString()))
-                .map(posting -> posting.get("entryType").asString() + " " + posting.get("side").asString() + " "
-                        + posting.get("amountMinor").asLong())
-                .toList();
-    }
-
     /** The count of own-bank verifications vop-service answered {@code MATCH}, from its scrape. */
     private static double ownMatches() {
         return Scrape.value(vopService(), VOP_REQUESTS, OWN_MATCH);
