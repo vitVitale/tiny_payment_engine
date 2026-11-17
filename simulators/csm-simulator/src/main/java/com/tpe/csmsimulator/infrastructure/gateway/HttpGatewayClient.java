@@ -27,8 +27,8 @@ public final class HttpGatewayClient implements GatewayClient {
     }
 
     @Override
-    public void send(String envelope) {
-        client.post().uri("/csm/v1/inbound").contentType(XML).body(envelope.getBytes(StandardCharsets.UTF_8))
-                .retrieve().toBodilessEntity();
+    public int post(String message) {
+        return client.post().uri("/csm/v1/inbound").contentType(XML).body(message.getBytes(StandardCharsets.UTF_8))
+                .exchange((request, response) -> response.getStatusCode().value());
     }
 }

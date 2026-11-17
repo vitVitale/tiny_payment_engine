@@ -44,6 +44,9 @@ class ControlController {
         }
     }
 
+    /** @param gatewayStatus the HTTP status csm-gateway answered */
+    record RawSent(int gatewayStatus) {}
+
     record SettlementView(String txId, String debtorAgentBic, String direction, long amountMinor, Instant settledAt) {
 
         static SettlementView of(Settlement settlement) {
@@ -80,6 +83,12 @@ class ControlController {
         }
         simulation.setScenario(new Iban(creditorIban), scenario);
         return ResponseEntity.noContent().build();
+    }
+
+    /** Sends the body to csm-gateway as it is, possibly invalid; {@code 502} if the gateway gave no answer. */
+    @PostMapping("/incoming-payments/raw")
+    RawSent sendRaw(@RequestBody String message) {
+        return new RawSent(simulation.sendRaw(message));
     }
 
     @GetMapping("/received")
