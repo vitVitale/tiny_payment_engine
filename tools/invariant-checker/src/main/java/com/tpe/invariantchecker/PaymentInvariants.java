@@ -19,8 +19,9 @@ import java.util.UUID;
  *
  * <ul>
  *   <li><b>INV-3</b> a final outgoing payment has no {@code ACTIVE} hold; {@code SETTLED} ⇔ its hold {@code SETTLED}
- *   (an on-us payment's by an {@code ON_US} entry); {@code REJECTED} ⇔ its hold {@code RELEASED}, tombstoned or never
- *   created. The hold id is the payment id (orchestrator {@code HttpLedger}).</li>
+ *   (an on-us payment's by an {@code ON_US} entry, one to another PSP's by a {@code PAYMENT_OUT} entry to the
+ *   CSM); {@code REJECTED} ⇔ its hold {@code RELEASED}, tombstoned or never created. The hold id is the payment id
+ *   (orchestrator {@code HttpLedger}).</li>
  *   <li><b>INV-8</b> a {@code SETTLED} outgoing payment that is not on-us has exactly one {@code CR CSM_SETTLEMENT}
  *   posting of its amount, a {@code SETTLED} incoming payment exactly one {@code DR CSM_SETTLEMENT}; on-us and
  *   {@code REJECTED} payments none.</li>
@@ -110,6 +111,9 @@ public final class PaymentInvariants {
                 } else if (payment.onUs() && !"ON_US".equals(hold.entryType())) {
                     violations.add(new Violation("INV-3", subject, "on-us SETTLED, hold settled by a "
                             + hold.entryType() + " entry"));
+                } else if (!payment.onUs() && !"PAYMENT_OUT".equals(hold.entryType())) {
+                    violations.add(new Violation("INV-3", subject, "SETTLED to another PSP, hold settled by a "
+                            + hold.entryType() + " entry, not a PAYMENT_OUT one"));
                 }
             } else if (hold != null && !hold.status().equals("RELEASED")) {
                 violations.add(new Violation("INV-3", subject, "REJECTED, hold " + hold.status()));

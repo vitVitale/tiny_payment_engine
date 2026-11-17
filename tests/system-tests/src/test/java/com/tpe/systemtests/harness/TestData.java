@@ -72,8 +72,20 @@ public final class TestData {
      * (its sequence is far from 9.9 billion). Personal data from now on, as every IBAN a test uses.
      */
     public static String unknownOwnIban() {
-        var random = ThreadLocalRandom.current();
-        String bban = "10010010" + "99" + "%08d".formatted(random.nextInt(100_000_000));
+        return germanIban("10010010" + "99");
+    }
+
+    /**
+     * IBAN {@code DE.. 20020020 ..........} of the peer bank ({@code PEERDEFFXXX} in deploy/config/bank-directory.yml):
+     * a valid checksum, a random account number. Personal data from now on.
+     */
+    public static String peerIban() {
+        return germanIban("20020020" + "%02d".formatted(ThreadLocalRandom.current().nextInt(100)));
+    }
+
+    /** {@code DE}, the checksum, the bank code and account number prefix, and eight random digits. */
+    private static String germanIban(String prefix) {
+        String bban = prefix + "%08d".formatted(ThreadLocalRandom.current().nextInt(100_000_000));
         int check = 98 - new BigInteger(bban + "131400").mod(BigInteger.valueOf(97)).intValue();
         String iban = "DE" + "%02d".formatted(check) + bban;
         PERSONAL_DATA.add(iban);

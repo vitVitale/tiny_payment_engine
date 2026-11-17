@@ -5,6 +5,10 @@ tpe:
     send-by-offset: 3s
     deadline-offset: 6s
     hold-give-up-margin: 1s
+  incoming:
+    verdict-give-up-margin: 500ms
+    # E2E-I-08
+    settlement-overdue: 5s
   investigation:
     # E2E-O-11
     backoff: 500ms,1s

@@ -1,0 +1,6 @@
+# Profile systemtest (specs/20-testing-strategy.md §2.1): short deadlines keep the system tests fast, in the order of
+# the production values: answer-deadline-offset + answer-transmit-window <= the simulator's answer-timeout.
+tpe:
+  csm:
+    answer-deadline-offset: 2s
+    answer-transmit-window: 1s

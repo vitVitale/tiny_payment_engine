@@ -73,10 +73,10 @@ jobs:
           cache: maven
       - name: Start infrastructure
         run: docker compose -f deploy/docker-compose.yml up -d --wait postgres kafka oauth2
-      # the system tests (E2E-A-01, the @smoke E2E-O-02) start the services from their jars; their own tests run in
-      # the build job
+      # the system tests (E2E-A-01, the @smoke E2E-O-01, -O-02, -O-07) start the services and the CSM simulator from
+      # their jars; their own tests run in the build job
       - name: Package the services
-        run: ./mvnw -B -pl services/ledger-service,services/risk-service,services/vop-service,services/payment-orchestrator,services/payment-api -am package -DskipTests
+        run: ./mvnw -B -pl services/ledger-service,services/risk-service,services/vop-service,services/payment-orchestrator,services/payment-api,services/csm-gateway,simulators/csm-simulator -am package -DskipTests
       - name: Smoke check and system tests
         run: ./mvnw -B -pl tests/system-tests -am verify -Dtpe.local-stack=true
       - name: Compose logs

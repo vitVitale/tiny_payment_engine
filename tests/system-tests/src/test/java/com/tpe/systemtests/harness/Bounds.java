@@ -35,6 +35,25 @@ public final class Bounds {
                 .plus(orchestrator.duration("tpe.runner.max-backoff").orElseThrow());
     }
 
+    /**
+     * How long past its {@code sendBy} a transmission may still be {@code PENDING} before INV-11 calls it stuck:
+     * csm-gateway's {@code tpe.csm.transmit.lease} (a claimed transmission's last attempt) and its poll interval.
+     */
+    public static Duration transmissionOverdue() {
+        ServiceProfile gateway = ServiceProfile.systemtest(ServiceJar.CSM_GATEWAY);
+        return gateway.duration("tpe.csm.transmit.lease").orElseThrow()
+                .plus(gateway.duration("tpe.csm.transmit.poll-interval").orElseThrow());
+    }
+
+    /**
+     * How long after the start of a transmission the CSM may log its receipt: csm-gateway's
+     * {@code tpe.csm.timeouts.connect}, within which the request has reached the simulator or failed. INV-5 counts a
+     * {@code pacs.008} sent just before its {@code sendBy} as sent in time.
+     */
+    public static Duration transmissionInFlight() {
+        return ServiceProfile.systemtest(ServiceJar.CSM_GATEWAY).duration("tpe.csm.timeouts.connect").orElseThrow();
+    }
+
     /** Until a VoP reference has expired: vop-service's {@code tpe.vop.reference-validity} and the harness's side. */
     public static Duration referenceExpiry() {
         return ServiceProfile.systemtest(ServiceJar.VOP).duration("tpe.vop.reference-validity").orElseThrow()

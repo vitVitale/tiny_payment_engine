@@ -1,0 +1,6 @@
+# Profile systemtest (specs/20-testing-strategy.md §2.1): the scheme time-out deadline equals the orchestrator's
+# deadline-offset, as in production, and the answer timeout leaves the gateway its answer window.
+tpe:
+  sim:
+    timeout-deadline: 6s
+    answer-timeout: 3s

@@ -83,6 +83,36 @@ class ServiceProcessTest {
         assertThat(ServiceProcess.of("fake-service-d-proxied", service, Map.of())).isSameAs(second);
     }
 
+    /** csm-gateway and csm-simulator call each other: one's port is known before the other starts. */
+    @Test
+    void aServiceStartsOnAPortReservedBeforeHand() throws Exception {
+        var service = new ServiceJar("fake-service-e", fakeJar(jars.resolve("e"), "fake-service-e-1.0.jar").getParent());
+        int port = ServiceProcess.freePort();
+
+        ServiceProcess process = ServiceProcess.of(service, Map.of(), port);
+
+        assertThat(process.baseUrl().getPort()).isEqualTo(port);
+        assertThat(get(process, "/args")).contains("--server.port=" + port);
+    }
+
+    /** csm-gateway down and back (E2E-O-12 and later): the same port and properties, a fresh log section. */
+    @Test
+    void aStoppedServiceStartsAgainOnItsPortWithItsProperties() throws Exception {
+        var service = new ServiceJar("fake-service-f", fakeJar(jars.resolve("f"), "fake-service-f-1.0.jar").getParent());
+        ServiceProcess process = ServiceProcess.of(service, Map.of("tpe.x", "y"));
+
+        process.stop();
+
+        assertThat(process.isRunning()).isFalse();
+        assertThatThrownBy(() -> get(process, "/args")).isInstanceOf(IOException.class);
+
+        process.start();
+
+        assertThat(process.isRunning()).isTrue();
+        assertThat(get(process, "/args")).contains("--tpe.x=y", "--server.port=" + process.baseUrl().getPort());
+        assertThat(ServiceProcess.of(service)).isSameAs(process);
+    }
+
     @Test
     void aServiceWithoutAJarNamesTheBuildCommandAndTheProperty() {
         var service = ServiceJar.inRepository("no-such-service");

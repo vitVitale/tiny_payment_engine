@@ -17,6 +17,9 @@ public record ServiceJar(String name, Path directory) {
     /** The service modules of this repository, from the system-tests module. */
     private static final Path SERVICES = Path.of("../../services");
 
+    /** The simulator modules of this repository, from the system-tests module. */
+    private static final Path SIMULATORS = Path.of("../../simulators");
+
     /** ledger-service, the harness's first user. */
     public static final ServiceJar LEDGER = inRepository("ledger-service");
     /** risk-service, called by the orchestrator; its account projection is fed by the ledger's events. */
@@ -27,6 +30,11 @@ public record ServiceJar(String name, Path directory) {
     public static final ServiceJar ORCHESTRATOR = inRepository("payment-orchestrator");
     /** payment-api, the customer channels' API, calling payment-orchestrator and vop-service. */
     public static final ServiceJar PAYMENT_API = inRepository("payment-api");
+    /** csm-gateway, between the orchestrator's Kafka commands and the CSM's transport. */
+    public static final ServiceJar CSM_GATEWAY = inRepository("csm-gateway");
+    /** csm-simulator, the CSM (TIPS) and the peer banks behind it. */
+    public static final ServiceJar CSM_SIMULATOR = new ServiceJar("csm-simulator",
+            SIMULATORS.resolve("csm-simulator").resolve("target"));
 
     /**
      * A service of this repository: its jar in {@code services/<name>/target}, built earlier in the same reactor run
@@ -36,9 +44,9 @@ public record ServiceJar(String name, Path directory) {
         return new ServiceJar(name, SERVICES.resolve(name).resolve("target"));
     }
 
-    /** The configuration sources of a service of this repository ({@link ServiceProfile} reads them). */
+    /** The configuration sources of a module of this repository ({@link ServiceProfile} reads them). */
     Path resources() {
-        return SERVICES.resolve(name).resolve("src/main/resources");
+        return directory.getParent().resolve("src/main/resources");
     }
 
     /** The jar to start: {@code tpe.<name>.jar} if set, else the first {@code <name>-*.jar} in {@link #directory}. */
