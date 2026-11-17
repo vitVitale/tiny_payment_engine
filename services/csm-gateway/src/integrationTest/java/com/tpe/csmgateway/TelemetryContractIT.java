@@ -13,7 +13,8 @@ import org.springframework.beans.factory.annotation.Autowired;
 
 /**
  * The gateway's telemetry contract (specs/20-testing-strategy.md §1, specs/15-csm-gateway.md §8): after a transfer
- * sent and one not sent, the scrape has {@code tpe.csm.messages{direction,type}} and {@code tpe.csm.notsent{reason}}
+ * sent and one not sent, the scrape has {@code tpe.csm.messages{direction,type}}, {@code tpe.csm.notsent{reason}} and
+ * {@code tpe.csm.transmit.attempts{type}}
  * ({@code tpe.csm.uncorrelated} is registered at start, StatusReportIT counts it), every series on the allow-list and
  * no high-cardinality tag.
  */
@@ -33,6 +34,7 @@ class TelemetryContractIT extends GatewayStack {
         TelemetryAssertions.assertThat(PrometheusScrape.parse(prometheus.scrape()))
                 .hasMeterWithTags("tpe.csm.messages", "direction", "type")
                 .hasMeterWithTags("tpe.csm.notsent", "reason")
+                .hasMeterWithTags("tpe.csm.transmit.attempts", "type")
                 .hasMeter("tpe.csm.uncorrelated")
                 .satisfiesTelemetryContract();
     }

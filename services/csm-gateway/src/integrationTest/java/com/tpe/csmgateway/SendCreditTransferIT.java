@@ -138,9 +138,4 @@ class SendCreditTransferIT extends GatewayStack {
         assertThat((String) transfer("TX-TRACE").get("trace_context")).matches("00-[0-9a-f]{32}-[0-9a-f]{16}-0[01]");
     }
 
-    /** The transfer's row; empty while there is none. */
-    private Map<String, Object> transfer(String txId) {
-        return jdbc.sql("SELECT * FROM outgoing_transfers WHERE tx_id = :txId").param("txId", txId).query()
-                .listOfRows().stream().findFirst().orElse(Map.of());
-    }
 }

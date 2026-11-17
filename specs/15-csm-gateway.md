@@ -26,6 +26,7 @@ Not responsible for: payment state, risk, ledger, choosing the verdict (orchestr
 | `application.answer` | Answer coordinator |
 | `application.correlation` | Correlation service |
 | `application.transmit` | Transmitter (§6.5) |
+| `infrastructure.transmit` | Transmit worker: polls the transmitter (§6.5) |
 | `infrastructure.timers` | Answer deadline scheduler |
 | `infrastructure.journal` | Message journal repositories |
 | `infrastructure.csm` | CSM client (`RestClient`, mTLS in `prod`) |
@@ -229,7 +230,10 @@ Endpoint transaction: validate, journal, then match `OrgnlTxId` + `OrgnlTxRef/Db
 - One lease-based worker for `outgoing_transfers`, `incoming_transfers` (answers) and `status_requests` rows with
   `transmit_status = PENDING AND next_transmit_at <= :now`. Claim = conditional update of `next_transmit_at = now +
   lease` and `transmit_attempts + 1`; the HTTP call happens after the claim commits (no lock held during I/O);
-  an `afterCommit` fast path transmits immediately.
+  an `afterCommit` fast path transmits immediately. It is not a `PollingWorker`
+  ([00 §10](00-engineering-baseline.md#10-persistent-timers-and-polling-workers)): that one holds the row lock while it
+  handles a row, and the HTTP call must run without it. A poll sends its rows side by side, so one slow CSM call holds
+  up no other row.
 - `2xx` → `DELIVERED`. Error / timeout → `next_transmit_at = now + 200 ms × 2^(attempts−1)` capped at 1 s.
 - Give-up windows: `pacs.008` at `sendBy` (§6.1); answers at `answer_deadline + answer-transmit-window`, for verdict and
   deadline answers alike (the CSM stops waiting for our answer shortly after the deadline, so later retries are only
@@ -260,6 +264,7 @@ above; no record → journal + alert.
 | `tpe.csm.answer-deadline-offset` | `5s` |
 | `tpe.csm.answer-transmit-window` | `1s` (after `answer_deadline`; `answer-deadline-offset` + this ≤ the CSM's answer timeout, [20 §2.1](20-testing-strategy.md#21-systemtest-profile)) |
 | `tpe.csm.transmit.lease` | `2s` |
+| `tpe.csm.transmit.poll-interval` | `50ms` (how often the transmit worker looks for due and expired rows, §6.5) |
 | `tpe.csm.timeouts.connect` / `.read` | `200ms` / `1s` |
 | `tpe.csm.mtls.*` | keystore / truststore, `prod` only |
 | `tpe.bank-directory.location` | see [01 §1.4](01-shared-libraries.md#14-bank-directory) (own BIC) |

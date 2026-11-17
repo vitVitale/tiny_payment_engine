@@ -18,7 +18,6 @@ import com.tpe.paymentdomain.ReasonCode;
 import com.tpe.paymentdomain.Uetr;
 import io.micrometer.core.instrument.MeterRegistry;
 import java.time.Duration;
-import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.Test;
@@ -174,11 +173,6 @@ class StatusReportIT extends GatewayStack {
 
     private static MsgId msgId() {
         return new MsgId("SIMM-" + REPORTS.incrementAndGet() + "-" + UUID.randomUUID().toString().substring(0, 8));
-    }
-
-    private Map<String, Object> transfer(String txId) {
-        return jdbc.sql("SELECT * FROM outgoing_transfers WHERE tx_id = :txId").param("txId", txId).query()
-                .listOfRows().stream().findFirst().orElse(Map.of());
     }
 
     private java.util.List<String> notes(String txId) {

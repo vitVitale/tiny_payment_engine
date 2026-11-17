@@ -39,5 +39,6 @@ It checks `sendBy` once, when it consumes the command. Two gaps remain:
   required anyway by the lease-based transmitter.
 
 ## Action items
-1. [ ] Implement in the transmitter ([15 §6.1, §6.5](../../specs/15-csm-gateway.md#61-outgoing-sendcredittransfer)).
-2. [ ] Tests GW-AC-03 and GW-AC-04; chaos test CH-02.
+1. [x] Implement in the transmitter ([15 §6.1, §6.5](../../specs/15-csm-gateway.md#61-outgoing-sendcredittransfer)).
+2. [x] Tests GW-AC-03 and GW-AC-04.
+3. [ ] Chaos test CH-02.
