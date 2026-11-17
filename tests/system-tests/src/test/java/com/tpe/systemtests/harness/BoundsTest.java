@@ -42,6 +42,28 @@ class BoundsTest {
         assertThat(Bounds.referenceExpiry()).isEqualTo(Duration.ofSeconds(5).plusSeconds(2));
     }
 
+    /** E2E-O-09, -10, -20: answered by the first status request, asked again after 500 ms (20 §2.1) if lost. */
+    @Test
+    void aPaymentLeftWithoutAnAnswerIsFinalAfterTheFirstStatusRequest() {
+        assertThat(Bounds.paymentFinalAfterInvestigation())
+                .isEqualTo(Bounds.paymentFinal().plus(Duration.ofMillis(500)));
+    }
+
+    /** E2E-O-11: deadline 6 s, budget 10 s, then the next retry after the last back-off value, 1 s (20 §2.1). */
+    @Test
+    void anInvestigationIsUnresolvedAfterTheDeadlineTheBudgetAndTheLastBackoff() {
+        assertThat(Bounds.investigationUnresolved()).isEqualTo(Duration.ofSeconds(6 + 10 + 1 + 2));
+    }
+
+    /** E2E-O-11's retry: the request at once, asked again after 500 ms, then the event's delivery. */
+    @Test
+    void aRetriedInvestigationIsAnsweredWithinTheFirstBackoffAndEventDelivery() {
+        ServiceProfile orchestrator = ServiceProfile.systemtest(ServiceJar.ORCHESTRATOR);
+
+        assertThat(Bounds.statusRequestAnswered())
+                .isEqualTo(Duration.ofMillis(500).plus(Bounds.eventDelivery(orchestrator)));
+    }
+
     @Test
     void anActionIsOverdueAfterTheOrchestratorsLeaseAndLongestBackoff() {
         assertThat(Bounds.actionOverdue()).isEqualTo(Duration.ofSeconds(35));

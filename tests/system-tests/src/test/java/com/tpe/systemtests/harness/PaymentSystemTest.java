@@ -8,6 +8,7 @@ import com.tpe.invariantchecker.EventInvariants;
 import com.tpe.invariantchecker.PaymentInvariants;
 import com.tpe.invariantchecker.Violation;
 import com.tpe.paymentdomain.CommandId;
+import java.math.BigDecimal;
 import java.net.URI;
 import java.sql.Connection;
 import java.sql.SQLException;
@@ -20,6 +21,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.CopyOnWriteArraySet;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.stream.Collectors;
 import org.awaitility.core.ConditionTimeoutException;
@@ -52,6 +54,7 @@ public abstract class PaymentSystemTest extends LedgerSystemTest {
     private static final ServiceProcess CSM_GATEWAY;
     /** csm-gateway's admin API (15 §3.2), for the debug bundle. */
     private static final JsonHttp GATEWAY_ADMIN;
+    private static final JsonHttp CASE_API;
     private static final SimulatorControl SIMULATOR;
     /** Every settlement the CSM made under this JVM's tests is at or after this. */
     private static final Instant STARTED = Instant.now();
@@ -78,10 +81,14 @@ public abstract class PaymentSystemTest extends LedgerSystemTest {
         ORCHESTRATOR = ServiceProcess.of(ServiceJar.ORCHESTRATOR, Map.of(
                 "tpe.clients.risk.base-url", risk.toString(),
                 "tpe.clients.ledger.base-url", ledger.toString())).baseUrl();
+        CASE_API = new JsonHttp(ORCHESTRATOR);
         PAYMENT_API = new JsonHttp(ServiceProcess.of(ServiceJar.PAYMENT_API, Map.of(
                 "tpe.clients.orchestrator.base-url", ORCHESTRATOR.toString(),
                 "tpe.clients.vop.base-url", VOP.toString())).baseUrl());
     }
+
+    /** The case types this test opens on purpose; JUnit makes a new instance per test. */
+    private final Set<String> expectedCases = new CopyOnWriteArraySet<>();
 
     /** The payments this test initiated: the scope of its invariant checks. */
     private final CopyOnWriteArrayList<UUID> payments = new CopyOnWriteArrayList<>();
@@ -151,9 +158,24 @@ public abstract class PaymentSystemTest extends LedgerSystemTest {
         }
     }
 
-    /** The exception case types this test opens on purpose; any other is a breach of INV-9. None by default. */
+    /** The exception case types this test opens on purpose ({@link #expectCase}); any other is a breach of INV-9. */
     protected Set<String> expectedCases() {
-        return Set.of();
+        return Set.copyOf(expectedCases);
+    }
+
+    /** This test opens a case of {@code type} on purpose, e.g. E2E-O-11 its {@code UNRESOLVED_INVESTIGATION}. */
+    protected void expectCase(String type) {
+        expectedCases.add(type);
+    }
+
+    /** The orchestrator's exception case API (11 §3.2), as a back-office operator calls it with {@link #OPERATOR}. */
+    protected static JsonHttp caseApi() {
+        return CASE_API;
+    }
+
+    /** {@code GET /v1/payments/{id}} as {@code payer}, now. */
+    protected JsonNode status(Party payer, UUID payment) {
+        return PAYMENT_API.get(payer.token(), "/v1/payments/" + payment).body();
     }
 
     /** payment-api, for the customer channel's calls (POST with a fresh {@code Idempotency-Key}). */
@@ -190,6 +212,71 @@ public abstract class PaymentSystemTest extends LedgerSystemTest {
 
     /** A payee at another PSP: holder name and IBAN. */
     public record Payee(String name, String iban) {}
+
+    /**
+     * The payee verified, then {@code payer} pays it 123.45 EUR under {@code endToEndId}; the payment's id. vop-service
+     * cannot ask a peer bank's responder yet (its {@code NoCounterpartyVop} until the VoP remote track, 13 §6.1 step
+     * 3), so the reference says {@code NOT_POSSIBLE}, which the customer may pay on (UC-02 3a) and risk lets pass at
+     * this amount; with the remote client the simulator's responder answers {@code MATCH} for the account
+     * {@link #peerPayee} seeded.
+     */
+    /** What {@link #paidToPeer} pays: 123.45 EUR. */
+    protected static final long PEER_PAYMENT_MINOR = 12_345;
+
+    protected UUID paidToPeer(Party payer, Payee payee, String endToEndId) {
+        JsonNode verification = verified(payer, payee.iban(), payee.name(), "NOT_POSSIBLE");
+        Response accepted = initiate(payer.token(), Map.of(
+                "endToEndId", endToEndId,
+                "debtor", Map.of("name", payer.name(), "iban", payer.iban()),
+                "creditor", Map.of("name", payee.name(), "iban", payee.iban()),
+                "amount", Map.of("value", BigDecimal.valueOf(PEER_PAYMENT_MINOR, 2).toPlainString(),
+                        "currency", "EUR"),
+                "remittanceInformation", endToEndId + " to another PSP",
+                "vopReference", verification.get("vopReference").asString()));
+        assertThat(accepted.status()).as("%s", accepted.body()).isEqualTo(202);
+        return UUID.fromString(accepted.body().get("paymentId").asString());
+    }
+
+    /** The payment's row in the orchestrator, as far as the CSM side needs it. */
+    public record OrchestratorPayment(String txId, Instant acceptedAt, String state) {}
+
+    /** The orchestrator's {@code txId}, acceptance and state of {@code payment}, now. */
+    protected static OrchestratorPayment orchestratorPayment(UUID payment) throws SQLException {
+        try (var orchestrator = LocalDatabases.payments(); var statement = orchestrator.prepareStatement(
+                "SELECT tx_id, accepted_at, state FROM payments WHERE payment_id = ?")) {
+            statement.setObject(1, payment);
+            try (var rs = statement.executeQuery()) {
+                rs.next();
+                return new OrchestratorPayment(rs.getString(1), rs.getTimestamp(2).toInstant(), rs.getString(3));
+            }
+        }
+    }
+
+    /**
+     * The CSM's settlements of {@code payment}'s transaction (17 §3.5). Read from a second before its acceptance: no
+     * settlement of it is earlier, whatever the small skew between the database's clock and the simulator's.
+     */
+    protected static List<CsmInvariants.Settlement> csmSettlements(UUID payment) throws SQLException {
+        OrchestratorPayment found = orchestratorPayment(payment);
+        return SIMULATOR.settlements(found.acceptedAt().minusSeconds(1)).stream()
+                .filter(settlement -> settlement.txId().equals(found.txId())).toList();
+    }
+
+    /** The orchestrator's transitions of {@code payment}, as {@code from|to|cause}, oldest first. */
+    protected static List<String> transitions(UUID payment) throws SQLException {
+        try (var orchestrator = LocalDatabases.payments(); var statement = orchestrator.prepareStatement("""
+                SELECT coalesce(from_state, '-') || '|' || to_state || '|' || cause FROM payment_transitions
+                 WHERE payment_id = ? ORDER BY id""")) {
+            statement.setObject(1, payment);
+            var found = new ArrayList<String>();
+            try (var rs = statement.executeQuery()) {
+                while (rs.next()) {
+                    found.add(rs.getString(1));
+                }
+            }
+            return found;
+        }
+    }
 
     /** vop-service, for its metrics. */
     protected static URI vopService() {
@@ -269,8 +356,13 @@ public abstract class PaymentSystemTest extends LedgerSystemTest {
 
     /** {@code GET /v1/payments/{id}} as {@code payer} once it is no longer {@code PDNG}: what the customer sees. */
     protected JsonNode finalStatus(Party payer, UUID payment) {
+        return finalStatus(payer, payment, Bounds.paymentFinal());
+    }
+
+    /** As {@link #finalStatus(Party, UUID)} within {@code bound}, e.g. after an investigation. */
+    protected JsonNode finalStatus(Party payer, UUID payment, Duration bound) {
         var status = new AtomicReference<JsonNode>();
-        await().atMost(Bounds.paymentFinal()).pollInterval(Duration.ofMillis(100)).until(() -> {
+        await().atMost(bound).pollInterval(Duration.ofMillis(100)).until(() -> {
             status.set(PAYMENT_API.get(payer.token(), "/v1/payments/" + payment).body());
             return status.get() != null && !"PDNG".equals(status.get().get("status").asString());
         });

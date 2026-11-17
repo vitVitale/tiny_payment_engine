@@ -2,6 +2,7 @@ package com.tpe.systemtests.harness;
 
 import com.tpe.messaging.outbox.OutboxRelay;
 import java.time.Duration;
+import java.util.List;
 
 /**
  * Awaitility upper bounds derived from the services' configuration in the {@code systemtest} profile, never magic
@@ -33,6 +34,47 @@ public final class Bounds {
         ServiceProfile orchestrator = ServiceProfile.systemtest(ServiceJar.ORCHESTRATOR);
         return orchestrator.duration("tpe.runner.lease").orElseThrow()
                 .plus(orchestrator.duration("tpe.runner.max-backoff").orElseThrow());
+    }
+
+    /**
+     * From a {@code 202} to the final state of a payment the CSM left without an answer, resolved by the first status
+     * request: the deadline, the first {@code tpe.investigation.backoff} value (a lost request is asked again), and
+     * the event's delivery.
+     */
+    public static Duration paymentFinalAfterInvestigation() {
+        return paymentFinal().plus(investigationBackoff().getFirst());
+    }
+
+    /**
+     * From an operator's {@code RETRY_INVESTIGATION} to the final state: the new status request goes out at once and
+     * is asked again after the first back-off value if lost, then the event's delivery.
+     */
+    public static Duration statusRequestAnswered() {
+        return investigationBackoff().getFirst()
+                .plus(eventDelivery(ServiceProfile.systemtest(ServiceJar.ORCHESTRATOR)));
+    }
+
+    /**
+     * From a {@code 202} to the {@code UNRESOLVED_INVESTIGATION} case of a payment the CSM never answers: the
+     * deadline, {@code tpe.investigation.budget}, the last back-off (the first retry past the budget opens it), and
+     * the harness's side.
+     */
+    public static Duration investigationUnresolved() {
+        ServiceProfile orchestrator = ServiceProfile.systemtest(ServiceJar.ORCHESTRATOR);
+        return orchestrator.duration("tpe.outgoing.deadline-offset").orElseThrow()
+                .plus(orchestrator.duration("tpe.investigation.budget").orElseThrow())
+                .plus(investigationBackoff().getLast())
+                .plus(HARNESS);
+    }
+
+    /** The orchestrator's {@code tpe.investigation.backoff} in the {@code systemtest} profile. */
+    private static List<Duration> investigationBackoff() {
+        List<Duration> backoff = ServiceProfile.systemtest(ServiceJar.ORCHESTRATOR)
+                .durations("tpe.investigation.backoff");
+        if (backoff.isEmpty()) {
+            throw new IllegalStateException("tpe.investigation.backoff is not set");
+        }
+        return backoff;
     }
 
     /**

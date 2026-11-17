@@ -35,8 +35,9 @@ import org.mockito.ArgumentCaptor;
 /**
  * M-02, consumer payment-orchestrator (specs/20-testing-strategy.md §10.1, §10.2): the outgoing events of csm-gateway
  * on {@code csm.inbound.events}, through the real listener and {@code ContractValidator} up to the handling, which
- * is mocked. The bodies pin the fields the orchestrator reads and those the contracts require. The incoming events
- * follow with the incoming flow; the provider verification comes with E2E-O-01.
+ * is mocked. The bodies pin the fields the orchestrator reads and those the contracts require. The answers of an
+ * investigation ({@code source = INVESTIGATION}: settled, or unknown after the deadline, UC-05) are interactions of
+ * their own. The incoming events follow with the incoming flow.
  */
 @ExtendWith(PactConsumerTestExt.class)
 @PactTestFor(providerName = CsmGatewayPactTest.PROVIDER, providerType = ProviderType.ASYNCH,
@@ -76,6 +77,29 @@ class CsmGatewayPactTest {
                 });
     }
 
+    /** A {@code pacs.028} answered {@code ACSC} (UC-05 3, E2E-O-09). */
+    @Pact(consumer = CONSUMER)
+    V4Pact creditTransferSettledByInvestigation(MessagePactBuilder builder) {
+        return event(builder, "CreditTransferSettled: an outgoing transfer an investigation found settled",
+                "CreditTransferSettled", body -> {
+                    outgoing(body);
+                    body.stringMatcher("settledAt", TIMESTAMP_PATTERN, "2026-10-21T09:15:51.200Z");
+                    body.stringValue("source", "INVESTIGATION");
+                });
+    }
+
+    /** A {@code pacs.028} answered {@code UNKNOWN_TX} after the deadline: rejected {@code AB05} (UC-05 4c, E2E-O-10). */
+    @Pact(consumer = CONSUMER)
+    V4Pact creditTransferUnknownAfterTheDeadline(MessagePactBuilder builder) {
+        return event(builder, "CreditTransferRejected: an outgoing transfer unknown to the CSM after the deadline",
+                "CreditTransferRejected", body -> {
+                    outgoing(body);
+                    body.stringValue("reasonCode", "AB05");
+                    body.stringMatcher("rejectedAt", TIMESTAMP_PATTERN, "2026-10-21T09:15:51.200Z");
+                    body.stringValue("source", "INVESTIGATION");
+                });
+    }
+
     @Pact(consumer = CONSUMER)
     V4Pact creditTransferNotSent(MessagePactBuilder builder) {
         return event(builder, "CreditTransferNotSent: an outgoing transfer never sent", "CreditTransferNotSent",
@@ -107,6 +131,26 @@ class CsmGatewayPactTest {
         assertThat(event.txId().value()).isEqualTo(TX_ID);
         assertThat(event.direction()).isEqualTo(Direction.OUTGOING);
         assertThat(event.reasonCode()).isEqualTo(ReasonCode.AC04);
+    }
+
+    @Test
+    @PactTestFor(pactMethod = "creditTransferSettledByInvestigation")
+    void PACT_M02_creditTransferSettledByInvestigation(V4Interaction.AsynchronousMessage message) {
+        var event = (CreditTransferSettled) handled(message);
+
+        assertThat(event.txId().value()).isEqualTo(TX_ID);
+        assertThat(event.direction()).isEqualTo(Direction.OUTGOING);
+        assertThat(event.source()).isEqualTo(SettlementSource.INVESTIGATION);
+    }
+
+    @Test
+    @PactTestFor(pactMethod = "creditTransferUnknownAfterTheDeadline")
+    void PACT_M02_creditTransferUnknownAfterTheDeadline(V4Interaction.AsynchronousMessage message) {
+        var event = (CreditTransferRejected) handled(message);
+
+        assertThat(event.txId().value()).isEqualTo(TX_ID);
+        assertThat(event.reasonCode()).isEqualTo(ReasonCode.AB05);
+        assertThat(event.source()).isEqualTo(SettlementSource.INVESTIGATION);
     }
 
     @Test

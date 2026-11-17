@@ -137,7 +137,7 @@ every PR. New ids are appended; existing ids are never renumbered ([30](30-deliv
 | E2E-O-17 | VoP required | no / expired / mismatching reference | `422 VOP_REQUIRED`; no payment |
 | E2E-O-18 | On-us payee unknown / closed / risk deny | IBAN with our bank code and no account; closed payee; payee trips `MULE_NEW_ACCOUNT` | `RJCT AC01` / `AC04` / `FR01`; hold released |
 | E2E-O-19 | Risk `REVIEW` | first payment of 6 000 EUR to a counterparty with VoP `CLOSE_MATCH` (`NEW_PAYEE_HIGH_AMOUNT`); variant: VoP `MATCH` | `RJCT FR01`; no ledger call. Variant: `ACSC` |
-| E2E-O-20 | Late `pacs.002` during investigation | `LATE_STATUS:<deadline + 1s>` | `INVESTIGATING` → `ACSC` from the late `pacs.002`; the `pacs.028` answer is a no-op; one settlement |
+| E2E-O-20 | Late `pacs.002` during investigation | `LATE_STATUS:<deadline + 1s>` | `INVESTIGATING` → `ACSC` from the answer to the first `pacs.028` (the CSM settled, [17 §3.2](17-csm-simulator.md#32-scheme-behaviour)); the late `pacs.002` is a duplicate status at the gateway and publishes nothing; one settlement |
 | E2E-O-21 | Gateway down past the deadline | stop csm-gateway before submit, start it after the deadline | `INVESTIGATING` → `CreditTransferNotSent` → `RJCT AB03`; no `pacs.028`, simulator received nothing |
 
 ### Incoming
