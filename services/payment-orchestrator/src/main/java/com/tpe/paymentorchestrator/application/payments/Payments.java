@@ -36,8 +36,18 @@ public interface Payments {
     void recordTransition(PaymentId paymentId, PaymentState from, PaymentState to, StatusReason reason, String cause,
             Instant at);
 
-    /** A {@code SCHEDULED} timer. */
-    void scheduleTimer(PaymentId paymentId, TimerType type, Instant dueAt, Instant now);
+    /** A {@code SCHEDULED} timer with {@code attempt} 0. */
+    default void scheduleTimer(PaymentId paymentId, TimerType type, Instant dueAt, Instant now) {
+        scheduleTimer(paymentId, type, dueAt, 0, now);
+    }
+
+    /**
+     * A {@code SCHEDULED} timer.
+     *
+     * @param attempt what the timer counts; for {@code INVESTIGATION_RETRY} the status requests of the investigation
+     *     so far
+     */
+    void scheduleTimer(PaymentId paymentId, TimerType type, Instant dueAt, int attempt, Instant now);
 
     /** Marks a timer {@code FIRED}: it is not handed over again. */
     void markTimerFired(long timerId);
@@ -55,6 +65,20 @@ public interface Payments {
      * @param finalEventEmitted the transaction writes the payment's final event
      */
     void applyTimer(LockedPayment locked, Payment next, boolean finalEventEmitted, Instant now);
+
+    /**
+     * Stores the locked payment gone into investigation ({@code INVESTIGATING}) as {@link #applyTimer} does, with
+     * {@code investigation_started_at = now} (§6.4).
+     */
+    void startInvestigation(LockedPayment locked, Payment next, Instant now);
+
+    /**
+     * Counts a new status request of the payment, whose row the current transaction locked: its
+     * {@code status_request_attempt} goes up by one and is never reset (§6.4), and its version moves on.
+     *
+     * @return the new request's {@code attempt}
+     */
+    int nextStatusRequestAttempt(PaymentId paymentId, Instant now);
 
     /**
      * Claims the payment's pending action if it is one of {@code actions} and due at {@code now}: the action belongs

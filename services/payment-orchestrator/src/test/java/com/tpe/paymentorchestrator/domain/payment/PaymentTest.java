@@ -169,6 +169,26 @@ class PaymentTest {
     }
 
     @Test
+    void aSentPaymentPastItsDeadlineGoesIntoInvestigationWithItsHoldKept() {
+        Payment sent = submitted().riskChecked().fundsReserved(UUID.randomUUID()).sent();
+
+        Payment investigating = sent.atDeadline(ACCEPTED.plusSeconds(20)).orElseThrow();
+
+        assertThat(investigating.state()).isEqualTo(PaymentState.INVESTIGATING);
+        assertThat(investigating.reasonCode()).isNull();
+        assertThat(investigating.pendingAction()).as("no release: the CSM may have settled").isNull();
+        assertThat(investigating.finalisedAt()).isNull();
+    }
+
+    @Test
+    void aPaymentUnderInvestigationIsLeftAsItIsByTheDeadline() {
+        Payment investigating = submitted().riskChecked().fundsReserved(UUID.randomUUID()).sent()
+                .atDeadline(ACCEPTED.plusSeconds(20)).orElseThrow();
+
+        assertThat(investigating.atDeadline(ACCEPTED.plusSeconds(21))).isEmpty();
+    }
+
+    @Test
     void aFinalPaymentIsLeftAsItIs() {
         Instant at = ACCEPTED.plusSeconds(20);
 

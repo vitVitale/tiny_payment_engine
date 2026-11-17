@@ -305,8 +305,9 @@ Rules:
 Handled by a `PollingWorker` over `payment_timers` (100 ms). Handlers only change local state and write the outbox.
 A handler locks the payment row (`FOR UPDATE`) and moves its `version` on, so the result of an action still in
 flight is discarded (§6.2, §6.6); a compensation it sets runs after the commit. As the sweeper, the worker picks only
-the timer types the service handles: `SETTLEMENT_OVERDUE` and `INVESTIGATION_RETRY` wait until their milestone
-handles them.
+the timer types the service handles: `SETTLEMENT_OVERDUE` waits until the incoming flow handles it (M4).
+`INVESTIGATION_RETRY` carries in `attempt` the status requests of its investigation so far, which picks the next
+back-off value.
 
 | Timer | Created | When it fires |
 |---|---|---|
@@ -349,7 +350,9 @@ Listener transaction: validate → inbox → load payment by `(direction, debtor
 
 - The payment is found by (`direction`, `debtorAgentBic`, `txId`) and locked (`FOR UPDATE`) like a timer's (§6.6).
   Recording an outcome stores `csm_outcome` and `csm_outcome_at` and cancels the payment's `SCHEDULED` timers in the
-  same transaction; the next action runs after the commit.
+  same transaction; the next action runs after the commit. The timer worker locks a timer row before its payment, so
+  the cancel skips a timer row it cannot lock (`SKIP LOCKED`) instead of waiting for it: that timer then finds
+  `csm_outcome` set and changes nothing.
 - `CreditTransferSettled` while `SETTLE_HOLD` is pending (the outcome is recorded, the hold not yet settled) is a
   no-op; a rejection or `CreditTransferNotSent` then is a contradiction case.
 - A contradiction case changes nothing else: no transition, no ledger call, no final event.

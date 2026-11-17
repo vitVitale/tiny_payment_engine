@@ -19,6 +19,11 @@ tpe:
     send-by-offset: 10s
     deadline-offset: 20s
     hold-give-up-margin: 2s
+  investigation:
+    # specs/11-payment-orchestrator.md §6.4, §7, UC-05: delays between status requests, the last repeats
+    backoff: 5s,15s,60s,300s
+    # past this an UNRESOLVED_INVESTIGATION case opens and no further status request goes out automatically
+    budget: 1h
   runner:
     # specs/11-payment-orchestrator.md §6.3, §7
     lease: 5s
