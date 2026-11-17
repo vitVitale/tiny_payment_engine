@@ -3,7 +3,9 @@ package com.tpe.csmsimulator.application;
 import static com.tpe.csmsimulator.CreditTransfers.CREDITOR;
 import static com.tpe.csmsimulator.CreditTransfers.OUR_BIC;
 import static com.tpe.csmsimulator.CreditTransfers.pacs008;
+import static com.tpe.csmsimulator.CreditTransfers.pacs028;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.tpe.csmsimulator.application.CsmSimulation.Received;
 import com.tpe.csmsimulator.application.CsmSimulation.Refused;
@@ -40,6 +42,7 @@ class CsmSimulationTest {
     private final MutableClock clock = new MutableClock(START);
     private final List<String> sent = new ArrayList<>();
     private boolean gatewayDown;
+    private int gatewayStatus = 202;
     private final EnvelopeCodec envelopes = new EnvelopeCodec();
     private final CsmSimulation simulation = new CsmSimulation(envelopes,
             new OutgoingScheme(BENEFICIARY_DELAY, TIMEOUT_DEADLINE), new Pacs002Builder(), this::gateway, clock,
@@ -246,7 +249,7 @@ class CsmSimulationTest {
         String dollars = pacs008("MSG-1", "TX-1", "10.00", START).replace("Ccy=\"EUR\"", "Ccy=\"USD\"");
 
         assertThat(simulation.receive(dollars)).isInstanceOfSatisfying(Refused.class, refused -> assertThat(
-                refused.violations()).extracting(v -> v.code()).containsExactly(CsmSimulation.UNREADABLE_TRANSFER));
+                refused.violations()).extracting(v -> v.code()).containsExactly(CsmSimulation.UNREADABLE_MESSAGE));
         simulation.tick();
 
         assertThat(simulation.journal(new TxId("TX-1"))).isEmpty();
@@ -267,18 +270,207 @@ class CsmSimulationTest {
         assertThat(simulation.settlements(Instant.EPOCH)).as("the CSM settled; only its report was lost").hasSize(1);
     }
 
-    private void gateway(String envelope) {
+    @Test
+    void SIM_AC_05_lateStatusSettlesOnceAndReportsOnceAtAcceptanceTimePlusItsDelay() {
+        simulation.setScenario(CREDITOR, Scenario.parse("LATE_STATUS:21000"));
+
+        simulation.receive(pacs008("MSG-1", "TX-1", "10.00", START));
+        simulation.tick();
+        clock.advance(BENEFICIARY_DELAY);
+        simulation.tick();
+        assertThat(sent).as("settled, not reported").isEmpty();
+        assertThat(simulation.settlements(Instant.EPOCH)).hasSize(1);
+
+        clock.set(START.plusSeconds(1));
+        simulation.receive(pacs028("REQ-1", "MSG-1", "TX-1", clock.instant()));
+        simulation.tick();
+        PaymentTransaction110 investigated = onlyStatusReport();
+        assertThat(investigated.getTxSts()).as("a pacs.028 before the late pacs.002").isEqualTo("ACSC");
+        assertThat(originalGroup(sent.getFirst()).getOrgnlMsgId()).isEqualTo("REQ-1");
+        assertThat(originalGroup(sent.getFirst()).getOrgnlMsgNmId()).isEqualTo(CsmMessageType.PACS_028.version());
+
+        clock.set(START.plusSeconds(21).minusMillis(1));
+        simulation.tick();
+        assertThat(sent).hasSize(1);
+        clock.set(START.plusSeconds(21));
+        simulation.tick();
+        clock.advance(Duration.ofMinutes(1));
+        simulation.tick();
+
+        assertThat(sent).hasSize(2);
+        assertThat(statusReport(sent.get(1)).getTxSts()).isEqualTo("ACSC");
+        assertThat(originalGroup(sent.get(1)).getOrgnlMsgId()).isEqualTo("MSG-1");
+        assertThat(simulation.journal(new TxId("TX-1"))).filteredOn(e -> e.kind() == Kind.SENT)
+                .extracting(JournalEntry::at).containsExactly(START.plusSeconds(1), START.plusSeconds(21));
+        assertThat(simulation.settlements(Instant.EPOCH)).as("settled once").hasSize(1);
+    }
+
+    @Test
+    void silentSettlesWithoutAReportAndAnInvestigationIsAnsweredSettled() {
+        simulation.setScenario(CREDITOR, Scenario.parse("SILENT"));
+
+        simulation.receive(pacs008("MSG-1", "TX-1", "10.00", START));
+        simulation.tick();
+        clock.advance(Duration.ofMinutes(1));
+        simulation.tick();
+        assertThat(sent).isEmpty();
+        assertThat(simulation.settlements(Instant.EPOCH)).hasSize(1);
+
+        simulation.receive(pacs028("REQ-1", "MSG-1", "TX-1", clock.instant()));
+        simulation.tick();
+
+        PaymentTransaction110 answer = onlyStatusReport();
+        assertThat(answer.getTxSts()).isEqualTo("ACSC");
+        assertThat(answer.getOrgnlTxId()).isEqualTo("TX-1");
+        assertThat(answer.getOrgnlTxRef().getDbtrAgt().getFinInstnId().getBICFI()).isEqualTo(OUR_BIC.value());
+        assertThat(answer.getInstdAgt().getFinInstnId().getBICFI()).isEqualTo(OUR_BIC.value());
+    }
+
+    @Test
+    void lostIsNeitherSettledNorAnsweredAndAnInvestigationIsAnsweredUnknownTx() {
+        simulation.setScenario(CREDITOR, Scenario.parse("LOST"));
+
+        assertThat(simulation.receive(pacs008("MSG-1", "TX-1", "10.00", START))).isInstanceOf(Received.class);
+        simulation.tick();
+        clock.advance(Duration.ofMinutes(1));
+        simulation.tick();
+        assertThat(sent).isEmpty();
+
+        simulation.receive(pacs028("REQ-1", "MSG-1", "TX-1", clock.instant()));
+        simulation.tick();
+
+        PaymentTransaction110 answer = onlyStatusReport();
+        assertThat(answer.getTxSts()).isEqualTo("RJCT");
+        assertThat(answer.getStsRsnInf().getFirst().getRsn().getPrtry()).isEqualTo("UNKNOWN_TX");
+        assertThat(simulation.settlements(Instant.EPOCH)).isEmpty();
+    }
+
+    @Test
+    void anInvestigationOfATransactionNeverReceivedIsAnsweredUnknownTx() {
+        simulation.receive(pacs028("REQ-1", "MSG-1", "TX-1", START));
+        simulation.tick();
+
+        assertThat(onlyStatusReport().getStsRsnInf().getFirst().getRsn().getPrtry()).isEqualTo("UNKNOWN_TX");
+    }
+
+    @Test
+    void anInvestigationIsAnsweredWithTheRejection() {
+        simulation.setScenario(CREDITOR, Scenario.parse("REJECT:AC04"));
+        simulation.receive(pacs008("MSG-1", "TX-1", "10.00", START));
+        simulation.tick();
+        simulation.tick();
+
+        simulation.receive(pacs028("REQ-1", "MSG-1", "TX-1", START));
+        simulation.tick();
+
+        assertThat(sent).hasSize(2);
+        PaymentTransaction110 answer = statusReport(sent.get(1));
+        assertThat(answer.getTxSts()).isEqualTo("RJCT");
+        assertThat(answer.getStsRsnInf().getFirst().getRsn().getCd()).isEqualTo("AC04");
+    }
+
+    @Test
+    void anInvestigationBeforeTheFinalStatusIsNotAnswered() {
+        simulation.setScenario(CREDITOR, Scenario.parse("TIMEOUT"));
+        simulation.receive(pacs008("MSG-1", "TX-1", "10.00", START));
+        simulation.tick();
+
+        simulation.receive(pacs028("REQ-1", "MSG-1", "TX-1", START));
+        simulation.tick();
+
+        assertThat(sent).isEmpty();
+    }
+
+    @Test
+    void investigationSilentIgnoresInvestigationsUntilTheScenarioIsCleared() {
+        simulation.setScenario(CREDITOR, Scenario.parse("SILENT+INVESTIGATION_SILENT"));
+        simulation.receive(pacs008("MSG-1", "TX-1", "10.00", START));
+        simulation.tick();
+        clock.advance(BENEFICIARY_DELAY);
+        simulation.tick();
+
+        simulation.receive(pacs028("REQ-1", "MSG-1", "TX-1", clock.instant()));
+        simulation.tick();
+        assertThat(sent).isEmpty();
+        assertThat(simulation.settlements(Instant.EPOCH)).as("the payment itself played SILENT").hasSize(1);
+
+        simulation.setScenario(CREDITOR, Scenario.parse("SILENT"));
+        simulation.receive(pacs028("REQ-2", "MSG-1", "TX-1", clock.instant()));
+        simulation.tick();
+
+        assertThat(onlyStatusReport().getTxSts()).isEqualTo("ACSC");
+        assertThat(originalGroup(sent.getFirst()).getOrgnlMsgId()).isEqualTo("REQ-2");
+    }
+
+    @Test
+    void aRetriedInvestigationIsAnsweredOnce() {
+        String request = pacs028("REQ-1", "MSG-1", "TX-1", START);
+
+        simulation.receive(request);
+        simulation.receive(request);
+        simulation.tick();
+
+        assertThat(sent).hasSize(1);
+        assertThat(simulation.journal(new TxId("TX-1"))).extracting(JournalEntry::kind, JournalEntry::duplicate)
+                .containsExactly(
+                        org.assertj.core.groups.Tuple.tuple(Kind.RECEIVED, false),
+                        org.assertj.core.groups.Tuple.tuple(Kind.RECEIVED, true),
+                        org.assertj.core.groups.Tuple.tuple(Kind.SENT, false));
+    }
+
+    @Test
+    void aRawMessageGoesToTheGatewayAsItIsAndIsJournalledWhenItNamesATransaction() {
+        String raw = pacs008("MSG-1", "TX-1", "10.00", START);
+
+        assertThat(simulation.sendRaw(raw)).isEqualTo(202);
+        assertThat(simulation.sendRaw("<not-a-csm-envelope/>")).isEqualTo(202);
+
+        assertThat(sent).containsExactly(raw, "<not-a-csm-envelope/>");
+        assertThat(simulation.journal(new TxId("TX-1"))).extracting(JournalEntry::kind, JournalEntry::msgId)
+                .containsExactly(org.assertj.core.groups.Tuple.tuple(Kind.SENT, "MSG-1"));
+    }
+
+    @Test
+    void aRawMessageTheGatewayGivesNoAnswerToIsGatewayUnreachable() {
+        CsmSimulation unreachable = new CsmSimulation(envelopes, new OutgoingScheme(BENEFICIARY_DELAY,
+                TIMEOUT_DEADLINE), new Pacs002Builder(), message -> {
+                    throw new IllegalStateException("connection refused");
+                }, clock, new UlidGenerator(clock, new Random(7)), CSM_BIC);
+
+        assertThatThrownBy(() -> unreachable.sendRaw("<x/>")).isInstanceOf(GatewayUnreachableException.class);
+    }
+
+    @Test
+    void aRawMessageTheGatewayRefusesIsReportedWithItsStatusAndNotJournalled() {
+        gatewayStatus = 400;
+
+        assertThat(simulation.sendRaw(pacs008("MSG-1", "TX-1", "10.00", START))).isEqualTo(400);
+
+        assertThat(simulation.journal(new TxId("TX-1"))).isEmpty();
+    }
+
+    private int gateway(String envelope) {
         if (gatewayDown) {
-            throw new IllegalStateException("503 from csm-gateway");
+            return 503;
         }
         sent.add(envelope);
+        return gatewayStatus;
+    }
+
+    private PaymentTransaction110 statusReport(String xml) {
+        CsmEnvelope envelope = ((Accepted) envelopes.split(xml)).envelope();
+        assertThat(envelope.messageType()).isEqualTo(CsmMessageType.PACS_002);
+        return ((com.tpe.iso20022model.pacs002v10.Document) envelope.document())
+                .getFIToFIPmtStsRpt().getTxInfAndSts().getFirst();
+    }
+
+    private com.tpe.iso20022model.pacs002v10.OriginalGroupHeader17 originalGroup(String xml) {
+        return ((com.tpe.iso20022model.pacs002v10.Document) ((Accepted) envelopes.split(xml)).envelope().document())
+                .getFIToFIPmtStsRpt().getOrgnlGrpInfAndSts().getFirst();
     }
 
     private PaymentTransaction110 onlyStatusReport() {
         assertThat(sent).hasSize(1);
-        CsmEnvelope envelope = ((Accepted) envelopes.split(sent.getFirst())).envelope();
-        assertThat(envelope.messageType()).isEqualTo(CsmMessageType.PACS_002);
-        return ((com.tpe.iso20022model.pacs002v10.Document) envelope.document())
-                .getFIToFIPmtStsRpt().getTxInfAndSts().getFirst();
+        return statusReport(sent.getFirst());
     }
 }

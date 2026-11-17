@@ -4,6 +4,8 @@ import com.tpe.iso20022model.EnvelopeCodec;
 import com.tpe.iso20022model.Pacs008Builder;
 import com.tpe.iso20022model.Pacs008Builder.AccountHolder;
 import com.tpe.iso20022model.Pacs008Builder.CreditTransfer;
+import com.tpe.iso20022model.Pacs028Builder;
+import com.tpe.iso20022model.Pacs028Builder.StatusRequest;
 import com.tpe.paymentdomain.Bic;
 import com.tpe.paymentdomain.EndToEndId;
 import com.tpe.paymentdomain.Iban;
@@ -19,12 +21,13 @@ import java.time.LocalDate;
 import java.time.ZoneOffset;
 import java.util.UUID;
 
-/** {@code pacs.008} envelopes as csm-gateway sends them: from our bank to a counterparty. */
+/** {@code pacs.008} and {@code pacs.028} envelopes as csm-gateway sends them: from our bank. */
 public final class CreditTransfers {
 
     public static final Bic OUR_BIC = new Bic("TPEBDEFFXXX");
     public static final Bic PEER_BIC = new Bic("PEERDEFFXXX");
     public static final Iban CREDITOR = new Iban("DE07200200200123456789");
+    public static final Bic CSM_BIC = new Bic("TIPSXXXXXXX");
     public static final Iban DEBTOR = new Iban("DE36100100100000000001");
 
     private CreditTransfers() {}
@@ -50,6 +53,13 @@ public final class CreditTransfers {
                 new AccountHolder(new PartyName("Erika Musterfrau"), creditor),
                 new RemittanceInformation("Invoice " + txId));
         return new EnvelopeCodec().join(new Pacs008Builder().build(transfer));
+    }
+
+    /** A status request for the transfer {@code txId} sent with {@code originalMsgId}. */
+    public static String pacs028(String msgId, String originalMsgId, String txId, Instant createdAt) {
+        return new EnvelopeCodec().join(new Pacs028Builder().build(new StatusRequest(new MsgId(msgId), createdAt,
+                new MsgId(originalMsgId), new TxId(txId), new EndToEndId("E2E-" + txId), uetr(txId), OUR_BIC,
+                OUR_BIC, CSM_BIC)));
     }
 
     /** A UUID v4 derived from {@code txId}, so a retry carries the same one. */

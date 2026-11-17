@@ -1,5 +1,6 @@
 package com.tpe.csmsimulator.api;
 
+import com.tpe.csmsimulator.application.GatewayUnreachableException;
 import com.tpe.paymentdomain.DomainValidationException;
 import java.net.URI;
 import java.util.List;
@@ -19,13 +20,15 @@ import org.springframework.web.servlet.mvc.method.annotation.ResponseEntityExcep
 /**
  * Problem Details with {@code code}, and {@code errors} on a {@code 400} (specs/00-engineering-baseline.md §7), for
  * the simulator's own APIs. Codes: {@code INVALID_ENVELOPE} (the CSM transport), {@code VALIDATION_FAILED} (a
- * control request it cannot act on, and every other {@code 400} Spring MVC raises), else the status name.
+ * control request it cannot act on, and every other {@code 400} Spring MVC raises), {@code GATEWAY_UNREACHABLE}
+ * ({@code 502}: csm-gateway gave no answer to a message the control API sends), else the status name.
  */
 @RestControllerAdvice
 public class ApiProblems extends ResponseEntityExceptionHandler {
 
     public static final String INVALID_ENVELOPE = "INVALID_ENVELOPE";
     public static final String VALIDATION_FAILED = "VALIDATION_FAILED";
+    public static final String GATEWAY_UNREACHABLE = "GATEWAY_UNREACHABLE";
 
     /** One entry of {@code errors}. */
     public record FieldError(String field, String code) {}
@@ -49,6 +52,14 @@ public class ApiProblems extends ResponseEntityExceptionHandler {
     @ExceptionHandler(InvalidControlRequestException.class)
     ProblemDetail invalidControlRequest(InvalidControlRequestException e) {
         return badRequest(VALIDATION_FAILED, e.getMessage(), List.of(new FieldError(e.field(), "INVALID")));
+    }
+
+    @ExceptionHandler(GatewayUnreachableException.class)
+    ProblemDetail gatewayUnreachable(GatewayUnreachableException e) {
+        ProblemDetail problem = ProblemDetail.forStatusAndDetail(HttpStatus.BAD_GATEWAY, e.getMessage());
+        problem.setType(type(GATEWAY_UNREACHABLE));
+        problem.setProperty("code", GATEWAY_UNREACHABLE);
+        return problem;
     }
 
     @Override

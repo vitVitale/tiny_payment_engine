@@ -14,6 +14,7 @@ import com.tpe.iso20022model.EnvelopeCodec;
 import com.tpe.iso20022model.EnvelopeCodec.Accepted;
 import com.tpe.iso20022model.EnvelopeCodec.Rejected;
 import com.tpe.iso20022model.Pacs002Builder;
+import com.tpe.iso20022model.Pacs002Builder.Status;
 import com.tpe.iso20022model.Pacs002Builder.StatusReport;
 import com.tpe.iso20022model.XsdValidator.Violation;
 import com.tpe.iso20022model.pacs008v08.CreditTransferTransaction39;
@@ -44,8 +45,9 @@ import org.slf4j.LoggerFactory;
 
 /**
  * The simulated CSM (specs/17-csm-simulator.md §3.1, §3.2, §3.5): receives envelopes from csm-gateway, plays the scheme
- * for our outgoing {@code pacs.008}, keeps the settlement log and the journal, and holds the control state. All state
- * is in memory; {@link #reset()} is a clean slate.
+ * for our outgoing {@code pacs.008}, answers status investigations ({@code pacs.028}) with the final status it knows,
+ * keeps the settlement log and the journal, and holds the control state. All state is in memory; {@link #reset()} is
+ * a clean slate.
  *
  * <p>Work happens on a timeline read from the injected clock: a received message is processed at {@code now} (or
  * {@code delay} later while the transport is {@code SLOW}), an answer at the instant the scheme decides. Each piece of
@@ -58,8 +60,8 @@ import org.slf4j.LoggerFactory;
  */
 public final class CsmSimulation {
 
-    /** The violation code of a schema-valid {@code pacs.008} the simulator cannot read into domain types. */
-    public static final String UNREADABLE_TRANSFER = "UNREADABLE_TRANSFER";
+    /** The violation code of a schema-valid {@code pacs.008} or {@code pacs.028} the simulator cannot read. */
+    public static final String UNREADABLE_MESSAGE = "UNREADABLE_MESSAGE";
 
     private static final Logger log = LoggerFactory.getLogger(CsmSimulation.class);
     private static final Currency EUR = Currency.getInstance("EUR");
@@ -80,6 +82,12 @@ public final class CsmSimulation {
     /** An envelope to send and its journal entry, recorded once the gateway took it. */
     private record Outbound(String envelope, JournalEntry entry, long generation) {}
 
+    /** A transaction is identified by its debtor agent and {@code TxId} (ADR-010). */
+    private record TransactionKey(Bic debtorAgent, TxId txId) {}
+
+    /** A transaction the CSM received; {@code finalStatus} is {@code null} until it has one. */
+    private record Transaction(CreditTransfer transfer, Status finalStatus) {}
+
     private final EnvelopeCodec envelopes;
     private final OutgoingScheme scheme;
     private final Pacs002Builder statusReports;
@@ -92,6 +100,7 @@ public final class CsmSimulation {
     private final Scenarios scenarios = new Scenarios();
     private final Map<Iban, CounterpartyAccount> counterpartyAccounts = new HashMap<>();
     private final Set<String> processedMsgIds = new HashSet<>();
+    private final Map<TransactionKey, Transaction> transactions = new HashMap<>();
     private final List<JournalEntry> journal = new ArrayList<>();
     private final List<Settlement> settlements = new ArrayList<>();
     private final PriorityQueue<Due> timeline =
@@ -124,23 +133,29 @@ public final class CsmSimulation {
         }
         CsmEnvelope envelope = ((Accepted) split).envelope();
         CsmMessage message = CsmMessage.of(envelope);
-        CreditTransfer transfer = null;
-        if (envelope.messageType() == CsmMessageType.PACS_008) {
-            try {
-                transfer = CreditTransfer.of(envelope);
-            } catch (RuntimeException e) {
-                return refuse(EnvelopeCodec.Part.DOCUMENT,
-                        List.of(new Violation(0, 0, UNREADABLE_TRANSFER, e.toString())));
-            }
+        Function<Instant, Optional<Outbound>> work;
+        try {
+            work = switch (envelope.messageType()) {
+                case PACS_008 -> {
+                    CreditTransfer transfer = CreditTransfer.of(envelope);
+                    yield at -> processCreditTransfer(transfer, at);
+                }
+                case PACS_028 -> {
+                    StatusRequest request = StatusRequest.of(envelope);
+                    yield at -> investigate(request, at);
+                }
+                case PACS_002 -> null;
+            };
+        } catch (RuntimeException e) {
+            return refuse(EnvelopeCodec.Part.DOCUMENT, List.of(new Violation(0, 0, UNREADABLE_MESSAGE, e.toString())));
         }
         synchronized (lock) {
             Instant now = clock.instant();
             boolean duplicate = !processedMsgIds.add(message.msgId());
             journal.add(new JournalEntry(message.txId(), Kind.RECEIVED, envelope.messageType().version(),
                     message.msgId(), now, duplicate, xml));
-            if (!duplicate && transfer != null) {
-                CreditTransfer received = transfer;
-                schedule(now.plus(outage.delay()), at -> processCreditTransfer(received, at));
+            if (!duplicate && work != null) {
+                schedule(now.plus(outage.delay()), work);
             }
         }
         return new Received();
@@ -167,6 +182,34 @@ public final class CsmSimulation {
         for (Outbound message : outbound) {
             send(message);
         }
+    }
+
+    /**
+     * Sends {@code message} to the gateway as it is ({@code POST /sim/v1/incoming-payments/raw}): no validation, so a
+     * test can send an invalid or contradicting one. Journalled as sent when the gateway took it and it is a CSM
+     * envelope that names a transaction.
+     *
+     * @return the gateway's HTTP status
+     * @throws GatewayUnreachableException if the gateway gave no answer
+     */
+    public int sendRaw(String message) {
+        int status;
+        try {
+            status = gateway.post(message);
+        } catch (RuntimeException e) {
+            throw new GatewayUnreachableException(e);
+        }
+        if (!GatewayClient.isSuccess(status)) {
+            return status;
+        }
+        if (envelopes.split(message) instanceof Accepted accepted
+                && CsmMessage.of(accepted.envelope()) instanceof CsmMessage sent && sent.txId() != null) {
+            synchronized (lock) {
+                journal.add(new JournalEntry(sent.txId(), Kind.SENT, accepted.envelope().messageType().version(),
+                        sent.msgId(), clock.instant(), false, message));
+            }
+        }
+        return status;
     }
 
     public void setScenario(Iban creditor, Scenario scenario) {
@@ -209,12 +252,16 @@ public final class CsmSimulation {
         }
     }
 
-    /** Clears all state: scenarios, accounts, journal, settlements, pending work and the outage. */
+    /**
+     * Clears all state: scenarios, accounts, the transactions received, journal, settlements, pending work and the
+     * outage.
+     */
     public void reset() {
         synchronized (lock) {
             scenarios.clear();
             counterpartyAccounts.clear();
             processedMsgIds.clear();
+            transactions.clear();
             journal.clear();
             settlements.clear();
             timeline.clear();
@@ -230,28 +277,84 @@ public final class CsmSimulation {
         return new Refused(part, violations);
     }
 
-    /** Runs under the lock, as of {@code now}. */
+    /** Runs under the lock, as of {@code now}. A {@code LOST} transfer is dropped: the CSM never received it. */
     private Optional<Outbound> processCreditTransfer(CreditTransfer transfer, Instant now) {
         Scenario scenario = scenarios.scenarioFor(transfer.creditor(), transfer.amount());
-        Outcome outcome = scheme.decide(transfer.acceptedAt(), scenario, now);
-        schedule(outcome.at(), at -> answer(transfer, outcome, at));
+        Optional<Outcome> decided = scheme.decide(transfer.acceptedAt(), scenario, now);
+        if (decided.isEmpty()) {
+            log.info("dropped {} of {}: scenario {}", transfer.msgId().value(), transfer.txId().value(),
+                    scenario.text());
+            return Optional.empty();
+        }
+        Outcome outcome = decided.get();
+        transactions.put(transfer.key(), new Transaction(transfer, null));
+        schedule(outcome.at(), at -> conclude(transfer, outcome, at));
         return Optional.empty();
     }
 
-    /** Runs under the lock, as of {@code now}: builds the status report first, so a settlement always has one. */
-    private Optional<Outbound> answer(CreditTransfer transfer, Outcome outcome, Instant now) {
-        MsgId msgId = new MsgId(MSG_ID_PREFIX + ulids.next());
-        CsmEnvelope report = statusReports.build(new StatusReport(msgId, now, transfer.msgId(),
-                CsmMessageType.PACS_008, transfer.txId(), transfer.endToEndId(), transfer.uetr(),
-                transfer.debtorAgent(), outcome.status(), ownBic, transfer.debtorAgent()));
-        // join validates both parts: everything the simulator sends is schema-valid (SIM-AC-02)
-        String xml = envelopes.join(report);
+    /**
+     * Runs under the lock, as of {@code now}: the status is final, the transfer settled if it settles, and the status
+     * reported now, later or never. A report due now is built first, so a reported settlement always has one.
+     */
+    private Optional<Outbound> conclude(CreditTransfer transfer, Outcome outcome, Instant now) {
+        Optional<Outbound> report = Optional.empty();
+        if (now.equals(outcome.reportAt())) {
+            report = Optional.of(report(transfer, outcome.status(), now));
+        } else if (outcome.reportAt() != null) {
+            schedule(outcome.reportAt(), at -> Optional.of(report(transfer, outcome.status(), at)));
+        }
         if (outcome.settles()) {
             settlements.add(new Settlement(transfer.txId(), transfer.debtorAgent(), Direction.OUTGOING,
                     transfer.amount().minor(), now));
         }
-        return Optional.of(new Outbound(xml, new JournalEntry(transfer.txId(), Kind.SENT,
-                CsmMessageType.PACS_002.version(), msgId.value(), now, false, xml), generation));
+        transactions.put(transfer.key(), new Transaction(transfer, outcome.status()));
+        return report;
+    }
+
+    /** The {@code pacs.002} answering the {@code pacs.008}. */
+    private Outbound report(CreditTransfer transfer, Status status, Instant now) {
+        return statusReport(transfer.txId(), now, id -> new StatusReport(id, now, transfer.msgId(),
+                CsmMessageType.PACS_008, transfer.txId(), transfer.endToEndId(), transfer.uetr(),
+                transfer.debtorAgent(), status, ownBic, transfer.debtorAgent()));
+    }
+
+    /**
+     * Runs under the lock, as of {@code now}: answers with the final status of the transaction, {@code RJCT
+     * UNKNOWN_TX} if the CSM never received it, nothing while it has no final status yet or its creditor's scenario
+     * ignores investigations.
+     */
+    private Optional<Outbound> investigate(StatusRequest request, Instant now) {
+        Transaction transaction = transactions.get(request.key());
+        Status status;
+        if (transaction == null) {
+            status = Status.UNKNOWN_TRANSACTION;
+        } else {
+            CreditTransfer transfer = transaction.transfer();
+            Scenario scenario = scenarios.scenarioFor(transfer.creditor(), transfer.amount());
+            if (scenario.ignoresInvestigations()) {
+                log.info("ignored investigation {} of {}: scenario {}", request.msgId().value(),
+                        request.txId().value(), scenario.text());
+                return Optional.empty();
+            }
+            if (transaction.finalStatus() == null) {
+                log.info("investigation {} of {} unanswered: no final status yet", request.msgId().value(),
+                        request.txId().value());
+                return Optional.empty();
+            }
+            status = transaction.finalStatus();
+        }
+        return Optional.of(statusReport(request.txId(), now, id -> new StatusReport(id, now, request.msgId(),
+                CsmMessageType.PACS_028, request.txId(), request.endToEndId(), request.uetr(), request.debtorAgent(),
+                status, ownBic, request.instructingAgent())));
+    }
+
+    /** A status report under a new {@code MsgId}, ready to send. */
+    private Outbound statusReport(TxId txId, Instant now, Function<MsgId, StatusReport> report) {
+        MsgId msgId = new MsgId(MSG_ID_PREFIX + ulids.next());
+        // join validates both parts: everything the simulator sends is schema-valid (SIM-AC-02)
+        String xml = envelopes.join(statusReports.build(report.apply(msgId)));
+        return new Outbound(xml, new JournalEntry(txId, Kind.SENT, CsmMessageType.PACS_002.version(), msgId.value(),
+                now, false, xml), generation);
     }
 
     /** Sends outside the lock; a send the gateway does not take is logged, not repeated, and not journalled. */
@@ -318,6 +421,10 @@ public final class CsmSimulation {
     private record CreditTransfer(MsgId msgId, TxId txId, EndToEndId endToEndId, Uetr uetr, Money amount,
             Instant acceptedAt, Bic debtorAgent, Iban creditor) {
 
+        TransactionKey key() {
+            return new TransactionKey(debtorAgent, txId);
+        }
+
         /** @throws RuntimeException if a field the scheme needs is missing or not a valid domain value */
         static CreditTransfer of(CsmEnvelope envelope) {
             var message = ((com.tpe.iso20022model.pacs008v08.Document) envelope.document()).getFIToFICstmrCdtTrf();
@@ -335,6 +442,28 @@ public final class CsmSimulation {
                     transaction.getAccptncDtTm().toGregorianCalendar().toInstant(),
                     new Bic(transaction.getDbtrAgt().getFinInstnId().getBICFI()),
                     new Iban(transaction.getCdtrAcct().getId().getIBAN()));
+        }
+    }
+
+    /** What an investigation needs from a {@code pacs.028}, read into domain types. */
+    private record StatusRequest(MsgId msgId, TxId txId, EndToEndId endToEndId, Uetr uetr, Bic debtorAgent,
+            Bic instructingAgent) {
+
+        /** @throws RuntimeException if a field the answer needs is missing or not a valid domain value */
+        static StatusRequest of(CsmEnvelope envelope) {
+            var message = ((com.tpe.iso20022model.pacs028v03.Document) envelope.document()).getFIToFIPmtStsReq();
+            var transaction = message.getTxInf().getFirst();
+            return new StatusRequest(
+                    new MsgId(message.getGrpHdr().getMsgId()),
+                    new TxId(transaction.getOrgnlTxId()),
+                    transaction.getOrgnlEndToEndId() == null ? null : new EndToEndId(transaction.getOrgnlEndToEndId()),
+                    transaction.getOrgnlUETR() == null ? null : new Uetr(transaction.getOrgnlUETR()),
+                    new Bic(transaction.getOrgnlTxRef().getDbtrAgt().getFinInstnId().getBICFI()),
+                    new Bic(transaction.getInstgAgt().getFinInstnId().getBICFI()));
+        }
+
+        TransactionKey key() {
+            return new TransactionKey(debtorAgent, txId);
         }
     }
 }

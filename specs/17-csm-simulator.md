@@ -53,9 +53,10 @@ State is in memory; restart = clean slate. Single instance.
 4. `TIMEOUT` → the beneficiary never answers; at `AccptncDtTm + 20s` the CSM sends `pacs.002 RJCT AB05`.
 5. `SILENT` → the CSM settles but sends no `pacs.002`; a later `pacs.028` is answered `ACSC` (UC-05 happy path).
 6. `LOST` → the CSM acknowledges the transport (`202`) and drops the message; a later `pacs.028` is answered
-   `UNKNOWN_TX` (UC-05 4c).
-7. `LATE_STATUS:<ms>` → settles as `ACCEPT`, but sends the `pacs.002 ACSC` only at `AccptncDtTm + <ms>`; a `pacs.028`
-   before that is answered `ACSC` (late `pacs.002` during an investigation, UC-05).
+   `UNKNOWN_TX` (UC-05 4c). The message is still journalled as received: the transport took it.
+7. `LATE_STATUS:<ms>` → settles as `ACCEPT`, but sends the `pacs.002 ACSC` only at `AccptncDtTm + <ms>` (at the
+   settlement, if that comes later); a `pacs.028` before that is answered `ACSC` (late `pacs.002` during an
+   investigation, UC-05).
 
 Every settlement, in either direction, is appended to the **settlement log** (`txId`, `debtorAgentBic`, `direction`,
 `amountMinor`, `settledAt`). It is the CSM's view of what moved, used by the ledger reconciliation invariant
@@ -71,7 +72,14 @@ seeded counterparty BIC as `DbtrAgt` unless the request gives `txId` / `debtorAg
 
 **Investigation:** `pacs.028` → `pacs.002` with the final status if known; for a `TxId` it never received →
 `pacs.002 TxSts = RJCT`, `StsRsnInf/Rsn/Prtry = UNKNOWN_TX` (the convention csm-gateway relies on,
-[15 §6.4](15-csm-gateway.md#64-correlation-inbound-pacs002)). Scenario `INVESTIGATION_SILENT` ignores `pacs.028`.
+[15 §6.4](15-csm-gateway.md#64-correlation-inbound-pacs002)). A transaction is the debtor agent's BIC and `TxId`
+(`OrgnlTxRef/DbtrAgt`, `OrgnlTxId`). The answer's `OrgnlMsgId` is the `pacs.028`'s, with `OrgnlMsgNmId`
+`pacs.028.001.03`. A `pacs.028` about a transaction that has no final status yet is not answered (the requester asks
+again). A `pacs.028` retried with the same `MsgId` is answered once. Scenario `INVESTIGATION_SILENT` ignores
+`pacs.028`; it joins a payment scenario with `+` (`SILENT+INVESTIGATION_SILENT`, E2E-O-11), and alone the payment is
+`ACCEPT`. It is read when the `pacs.028` arrives, so setting the creditor's scenario again without it (clearing it)
+makes the next `pacs.028` answered. The creditor is known only from a `pacs.008` the CSM received, so a `LOST`
+transaction is answered `UNKNOWN_TX` whatever the scenario.
 
 ### 3.3 VoP
 
@@ -100,7 +108,7 @@ seeded counterparty BIC as `DbtrAgt` unless the request gives `txId` / `debtorAg
 | Endpoint | Purpose |
 |---|---|
 | `PUT /sim/v1/counterparty-accounts` | Seed counterparty IBANs with holder names and bank codes |
-| `PUT /sim/v1/scenarios/{creditorIban}` | Scenario for payments to that IBAN: `ACCEPT`, `REJECT:<code>`, `TIMEOUT`, `SILENT`, `LOST`, `LATE_STATUS:<ms>`, `DELAY:<ms>`, `INVESTIGATION_SILENT`, `VOP_SLOW` |
+| `PUT /sim/v1/scenarios/{creditorIban}` | Scenario for payments to that IBAN: `ACCEPT`, `REJECT:<code>`, `TIMEOUT`, `SILENT`, `LOST`, `LATE_STATUS:<ms>`, `DELAY:<ms>`, `INVESTIGATION_SILENT` (alone or `<scenario>+INVESTIGATION_SILENT`), `VOP_SLOW` |
 | `POST /sim/v1/incoming-payments` | `{ creditorIban, amount, debtorName, debtorIban, scenario, txId?, debtorAgentBic? }` → returns `txId` |
 | `POST /sim/v1/incoming-payments/raw` | send an arbitrary (possibly invalid) XML to the gateway |
 | `GET /sim/v1/received?txId=` | every message the simulator received / sent for a transaction, with timestamps |
@@ -116,14 +124,17 @@ Bodies (JSON; a request the simulator cannot act on is `400` with a problem deta
 - `PUT /sim/v1/counterparty-accounts`: `[ { "iban": "…", "holderName": "…" } ]`, replacing all accounts. The bank
   code is not a separate field: it is the one the IBAN carries.
 - `PUT /sim/v1/scenarios/{creditorIban}`: `{ "scenario": "REJECT:AC04" }`; a reason code is four characters.
+- `POST /sim/v1/incoming-payments/raw`: the XML as the body, sent as it is, without validation; answers `200`
+  `{ "gatewayStatus": 202 }` with the status csm-gateway answered, or `502 GATEWAY_UNREACHABLE` if it gave none. A message the gateway took
+  that is a CSM envelope naming a transaction is journalled as `SENT`.
 - `GET /sim/v1/received?txId=`: `[ { "kind": "RECEIVED" | "SENT", "messageType": "pacs.008.001.08", "msgId",
   "at", "duplicate", "envelope" } ]`, oldest first.
 - `GET /sim/v1/settlements?since=`: `[ { "txId", "debtorAgentBic", "direction": "OUTGOING" | "INCOMING",
   "amountMinor", "settledAt" } ]`, oldest first; `since` is inclusive and optional.
 
-The tracer bullet (#104) plays `ACCEPT`, `REJECT:<code>`, `TIMEOUT` and `DELAY:<ms>`; the other scenarios, incoming
-payments and investigations follow in later work and are refused with `400` until then. Until `SILENT` exists, the
-`.94` amount shortcut is not applied (such a payment is `ACCEPT`).
+The simulator plays `ACCEPT`, `REJECT:<code>`, `TIMEOUT`, `DELAY:<ms>`, `SILENT`, `LOST`, `LATE_STATUS:<ms>` and
+`INVESTIGATION_SILENT`, and answers investigations. `VOP_SLOW` is refused with `400`, and `POST /sim/v1/incoming-payments` does
+not exist yet; both follow in later work.
 
 ## 4. Configuration
 
