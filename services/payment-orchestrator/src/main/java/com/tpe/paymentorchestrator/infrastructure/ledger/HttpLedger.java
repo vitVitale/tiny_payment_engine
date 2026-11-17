@@ -78,6 +78,14 @@ public class HttpLedger implements Ledger {
     }
 
     @Override
+    public LedgerAnswer<HoldSettled> settleHold(Payment payment, Duration readTimeout) {
+        UUID holdId = payment.paymentId().value();
+        return post(payment, "settle hold", HOLDS + "/" + holdId + "/settle", "hold-settle:" + holdId, Map.of(),
+                readTimeout, SettlementBody.class,
+                settled -> settled.journalEntryId() == null ? null : new HoldSettled(settled.journalEntryId()));
+    }
+
+    @Override
     public LedgerAnswer<Released> releaseHold(Payment payment, Duration readTimeout) {
         UUID holdId = payment.paymentId().value();
         return post(payment, "release hold", HOLDS + "/" + holdId + "/release", "hold-release:" + holdId, Map.of(),

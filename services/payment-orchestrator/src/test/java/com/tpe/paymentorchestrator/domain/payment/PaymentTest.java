@@ -177,6 +177,53 @@ class PaymentTest {
                 .settledOnUs(UUID.randomUUID(), UUID.randomUUID(), ACCEPTED).atDeadline(at)).isEmpty();
     }
 
+    @Test
+    void aHeldPaymentToAnotherBankIsSentToTheCsmWithNothingLeftToDo() {
+        Payment sent = submitted().riskChecked().fundsReserved(UUID.randomUUID()).sent();
+
+        assertThat(sent.state()).isEqualTo(PaymentState.SENT_TO_CSM);
+        assertThat(sent.pendingAction()).isNull();
+    }
+
+    @Test
+    void onlyAHeldPaymentToAnotherBankIsSent() {
+        assertThatThrownBy(() -> submitted(true).riskChecked().fundsReserved(UUID.randomUUID()).sent())
+                .isInstanceOf(IllegalStateException.class);
+        assertThatThrownBy(() -> submitted().riskChecked().sent()).isInstanceOf(IllegalStateException.class);
+    }
+
+    @Test
+    void aPaymentTheCsmSettledIsSettledWithTheEntryOfItsHold() {
+        UUID entry = UUID.randomUUID();
+        Payment csmSettled = submitted().riskChecked().fundsReserved(UUID.randomUUID()).sent().csmSettled();
+
+        Payment settled = csmSettled.settledFromHold(entry, ACCEPTED.plusSeconds(2));
+
+        assertThat(settled.state()).isEqualTo(PaymentState.SETTLED);
+        assertThat(settled.pendingAction()).isNull();
+        assertThat(settled.bookingEntryId()).isEqualTo(entry);
+        assertThat(settled.finalisedAt()).isEqualTo(ACCEPTED.plusSeconds(2));
+    }
+
+    @Test
+    void onlyAPaymentWaitingForItsHoldToBeSettledIsSettledFromIt() {
+        Payment sent = submitted().riskChecked().fundsReserved(UUID.randomUUID()).sent();
+
+        assertThatThrownBy(() -> sent.settledFromHold(UUID.randomUUID(), ACCEPTED))
+                .isInstanceOf(IllegalStateException.class);
+        assertThatThrownBy(sent::settleAbandoned).isInstanceOf(IllegalStateException.class);
+    }
+
+    @Test
+    void aHoldReleasedUnderASettlementLeavesTheStateWithNothingToDo() {
+        Payment csmSettled = submitted().riskChecked().fundsReserved(UUID.randomUUID()).sent().csmSettled();
+
+        Payment abandoned = csmSettled.settleAbandoned();
+
+        assertThat(abandoned.state()).isEqualTo(PaymentState.SENT_TO_CSM);
+        assertThat(abandoned.pendingAction()).isNull();
+    }
+
     private static Payment submitted() {
         return submitted(false);
     }

@@ -15,6 +15,9 @@ public record LedgerRefusal(String code) {
     /** A settled hold cannot be released: two contradicting decisions were made (ADR-009). */
     public static final String HOLD_SETTLED = "HOLD_SETTLED";
 
+    /** A released hold cannot be settled: the CSM settled a payment whose hold is gone (ADR-009). */
+    public static final String HOLD_RELEASED = "HOLD_RELEASED";
+
     /** A caller bug: the key was reused for another request, or the hold settled to another payee. */
     public static final String IDEMPOTENCY_CONFLICT = "IDEMPOTENCY_CONFLICT";
 

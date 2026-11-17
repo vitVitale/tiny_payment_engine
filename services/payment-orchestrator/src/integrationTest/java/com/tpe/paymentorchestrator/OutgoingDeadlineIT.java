@@ -101,16 +101,24 @@ class OutgoingDeadlineIT extends OrchestratorStack {
     void aHeldPaymentToAnotherBankAtItsDeadlineIsRejectedAb03AndItsHoldReleased() {
         riskAnswers("allow");
         ledgerAnswers("create-hold-created", "release-released");
+        String payee = Ibans.peer();
+        // SEND's result waits, so the payment stays held with SEND pending
+        ActionInterference.holdAfter(PendingAction.SEND, payee);
 
-        // until M3 sends it, a payment to another bank waits for SEND
-        UUID paymentId = submit(Ibans.peer());
-        await().atMost(AWAIT).untilAsserted(() -> assertThat(probe.row(paymentId)).isEqualTo(
-                new Row("FUNDS_RESERVED", null, "SEND", false)));
+        UUID paymentId = submit(payee);
+        await().atMost(AWAIT).until(() -> ActionInterference.held() >= 1);
+        assertThat(probe.row(paymentId)).isEqualTo(new Row("FUNDS_RESERVED", null, "SEND", false));
 
         CLOCK.advance(PAST_DEADLINE);
 
         await().atMost(AWAIT).untilAsserted(() -> assertThat(probe.row(paymentId)).isEqualTo(
                 new Row("REJECTED", "AB03", null, true)));
+        int held = ActionInterference.held();
+        ActionInterference.releaseHeld();
+        // SEND's result comes back after the timer: it is discarded, so nothing goes to the CSM
+        await().atMost(AWAIT).until(() -> ActionInterference.left() >= held);
+        assertThat(probe.row(paymentId)).isEqualTo(new Row("REJECTED", "AB03", null, true));
+        assertThat(probe.csmCommands(probe.txId(paymentId))).isEmpty();
         assertThat(probe.transitions(paymentId)).endsWith("FUNDS_RESERVED|REJECTED|DEADLINE");
         assertThat(probe.releaseCalls(paymentId)).hasSize(1);
         assertThat(probe.finalEvents(paymentId)).containsExactly("PaymentRejected|AB03");

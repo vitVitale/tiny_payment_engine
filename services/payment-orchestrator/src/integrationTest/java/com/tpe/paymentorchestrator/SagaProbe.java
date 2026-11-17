@@ -96,6 +96,36 @@ final class SagaProbe {
         return ledger.findAll(postRequestedFor(urlEqualTo("/v1/holds/" + paymentId + "/settle-on-us")));
     }
 
+    List<LoggedRequest> settleCalls(UUID paymentId) {
+        return ledger.findAll(postRequestedFor(urlEqualTo("/v1/holds/" + paymentId + "/settle")));
+    }
+
+    /** The commands written for csm-gateway, {@code type|payload}, oldest first. */
+    List<String> csmCommands(String txId) {
+        return jdbc.sql("""
+                        SELECT message_type || '|' || payload::text FROM outbox
+                        WHERE topic = 'csm.outbound.commands' AND message_key = ? ORDER BY id""")
+                .param(txId).query(String.class).list();
+    }
+
+    /** {@code type|status} of the payment's exception cases. */
+    List<String> cases(UUID paymentId) {
+        return jdbc.sql("SELECT type || '|' || status FROM exception_cases WHERE payment_id = ? ORDER BY opened_at")
+                .param(paymentId).query(String.class).list();
+    }
+
+    /** The {@code details} of the cases without a payment, as JSON text. */
+    List<String> casesWithoutPayment() {
+        return jdbc.sql("SELECT details::text FROM exception_cases WHERE payment_id IS NULL ORDER BY opened_at")
+                .query(String.class).list();
+    }
+
+    /** The payment's {@code tx_id}. */
+    String txId(UUID paymentId) {
+        return jdbc.sql("SELECT tx_id FROM payments WHERE payment_id = ?").param(paymentId).query(String.class)
+                .single();
+    }
+
     List<LoggedRequest> releaseCalls(UUID paymentId) {
         return ledger.findAll(postRequestedFor(urlEqualTo("/v1/holds/" + paymentId + "/release")));
     }

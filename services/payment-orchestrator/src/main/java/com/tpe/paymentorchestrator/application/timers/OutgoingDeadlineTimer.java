@@ -7,7 +7,6 @@ import com.tpe.paymentorchestrator.application.payments.Payments;
 import com.tpe.paymentorchestrator.application.runner.SagaRunner;
 import com.tpe.paymentorchestrator.application.runner.SagaTelemetry;
 import com.tpe.paymentorchestrator.domain.payment.Payment;
-import com.tpe.paymentorchestrator.domain.payment.PaymentState;
 import com.tpe.paymentorchestrator.domain.payment.RejectionCause;
 import java.time.Clock;
 import java.time.Duration;
@@ -68,7 +67,7 @@ public class OutgoingDeadlineTimer {
         Payment payment = locked.payment();
         Optional<Payment> moved = locked.csmOutcomeRecorded() ? Optional.empty() : payment.atDeadline(now);
         if (moved.isEmpty()) {
-            if (payment.state() == PaymentState.SENT_TO_CSM || payment.state() == PaymentState.INVESTIGATING) {
+            if (payment.state().isWithCsm()) {
                 // the investigation of a payment the CSM has comes with M3
                 LOG.warn("payment {} deadline in {}: no investigation yet", payment.paymentId().value(),
                         payment.state());

@@ -21,6 +21,11 @@ public enum PaymentState {
     SETTLED,
     REJECTED;
 
+    /** {@code SENT_TO_CSM} and {@code INVESTIGATING}: the CSM has the payment and decides its outcome. */
+    public boolean isWithCsm() {
+        return this == SENT_TO_CSM || this == INVESTIGATING;
+    }
+
     /** {@code SETTLED} and {@code REJECTED}: never left; contradicting facts open a case. */
     public boolean isFinal() {
         return this == SETTLED || this == REJECTED;

@@ -1,10 +1,14 @@
 package com.tpe.paymentorchestrator.application.payments;
 
+import com.tpe.paymentdomain.Bic;
 import com.tpe.paymentdomain.CommandId;
 import com.tpe.paymentdomain.PaymentId;
 import com.tpe.paymentdomain.StatusReason;
+import com.tpe.paymentdomain.TxId;
+import com.tpe.paymentorchestrator.domain.payment.CsmOutcome;
 import com.tpe.paymentorchestrator.domain.payment.ExceptionCaseType;
 import com.tpe.paymentorchestrator.domain.payment.Payment;
+import com.tpe.paymentorchestrator.domain.payment.PaymentDirection;
 import com.tpe.paymentorchestrator.domain.payment.PaymentState;
 import com.tpe.paymentorchestrator.domain.payment.PendingAction;
 import com.tpe.paymentorchestrator.domain.payment.TimerType;
@@ -75,8 +79,32 @@ public interface Payments {
     /**
      * Opens an exception case of the payment unless one of its type is open already (§5).
      *
+     * @param paymentId {@code null} for a case without a payment (a message for no known payment, §6.5): one is
+     *     open per {@code details}
      * @param details the case's {@code details} JSON object; never personal data
-     * @return {@code false} if a case of the type was open
+     * @return {@code false} if such a case was open
      */
     boolean openCase(PaymentId paymentId, ExceptionCaseType type, Map<String, Object> details, Instant now);
+
+    /**
+     * The one payment with {@code txId}, in either direction and from any debtor agent; empty if there is none or
+     * more than one (a dead letter names only the record's key, §4).
+     */
+    Optional<PaymentId> findOnlyByTxId(TxId txId);
+
+    /**
+     * The payment of a transaction (ADR-010), locked for the current transaction ({@code FOR UPDATE}) like
+     * {@link #lockForTimer}.
+     */
+    Optional<LockedPayment> lockByTransaction(PaymentDirection direction, Bic debtorAgentBic, TxId txId);
+
+    /**
+     * Stores what a CSM event made of the locked payment (§6.5): its state and next action, a new action due, and
+     * pending since, {@code now}; records {@code outcome} at {@code now} and cancels the payment's scheduled timers
+     * (§6.4). The new version discards the result of an action claimed at the old one.
+     *
+     * @param finalEventEmitted the transaction writes the payment's final event
+     */
+    void applyCsmOutcome(LockedPayment locked, Payment next, CsmOutcome outcome, boolean finalEventEmitted,
+            Instant now);
 }

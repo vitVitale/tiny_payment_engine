@@ -157,6 +157,13 @@ class LedgerServicePactVerificationIT extends LedgerStack {
         return hold;
     }
 
+    @State("hold is SETTLED to the CSM")
+    Map<String, Object> holdIsSettledToTheCsm(Map<String, Object> parameters) {
+        Map<String, Object> hold = holdIsActive(parameters);
+        settlements.settle(UUID.fromString((String) hold.get("holdId")));
+        return hold;
+    }
+
     @State("no account has the payer IBAN")
     Map<String, Object> noAccountHasThePayerIban() {
         return Map.of("debtorIban", unusedIban(), "holdId", UUID.randomUUID().toString());

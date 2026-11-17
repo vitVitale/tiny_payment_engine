@@ -123,6 +123,60 @@ public record Payment(
     }
 
     /**
+     * {@code SendCreditTransfer} is in the outbox (§6.2 {@code SEND}): {@code SENT_TO_CSM}, nothing to do until the
+     * CSM's outcome arrives.
+     *
+     * @throws IllegalStateException unless this is a held payment to another bank
+     */
+    public Payment sent() {
+        if (onUs || state != PaymentState.FUNDS_RESERVED) {
+            throw new IllegalStateException("only a held payment to another bank is sent, not " + this);
+        }
+        return moveTo(PaymentState.SENT_TO_CSM, null, null, null);
+    }
+
+    /**
+     * The CSM settled the payment (§6.5): the state stays until the hold is settled, next {@code SETTLE_HOLD}.
+     *
+     * @throws IllegalStateException unless the payment is with the CSM
+     */
+    public Payment csmSettled() {
+        if (!state.isWithCsm()) {
+            throw new IllegalStateException("only a payment with the CSM is settled by it, not " + this);
+        }
+        return withAction(PendingAction.SETTLE_HOLD);
+    }
+
+    /**
+     * The ledger settled the hold to the CSM (§6.2 {@code SETTLE_HOLD}): {@code SETTLED} at {@code at}, nothing left
+     * to do.
+     *
+     * @throws IllegalStateException unless the payment waits for its hold to be settled
+     */
+    public Payment settledFromHold(UUID bookingEntryId, Instant at) {
+        requireSettlingHold();
+        return moveTo(PaymentState.SETTLED, null, null, Objects.requireNonNull(at, "at")).withAccounts(
+                debtorAccountId, creditorAccountId, Objects.requireNonNull(bookingEntryId, "bookingEntryId"));
+    }
+
+    /**
+     * The hold the CSM's settlement was to take is released (§6.2 {@code SETTLE_HOLD}, {@code HOLD_RELEASED}): the
+     * money and the record disagree, so the payment stays as it is, with nothing left to do, for the exception case.
+     *
+     * @throws IllegalStateException unless the payment waits for its hold to be settled
+     */
+    public Payment settleAbandoned() {
+        requireSettlingHold();
+        return withAction(null);
+    }
+
+    private void requireSettlingHold() {
+        if (!state.isWithCsm() || pendingAction != PendingAction.SETTLE_HOLD) {
+            throw new IllegalStateException("no hold to settle for " + this);
+        }
+    }
+
+    /**
      * {@code REJECTED} with {@code reason}, finalised at {@code at}.
      *
      * @param compensation the action that undoes what the payment already holds ({@code RELEASE_HOLD},
@@ -171,6 +225,12 @@ public record Payment(
         return new Payment(paymentId, direction, to, reason, onUs, commandId, clientId, requestHash, txId, uetr,
                 endToEndId, amount, debtor, creditor, remittance, vopReference, vopResult, acceptedAt, sendBy,
                 deadlineAt, next, finalised, debtorAccountId, creditorAccountId, bookingEntryId, traceContext);
+    }
+
+    private Payment withAction(PendingAction next) {
+        return new Payment(paymentId, direction, state, reasonCode, onUs, commandId, clientId, requestHash, txId,
+                uetr, endToEndId, amount, debtor, creditor, remittance, vopReference, vopResult, acceptedAt, sendBy,
+                deadlineAt, next, finalisedAt, debtorAccountId, creditorAccountId, bookingEntryId, traceContext);
     }
 
     private Payment withAccounts(UUID debtorAccount, UUID creditorAccount, UUID entry) {

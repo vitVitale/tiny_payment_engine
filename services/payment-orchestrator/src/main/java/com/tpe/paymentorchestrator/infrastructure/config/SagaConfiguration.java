@@ -1,14 +1,18 @@
 package com.tpe.paymentorchestrator.infrastructure.config;
 
+import com.tpe.messaging.inbox.InboxGuard;
+import com.tpe.messaging.worker.PollingWorker;
 import com.tpe.observability.context.Spans;
 import com.tpe.observability.payment.PaymentTelemetry;
-import com.tpe.messaging.worker.PollingWorker;
 import com.tpe.paymentdomain.PaymentId;
+import com.tpe.paymentorchestrator.application.csm.CsmEventHandling;
 import com.tpe.paymentorchestrator.application.ledger.Ledger;
 import com.tpe.paymentorchestrator.application.outgoing.AssessPayeeRiskAction;
 import com.tpe.paymentorchestrator.application.outgoing.AssessRiskAction;
 import com.tpe.paymentorchestrator.application.outgoing.CreateHoldAction;
 import com.tpe.paymentorchestrator.application.outgoing.ReleaseHoldAction;
+import com.tpe.paymentorchestrator.application.outgoing.SendAction;
+import com.tpe.paymentorchestrator.application.outgoing.SettleHoldAction;
 import com.tpe.paymentorchestrator.application.outgoing.SettleOnUsAction;
 import com.tpe.paymentorchestrator.application.payments.DueTimer;
 import com.tpe.paymentorchestrator.application.payments.FinalEvents;
@@ -100,6 +104,17 @@ class SagaConfiguration {
     }
 
     @Bean
+    SendAction sendAction(Clock clock) {
+        return new SendAction(clock);
+    }
+
+    @Bean
+    SettleHoldAction settleHoldAction(Ledger ledger, RunnerSettings settings, LedgerProperties properties,
+            Clock clock) {
+        return new SettleHoldAction(ledger, settings, properties.timeout(), clock);
+    }
+
+    @Bean
     ReleaseHoldAction releaseHoldAction(Ledger ledger, RunnerSettings settings, LedgerProperties properties,
             Clock clock) {
         return new ReleaseHoldAction(ledger, settings, properties.timeout(), clock);
@@ -136,6 +151,12 @@ class SagaConfiguration {
                 paymentId -> runner.submitAfterCommit(new PaymentId(paymentId), true),
                 "SELECT min(next_action_at) FROM payments WHERE " + due, clock, registry,
                 spans.getIfAvailable(Spans::noop));
+    }
+
+    @Bean
+    CsmEventHandling csmEventHandling(Payments payments, InboxGuard inbox, FinalEvents finalEvents, SagaRunner runner,
+            SagaTelemetry telemetry, Clock clock) {
+        return new CsmEventHandling(payments, inbox, finalEvents, runner, telemetry, clock);
     }
 
     @Bean
