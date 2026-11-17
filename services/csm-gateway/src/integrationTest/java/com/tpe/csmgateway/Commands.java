@@ -1,6 +1,8 @@
 package com.tpe.csmgateway;
 
+import com.tpe.contracts.Direction;
 import com.tpe.contracts.Party;
+import com.tpe.contracts.RequestPaymentStatus;
 import com.tpe.contracts.SendCreditTransfer;
 import com.tpe.paymentdomain.Bic;
 import com.tpe.paymentdomain.EndToEndId;
@@ -39,5 +41,11 @@ final class Commands {
                 new Party(new PartyName("Max Mustermann"), new Iban("DE07200200200123456789"), null),
                 PEER_BIC,
                 new RemittanceInformation("Invoice " + txId));
+    }
+
+    /** The orchestrator's status request {@code attempt} for the transfer of {@code command}. */
+    static RequestPaymentStatus requestPaymentStatus(SendCreditTransfer command, int attempt) {
+        return new RequestPaymentStatus(command.paymentId(), command.txId(), command.debtorAgentBic(),
+                Direction.OUTGOING, attempt, command.acceptedAt());
     }
 }

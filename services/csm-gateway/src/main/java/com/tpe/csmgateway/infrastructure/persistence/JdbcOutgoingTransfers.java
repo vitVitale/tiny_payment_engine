@@ -5,6 +5,7 @@ import com.tpe.csmgateway.domain.outgoing.FinalStatus;
 import com.tpe.csmgateway.domain.outgoing.OutgoingTransfer;
 import com.tpe.csmgateway.domain.outgoing.OutgoingTransfer.SendStatus;
 import com.tpe.csmgateway.domain.outgoing.OutgoingTransfer.TransmitStatus;
+import com.tpe.csmgateway.domain.outgoing.StatusSource;
 import com.tpe.paymentdomain.MsgId;
 import com.tpe.paymentdomain.PaymentId;
 import com.tpe.paymentdomain.ReasonCode;
@@ -28,7 +29,7 @@ class JdbcOutgoingTransfers implements OutgoingTransfers {
     private static final String COLUMNS = """
             tx_id, payment_id, uetr, msg_id, accepted_at, send_by, deadline_at, send_status, not_sent_reason,
             journalled_at, transmit_status, transmit_attempts, next_transmit_at, delivered_at, final_status,
-            final_reason, final_at, trace_context""";
+            final_reason, final_at, final_source, trace_context""";
 
     private final JdbcClient jdbc;
 
@@ -47,7 +48,7 @@ class JdbcOutgoingTransfers implements OutgoingTransfers {
         jdbc.sql("INSERT INTO outgoing_transfers (" + COLUMNS + """
                 ) VALUES (:txId, :paymentId, :uetr, :msgId, :acceptedAt, :sendBy, :deadlineAt, :sendStatus,
                   :notSentReason, :journalledAt, :transmitStatus, :transmitAttempts, :nextTransmitAt, :deliveredAt,
-                  :finalStatus, :finalReason, :finalAt, :traceContext)""")
+                  :finalStatus, :finalReason, :finalAt, :finalSource, :traceContext)""")
                 .param("txId", t.txId().value())
                 .param("paymentId", t.paymentId().value())
                 .param("uetr", t.uetr())
@@ -65,6 +66,7 @@ class JdbcOutgoingTransfers implements OutgoingTransfers {
                 .param("finalStatus", t.finalStatus() == null ? null : t.finalStatus().name())
                 .param("finalReason", t.finalReason())
                 .param("finalAt", timestamp(t.finalAt()))
+                .param("finalSource", t.finalSource() == null ? null : t.finalSource().name())
                 .param("traceContext", t.traceContext())
                 .update();
     }
@@ -82,12 +84,14 @@ class JdbcOutgoingTransfers implements OutgoingTransfers {
     }
 
     @Override
-    public void recordFinal(TxId txId, FinalStatus status, String reason, Instant at) {
+    public void recordFinal(TxId txId, FinalStatus status, String reason, Instant at, StatusSource source) {
         jdbc.sql("""
                 UPDATE outgoing_transfers
-                   SET final_status = :status, final_reason = :reason, final_at = :at, version = version + 1
+                   SET final_status = :status, final_reason = :reason, final_at = :at, final_source = :source,
+                       version = version + 1
                  WHERE tx_id = :txId AND final_status IS NULL""")
                 .param("status", status.name()).param("reason", reason).param("at", timestamp(at))
+                .param("source", source.name())
                 .param("txId", txId.value())
                 .update();
     }
@@ -173,6 +177,7 @@ class JdbcOutgoingTransfers implements OutgoingTransfers {
     private static OutgoingTransfer row(ResultSet rs, int rowNum) throws SQLException {
         String transmitStatus = rs.getString("transmit_status");
         String finalStatus = rs.getString("final_status");
+        String finalSource = rs.getString("final_source");
         return new OutgoingTransfer(
                 new TxId(rs.getString("tx_id")),
                 new PaymentId(rs.getObject("payment_id", UUID.class)),
@@ -191,6 +196,7 @@ class JdbcOutgoingTransfers implements OutgoingTransfers {
                 finalStatus == null ? null : FinalStatus.valueOf(finalStatus),
                 rs.getString("final_reason"),
                 instant(rs, "final_at"),
+                finalSource == null ? null : StatusSource.valueOf(finalSource),
                 rs.getString("trace_context"));
     }
 

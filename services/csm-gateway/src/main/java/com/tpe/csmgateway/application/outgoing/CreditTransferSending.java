@@ -22,8 +22,10 @@ import com.tpe.iso20022model.XsdValidator.Violation;
 import com.tpe.messaging.inbox.InboxGuard;
 import com.tpe.messaging.outbox.OutboxWriter;
 import com.tpe.observability.context.Spans;
+import com.tpe.paymentdomain.Bic;
 import com.tpe.paymentdomain.MsgId;
 import com.tpe.paymentdomain.ReasonCode;
+import com.tpe.paymentdomain.TxId;
 import com.tpe.paymentdomain.UlidGenerator;
 import java.time.Clock;
 import java.time.Instant;
@@ -34,8 +36,6 @@ import java.util.UUID;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.transaction.annotation.Transactional;
-import org.springframework.transaction.support.TransactionSynchronization;
-import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 /**
  * {@code SendCreditTransfer} (specs/15-csm-gateway.md §6.1, ADR-004, UC-04 5): in the listener transaction, the
@@ -86,8 +86,8 @@ public class CreditTransferSending {
 
     @Transactional
     public void send(UUID eventId, SendCreditTransfer command) {
-        String dedupKey = "SendCreditTransfer:" + command.debtorAgentBic().value() + ":" + command.txId().value();
-        if (!inbox.firstTime(dedupKey, COMMANDS, eventId) || transfers.exists(command.txId())) {
+        if (!inbox.firstTime(dedupKey(command.debtorAgentBic(), command.txId()), COMMANDS, eventId)
+                || transfers.exists(command.txId())) {
             return;
         }
         Instant now = clock.instant();
@@ -113,12 +113,15 @@ public class CreditTransferSending {
         transfers.insert(transfer(command, msgId, SendStatus.SENT, null, TransmitStatus.PENDING, now, traceContext));
         journal.append(entry(command, msgId, xml, true, List.of(), now));
         metrics.message(MessageJournal.Direction.OUT, CsmMessageType.PACS_008.version());
-        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
-            @Override
-            public void afterCommit() {
-                transmitter.transmitSoon(msgId);
-            }
-        });
+        transmitter.transmitAfterCommit(msgId);
+    }
+
+    /**
+     * The inbox key of a {@code SendCreditTransfer} (02 §3). Taken also when a status request finds no transfer, so
+     * one that arrives after the {@code CreditTransferNotSent} is a duplicate and never sent (§6.6).
+     */
+    public static String dedupKey(Bic debtorAgentBic, TxId txId) {
+        return "SendCreditTransfer:" + debtorAgentBic.value() + ":" + txId.value();
     }
 
     /** {@code NOT_SENT} with {@code reason} and its {@code CreditTransferNotSent}, in the listener transaction. */
@@ -143,7 +146,7 @@ public class CreditTransferSending {
         return new OutgoingTransfer(command.txId(), command.paymentId(), UUID.fromString(command.uetr().value()),
                 msgId.value(), command.acceptedAt(), command.sendBy(), command.deadlineAt(), sendStatus,
                 notSentReason, now, transmitStatus, 0, transmitStatus == null ? null : now, null, null, null, null,
-                traceContext);
+                null, traceContext);
     }
 
     private static Entry entry(SendCreditTransfer command, MsgId msgId, String xml, boolean valid,

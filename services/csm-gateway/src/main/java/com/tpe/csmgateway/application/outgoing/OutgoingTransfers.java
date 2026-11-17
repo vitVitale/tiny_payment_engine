@@ -2,6 +2,7 @@ package com.tpe.csmgateway.application.outgoing;
 
 import com.tpe.csmgateway.domain.outgoing.FinalStatus;
 import com.tpe.csmgateway.domain.outgoing.OutgoingTransfer;
+import com.tpe.csmgateway.domain.outgoing.StatusSource;
 import com.tpe.paymentdomain.MsgId;
 import com.tpe.paymentdomain.ReasonCode;
 import com.tpe.paymentdomain.TxId;
@@ -25,7 +26,7 @@ public interface OutgoingTransfers {
     Optional<OutgoingTransfer> lockByMsgId(String msgId);
 
     /** Records the first final status; the row keeps it against any later, contradicting one. */
-    void recordFinal(TxId txId, FinalStatus status, String reason, Instant at);
+    void recordFinal(TxId txId, FinalStatus status, String reason, Instant at, StatusSource source);
 
     /** The {@code msgId}s of the {@code PENDING} transfers due at {@code now}, the longest due first. */
     List<MsgId> dueTransmissions(Instant now, int limit);

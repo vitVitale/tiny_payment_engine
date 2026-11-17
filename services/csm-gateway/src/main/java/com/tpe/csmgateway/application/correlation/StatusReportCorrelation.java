@@ -1,18 +1,17 @@
 package com.tpe.csmgateway.application.correlation;
 
-import com.tpe.contracts.CreditTransferRejected;
-import com.tpe.contracts.CreditTransferSettled;
-import com.tpe.contracts.Direction;
-import com.tpe.contracts.SettlementSource;
 import com.tpe.csmgateway.application.GatewayMetrics;
+import com.tpe.csmgateway.application.investigation.StatusRequests;
+import com.tpe.csmgateway.application.investigation.StatusRequests.StatusRequest;
 import com.tpe.csmgateway.application.journal.MessageJournal;
 import com.tpe.csmgateway.application.journal.MessageJournal.Entry;
-import com.tpe.csmgateway.application.outgoing.CreditTransferSending;
+import com.tpe.csmgateway.application.outgoing.OutgoingEvents;
 import com.tpe.csmgateway.application.outgoing.OutgoingTransfers;
 import com.tpe.csmgateway.domain.outgoing.OutgoingTransfer;
 import com.tpe.csmgateway.domain.outgoing.ReportedStatus;
 import com.tpe.csmgateway.domain.outgoing.StatusOutcome;
 import com.tpe.csmgateway.domain.outgoing.StatusOutcome.Effect;
+import com.tpe.csmgateway.domain.outgoing.StatusSource;
 import com.tpe.iso20022model.CsmEnvelope;
 import com.tpe.iso20022model.CsmMessageType;
 import com.tpe.iso20022model.EnvelopeCodec;
@@ -22,12 +21,10 @@ import com.tpe.iso20022model.EnvelopeCodec.Rejected;
 import com.tpe.iso20022model.XsdValidator.Violation;
 import com.tpe.iso20022model.pacs002v10.PaymentTransaction110;
 import com.tpe.iso20022model.pacs002v10.StatusReason6Choice;
-import com.tpe.messaging.outbox.OutboxWriter;
-import com.tpe.observability.context.Spans;
 import com.tpe.paymentdomain.Bic;
+import com.tpe.paymentdomain.DomainValidationException;
+import com.tpe.paymentdomain.MsgId;
 import com.tpe.paymentdomain.TxId;
-import io.micrometer.tracing.Span;
-import io.micrometer.tracing.Tracer;
 import java.time.Clock;
 import java.time.Instant;
 import java.util.List;
@@ -39,12 +36,15 @@ import org.springframework.transaction.annotation.Transactional;
 /**
  * The CSM inbound endpoint's work for a {@code pacs.002} (specs/15-csm-gateway.md §6.4, UC-04 6–8), in one
  * transaction: validate, journal, then match {@code OrgnlTxId} with {@code OrgnlTxRef/DbtrAgt} = our BIC to an
- * outgoing transfer (fallback: the {@code OrgnlMsgId} of the {@code pacs.008}, ADR-010). The first final status is
- * recorded and published ({@code CreditTransferSettled} / {@code CreditTransferRejected}, source
- * {@code STATUS_REPORT}); the same status again is journalled only; a contradicting one keeps the first in the row
- * and is published anyway, for the orchestrator's exception case (UC-04 8a). {@code ACCP} and {@code UNKNOWN_TX} are
- * journalled only; investigations and incoming transfers follow in later work. Unmatched → journalled
- * {@code uncorrelated}, counted for the alert.
+ * outgoing transfer (fallback: the {@code OrgnlMsgId}, of the {@code pacs.008} or of a {@code pacs.028} we sent,
+ * ADR-010). The source is {@code INVESTIGATION} when the report answers a {@code pacs.028} we sent (its
+ * {@code OrgnlMsgId} is a {@code status_requests.msg_id}), else {@code STATUS_REPORT}. The first final status is
+ * recorded and published ({@code CreditTransferSettled} / {@code CreditTransferRejected}); the same status again is
+ * journalled only; a contradicting one keeps the first in the row and is published anyway, for the orchestrator's
+ * exception case (UC-04 8a). {@code UNKNOWN_TX} answering our {@code pacs.028} for a {@code SENT} transfer with no
+ * final status past its {@code deadline_at} is a rejection {@code AB05} (UC-05 4c); otherwise, like {@code ACCP}, it
+ * is journalled only.
+ * Incoming transfers follow in later work. Unmatched → journalled {@code uncorrelated}, counted for the alert.
  *
  * <p>Events are written inside the payment's stored trace (ADR-014).
  */
@@ -66,23 +66,24 @@ public class StatusReportCorrelation {
     static final String NOT_HANDLED = "not handled yet";
 
     private static final Logger log = LoggerFactory.getLogger(StatusReportCorrelation.class);
+    private static final String SPAN = "csm.status-report";
 
     private final OutgoingTransfers transfers;
+    private final StatusRequests statusRequests;
     private final MessageJournal journal;
-    private final OutboxWriter outbox;
+    private final OutgoingEvents events;
     private final GatewayMetrics metrics;
-    private final Spans spans;
     private final Clock clock;
     private final Bic ownBic;
     private final EnvelopeCodec envelopes = new EnvelopeCodec();
 
-    public StatusReportCorrelation(OutgoingTransfers transfers, MessageJournal journal, OutboxWriter outbox,
-            GatewayMetrics metrics, Spans spans, Clock clock, Bic ownBic) {
+    public StatusReportCorrelation(OutgoingTransfers transfers, StatusRequests statusRequests, MessageJournal journal,
+            OutgoingEvents events, GatewayMetrics metrics, Clock clock, Bic ownBic) {
         this.transfers = transfers;
+        this.statusRequests = statusRequests;
         this.journal = journal;
-        this.outbox = outbox;
+        this.events = events;
         this.metrics = metrics;
-        this.spans = spans;
         this.clock = clock;
         this.ownBic = ownBic;
     }
@@ -116,7 +117,8 @@ public class StatusReportCorrelation {
         String originalMsgId = report.getOrgnlGrpInfAndSts().stream().findFirst()
                 .map(g -> g.getOrgnlMsgId()).orElse(null);
 
-        Optional<OutgoingTransfer> transfer = match(txId, debtorAgent, originalMsgId);
+        Optional<StatusRequest> answered = answered(originalMsgId);
+        Optional<OutgoingTransfer> transfer = match(txId, debtorAgent, originalMsgId, answered);
         String note;
         if (transfer.isEmpty()) {
             note = UNCORRELATED;
@@ -124,15 +126,28 @@ public class StatusReportCorrelation {
             log.warn("uncorrelated pacs.002 {} for {}", msgId, txId == null ? null : txId.value());
         } else {
             note = apply(transfer.get(), first.map(StatusReportCorrelation::status).orElse(ReportedStatus.unreadable()),
-                    now);
+                    answered.isPresent() ? StatusSource.INVESTIGATION : StatusSource.STATUS_REPORT, now);
         }
         journal.append(new Entry(MessageJournal.Direction.IN, envelope.messageType().version(), msgId,
                 transfer.map(OutgoingTransfer::txId).orElse(txId), debtorAgent, xml, true, List.of(), note, now));
         return new Journalled();
     }
 
+    /** The status request whose {@code pacs.028} this report answers, if it answers one. */
+    private Optional<StatusRequest> answered(String originalMsgId) {
+        MsgId msgId;
+        try {
+            msgId = originalMsgId == null ? null : new MsgId(originalMsgId);
+        } catch (DomainValidationException e) {
+            // not a MsgId this gateway could have sent
+            return Optional.empty();
+        }
+        return msgId == null ? Optional.empty() : statusRequests.findByMsgId(msgId);
+    }
+
     /** A {@code DbtrAgt} other than ours names an incoming transfer, which this gateway does not handle yet. */
-    private Optional<OutgoingTransfer> match(TxId txId, Bic debtorAgent, String originalMsgId) {
+    private Optional<OutgoingTransfer> match(TxId txId, Bic debtorAgent, String originalMsgId,
+            Optional<StatusRequest> answered) {
         if (debtorAgent != null && !ownBic.equals(debtorAgent)) {
             return Optional.empty();
         }
@@ -142,11 +157,18 @@ public class StatusReportCorrelation {
                 return byTxId;
             }
         }
+        if (answered.isPresent()) {
+            return transfers.lock(answered.get().txId());
+        }
         return originalMsgId == null ? Optional.empty() : transfers.lockByMsgId(originalMsgId);
     }
 
     /** @return the journal note */
-    private String apply(OutgoingTransfer transfer, ReportedStatus status, Instant now) {
+    private String apply(OutgoingTransfer transfer, ReportedStatus reported, StatusSource source, Instant now) {
+        // UNKNOWN_TX decides only as the answer to our pacs.028 (§6.4)
+        ReportedStatus status = source != StatusSource.INVESTIGATION ? reported
+                : StatusOutcome.effective(reported, transfer.finalStatus(), transfer.sendStatus(),
+                        transfer.deadlineAt(), now);
         Effect effect = StatusOutcome.of(transfer.finalStatus(), status);
         switch (effect) {
             case INFORMATIONAL -> {
@@ -156,31 +178,16 @@ public class StatusReportCorrelation {
                 return DUPLICATE;
             }
             case RECORD -> transfers.recordFinal(transfer.txId(), status.finalStatus(),
-                    status.reason() == null ? null : status.reason().code(), now);
+                    status.reason() == null ? null : status.reason().code(), now, source);
             case CONTRADICTION -> log.warn("contradicting pacs.002 for {}: {} after {}", transfer.txId().value(),
                     status.kind(), transfer.finalStatus());
         }
-        publish(transfer, status, now);
-        return effect == Effect.CONTRADICTION ? CONTRADICTING : null;
-    }
-
-    private void publish(OutgoingTransfer transfer, ReportedStatus status, Instant now) {
-        Span span = (transfer.traceContext() == null ? spans.newTrace("csm.status-report")
-                : spans.childOf("csm.status-report", transfer.traceContext())).start();
-        try (Tracer.SpanInScope ignored = spans.inScope(span)) {
-            String key = transfer.txId().value();
-            switch (status.kind()) {
-                case SETTLED -> outbox.write(CreditTransferSending.EVENTS, key, new CreditTransferSettled(
-                        transfer.txId(), ownBic, Direction.OUTGOING, transfer.paymentId(), now,
-                        SettlementSource.STATUS_REPORT));
-                case REJECTED -> outbox.write(CreditTransferSending.EVENTS, key, new CreditTransferRejected(
-                        transfer.txId(), ownBic, Direction.OUTGOING, transfer.paymentId(), status.reason(), now,
-                        SettlementSource.STATUS_REPORT));
-                default -> throw new IllegalArgumentException("no event for " + status.kind());
-            }
-        } finally {
-            span.end();
+        switch (status.kind()) {
+            case SETTLED -> events.settled(transfer, now, source, SPAN);
+            case REJECTED -> events.rejected(transfer, status.reason(), now, source, SPAN);
+            default -> throw new IllegalArgumentException("no event for " + status.kind());
         }
+        return effect == Effect.CONTRADICTION ? CONTRADICTING : null;
     }
 
     private static ReportedStatus status(PaymentTransaction110 transaction) {
