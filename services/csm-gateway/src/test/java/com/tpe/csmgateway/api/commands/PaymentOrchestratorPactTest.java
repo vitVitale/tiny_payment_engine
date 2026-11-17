@@ -14,7 +14,10 @@ import au.com.dius.pact.core.model.PactSpecVersion;
 import au.com.dius.pact.core.model.V4Interaction;
 import au.com.dius.pact.core.model.V4Pact;
 import au.com.dius.pact.core.model.annotations.Pact;
+import com.tpe.contracts.Direction;
+import com.tpe.contracts.RequestPaymentStatus;
 import com.tpe.contracts.SendCreditTransfer;
+import com.tpe.csmgateway.application.investigation.PaymentStatusRequesting;
 import com.tpe.csmgateway.application.outgoing.CreditTransferSending;
 import com.tpe.paymentdomain.Money;
 import java.nio.charset.StandardCharsets;
@@ -48,7 +51,8 @@ class PaymentOrchestratorPactTest {
     private static final String TIMESTAMP_PATTERN = "\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z";
 
     private final CreditTransferSending sending = mock(CreditTransferSending.class);
-    private final CsmCommandListener listener = new CsmCommandListener(sending);
+    private final PaymentStatusRequesting statusRequesting = mock(PaymentStatusRequesting.class);
+    private final CsmCommandListener listener = new CsmCommandListener(sending, statusRequesting);
 
     @Pact(consumer = CONSUMER)
     V4Pact sendCreditTransfer(MessagePactBuilder builder) {
@@ -84,15 +88,44 @@ class PaymentOrchestratorPactTest {
                 .toPact(V4Pact.class);
     }
 
+    @Pact(consumer = CONSUMER)
+    V4Pact requestPaymentStatus(MessagePactBuilder builder) {
+        return builder
+                .expectsToReceive("RequestPaymentStatus: the status of an outgoing transfer")
+                .withMetadata(metadata -> metadata
+                        .add("tpe-message-type", "RequestPaymentStatus")
+                        .add("tpe-schema-version", "1")
+                        .uuid("tpe-event-id", EVENT))
+                .withContent(newJsonBody(command -> {
+                    command.uuid("paymentId", PAYMENT);
+                    command.stringType("txId", TX_ID);
+                    command.stringMatcher("debtorAgentBic", BIC_PATTERN, "TPEBDEFFXXX");
+                    command.stringValue("direction", "OUTGOING");
+                    command.integerType("attempt", 2);
+                    command.stringMatcher("requestedAt", TIMESTAMP_PATTERN, "2026-10-21T09:16:20.000Z");
+                }).build())
+                .toPact(V4Pact.class);
+    }
+
+    @Test
+    @PactTestFor(pactMethod = "requestPaymentStatus")
+    void PACT_M01_requestPaymentStatus(V4Interaction.AsynchronousMessage message) {
+        listener.on(record(message));
+
+        var command = ArgumentCaptor.forClass(RequestPaymentStatus.class);
+        verify(statusRequesting).request(eq(EVENT), command.capture());
+        assertThat(command.getValue().paymentId().value()).isEqualTo(PAYMENT);
+        assertThat(command.getValue().txId().value()).isEqualTo(TX_ID);
+        assertThat(command.getValue().debtorAgentBic().value()).isEqualTo("TPEBDEFFXXX");
+        assertThat(command.getValue().direction()).isEqualTo(Direction.OUTGOING);
+        assertThat(command.getValue().attempt()).isEqualTo(2);
+        assertThat(command.getValue().requestedAt()).isEqualTo(Instant.parse("2026-10-21T09:16:20.000Z"));
+    }
+
     @Test
     @PactTestFor(pactMethod = "sendCreditTransfer")
     void PACT_M01_sendCreditTransfer(V4Interaction.AsynchronousMessage message) {
-        var record = new ConsumerRecord<>(CreditTransferSending.COMMANDS, 0, 0L, TX_ID,
-                message.getContents().getContents().valueAsString());
-        message.getContents().getMetadata().forEach((name, value) ->
-                record.headers().add(name, String.valueOf(value).getBytes(StandardCharsets.UTF_8)));
-
-        listener.on(record);
+        listener.on(record(message));
 
         var command = ArgumentCaptor.forClass(SendCreditTransfer.class);
         verify(sending).send(eq(EVENT), command.capture());
@@ -102,5 +135,13 @@ class PaymentOrchestratorPactTest {
         assertThat(command.getValue().amount()).isEqualTo(Money.parse("123.45"));
         assertThat(command.getValue().debtorAgentBic().value()).isEqualTo("TPEBDEFFXXX");
         assertThat(command.getValue().creditor().iban().value()).isEqualTo("DE07200200200123456789");
+    }
+
+    private static ConsumerRecord<String, String> record(V4Interaction.AsynchronousMessage message) {
+        var record = new ConsumerRecord<>(CreditTransferSending.COMMANDS, 0, 0L, TX_ID,
+                message.getContents().getContents().valueAsString());
+        message.getContents().getMetadata().forEach((name, value) ->
+                record.headers().add(name, String.valueOf(value).getBytes(StandardCharsets.UTF_8)));
+        return record;
     }
 }

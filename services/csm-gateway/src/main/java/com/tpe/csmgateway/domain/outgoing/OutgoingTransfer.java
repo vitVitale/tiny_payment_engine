@@ -34,6 +34,7 @@ public record OutgoingTransfer(
         FinalStatus finalStatus,
         String finalReason,
         Instant finalAt,
+        StatusSource finalSource,
         String traceContext) {
 
     public enum SendStatus { SENT, NOT_SENT }

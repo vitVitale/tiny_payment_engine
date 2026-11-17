@@ -3,8 +3,12 @@ package com.tpe.csmgateway.infrastructure.config;
 import com.tpe.contracts.ContractsModule;
 import com.tpe.csmgateway.application.GatewayMetrics;
 import com.tpe.csmgateway.application.correlation.StatusReportCorrelation;
+import com.tpe.csmgateway.application.investigation.PaymentStatusRequesting;
+import com.tpe.csmgateway.application.investigation.StatusRequestTransmissions;
+import com.tpe.csmgateway.application.investigation.StatusRequests;
 import com.tpe.csmgateway.application.journal.MessageJournal;
 import com.tpe.csmgateway.application.outgoing.CreditTransferSending;
+import com.tpe.csmgateway.application.outgoing.OutgoingEvents;
 import com.tpe.csmgateway.application.outgoing.OutgoingTransfers;
 import com.tpe.csmgateway.application.outgoing.OutgoingTransmissions;
 import com.tpe.csmgateway.application.transmit.CsmClient;
@@ -15,6 +19,7 @@ import com.tpe.messaging.inbox.InboxGuard;
 import com.tpe.messaging.outbox.OutboxWriter;
 import com.tpe.observability.context.Spans;
 import com.tpe.paymentdomain.BankDirectory;
+import com.tpe.paymentdomain.Bic;
 import com.tpe.paymentdomain.UlidGenerator;
 import java.net.URI;
 import java.security.SecureRandom;
@@ -24,20 +29,21 @@ import java.util.List;
 import java.util.Objects;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.web.client.RestClient;
 
-/** Time, ids, the CSM client and the outgoing flow (specs/15-csm-gateway.md §2, §6, §7). */
+/** Time, ids, the CSM client, the outgoing flow and status requests (specs/15-csm-gateway.md §2, §6, §7). */
 @Configuration(proxyBeanMethods = false)
 @EnableConfigurationProperties(GatewayConfiguration.CsmProperties.class)
 class GatewayConfiguration {
 
     /** {@code tpe.csm.*} (15 §7). */
     @ConfigurationProperties("tpe.csm")
-    record CsmProperties(URI baseUrl, Transmit transmit, Timeouts timeouts) {
+    record CsmProperties(URI baseUrl, String bic, Transmit transmit, Timeouts timeouts) {
 
         record Transmit(Duration lease, Duration pollInterval) {}
 
@@ -45,6 +51,7 @@ class GatewayConfiguration {
 
         CsmProperties {
             Objects.requireNonNull(baseUrl, "tpe.csm.base-url");
+            Objects.requireNonNull(bic, "tpe.csm.bic");
             Objects.requireNonNull(transmit, "tpe.csm.transmit");
             Objects.requireNonNull(transmit.lease(), "tpe.csm.transmit.lease");
             Objects.requireNonNull(transmit.pollInterval(), "tpe.csm.transmit.poll-interval");
@@ -82,15 +89,37 @@ class GatewayConfiguration {
     }
 
     @Bean
-    OutgoingTransmissions outgoingTransmissions(OutgoingTransfers transfers, MessageJournal journal,
-            OutboxWriter outbox, GatewayMetrics metrics, Spans spans, BankDirectory directory) {
-        return new OutgoingTransmissions(transfers, journal, outbox, metrics, spans, directory.ownBic());
+    OutgoingEvents outgoingEvents(OutboxWriter outbox, Spans spans, BankDirectory directory) {
+        return new OutgoingEvents(outbox, spans, directory.ownBic());
     }
 
     @Bean
-    Transmitter transmitter(OutgoingTransmissions outgoing, CsmClient csm, Clock clock, CsmProperties properties,
-            ExecutorService transmissions, Spans spans, GatewayMetrics metrics) {
+    OutgoingTransmissions outgoingTransmissions(OutgoingTransfers transfers, MessageJournal journal,
+            OutgoingEvents events, GatewayMetrics metrics) {
+        return new OutgoingTransmissions(transfers, journal, events, metrics);
+    }
+
+    /** Transmits the {@code pacs.008}s. */
+    @Bean
+    @Qualifier("outgoing")
+    Transmitter outgoingTransmitter(OutgoingTransmissions outgoing, CsmClient csm, Clock clock,
+            CsmProperties properties, ExecutorService transmissions, Spans spans, GatewayMetrics metrics) {
         return new Transmitter(outgoing, csm, clock, properties.transmit().lease(), transmissions, spans, metrics);
+    }
+
+    @Bean
+    StatusRequestTransmissions statusRequestTransmissions(StatusRequests requests, OutgoingTransfers transfers,
+            MessageJournal journal) {
+        return new StatusRequestTransmissions(requests, transfers, journal);
+    }
+
+    /** Transmits the {@code pacs.028}s. */
+    @Bean
+    @Qualifier("statusRequests")
+    Transmitter statusRequestTransmitter(StatusRequestTransmissions statusRequests, CsmClient csm, Clock clock,
+            CsmProperties properties, ExecutorService transmissions, Spans spans, GatewayMetrics metrics) {
+        return new Transmitter(statusRequests, csm, clock, properties.transmit().lease(), transmissions, spans,
+                metrics);
     }
 
     @Bean
@@ -100,14 +129,27 @@ class GatewayConfiguration {
 
     @Bean
     CreditTransferSending creditTransferSending(OutgoingTransfers transfers, MessageJournal journal,
-            InboxGuard inbox, OutboxWriter outbox, Transmitter transmitter, GatewayMetrics metrics, Spans spans,
-            Clock clock, UlidGenerator ulids) {
-        return new CreditTransferSending(transfers, journal, inbox, outbox, transmitter, metrics, spans, clock, ulids);
+            InboxGuard inbox, OutboxWriter outbox, @Qualifier("outgoing") Transmitter outgoingTransmitter,
+            GatewayMetrics metrics,
+            Spans spans, Clock clock, UlidGenerator ulids) {
+        return new CreditTransferSending(transfers, journal, inbox, outbox, outgoingTransmitter, metrics, spans, clock,
+                ulids);
     }
 
     @Bean
-    StatusReportCorrelation statusReportCorrelation(OutgoingTransfers transfers, MessageJournal journal,
-            OutboxWriter outbox, GatewayMetrics metrics, Spans spans, Clock clock, BankDirectory directory) {
-        return new StatusReportCorrelation(transfers, journal, outbox, metrics, spans, clock, directory.ownBic());
+    PaymentStatusRequesting paymentStatusRequesting(OutgoingTransfers transfers, StatusRequests requests,
+            MessageJournal journal, InboxGuard inbox, OutgoingEvents events,
+            @Qualifier("statusRequests") Transmitter statusRequestTransmitter,
+            GatewayMetrics metrics, Clock clock, UlidGenerator ulids, BankDirectory directory,
+            CsmProperties properties) {
+        return new PaymentStatusRequesting(transfers, requests, journal, inbox, events, statusRequestTransmitter,
+                metrics, clock, ulids, directory.ownBic(), new Bic(properties.bic()));
+    }
+
+    @Bean
+    StatusReportCorrelation statusReportCorrelation(OutgoingTransfers transfers, StatusRequests requests,
+            MessageJournal journal, OutgoingEvents events, GatewayMetrics metrics, Clock clock,
+            BankDirectory directory) {
+        return new StatusReportCorrelation(transfers, requests, journal, events, metrics, clock, directory.ownBic());
     }
 }

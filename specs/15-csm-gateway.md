@@ -21,7 +21,8 @@ Not responsible for: payment state, risk, ledger, choosing the verdict (orchestr
 |---|---|
 | `api.commands` | Command listener |
 | `api.csm` | CSM inbound endpoint |
-| `application.outgoing` | Outgoing payment handler (send-by guard, status requests) |
+| `application.outgoing` | Outgoing payment handler (send-by guard), the outgoing events |
+| `application.investigation` | `RequestPaymentStatus` and the `pacs.028` it sends (§6.6) |
 | `application.incoming` | Incoming payment handler |
 | `application.answer` | Answer coordinator |
 | `application.correlation` | Correlation service |
@@ -84,6 +85,7 @@ CREATE TABLE outgoing_transfers (
   final_status     VARCHAR(10) CHECK (final_status IN ('SETTLED','REJECTED')),
   final_reason     VARCHAR(35),
   final_at         TIMESTAMPTZ,
+  final_source     VARCHAR(13) CHECK (final_source IN ('STATUS_REPORT','INVESTIGATION')), -- re-published as it was (§6.6)
   trace_context    VARCHAR(55),                  -- W3C traceparent of the payment trace (ADR-014)
   version          BIGINT NOT NULL DEFAULT 0
 );
@@ -214,7 +216,7 @@ Endpoint transaction: validate, journal, then match `OrgnlTxId` + `OrgnlTxRef/Db
 |---|---|---|
 | `outgoing_transfers` | `ACSC` | first final status → set `SETTLED`, outbox `CreditTransferSettled(OUTGOING)` |
 | | `RJCT` + reason | first final status → set `REJECTED`, outbox `CreditTransferRejected(OUTGOING, reason)` |
-| | `RJCT` + `UNKNOWN_TX` (answer to `pacs.028`) | if `send_status = SENT` and `now ≥ deadline_at` → `REJECTED AB05`, outbox `CreditTransferRejected(OUTGOING, AB05, INVESTIGATION)` (UC-05 4c); otherwise journal only |
+| | `RJCT` + `UNKNOWN_TX` (answer to `pacs.028`) | if `send_status = SENT`, no final status yet and `now ≥ deadline_at` → `REJECTED AB05`, outbox `CreditTransferRejected(OUTGOING, AB05, INVESTIGATION)` (UC-05 4c); otherwise journal only (a late answer after a final status is a no-op, UC-05) |
 | `incoming_transfers` | `ACSC` | set `SETTLED`, outbox `CreditTransferSettled(INCOMING)` (UC-06 8) |
 | | `RJCT` | set `REJECTED`, outbox `CreditTransferRejected(INCOMING, reason)` (UC-06 8a) |
 | none | any | journal with note `uncorrelated`, alert |
@@ -222,7 +224,8 @@ Endpoint transaction: validate, journal, then match `OrgnlTxId` + `OrgnlTxRef/Db
 - Same final status again → journal only (duplicate).
 - A *different* final status after one was recorded → journal, keep the first in the row, and publish the
   contradicting event anyway; the orchestrator opens a case (UC-04 8a). The `source` field is `STATUS_REPORT` or
-  `INVESTIGATION` (if the `pacs.002` answers a `pacs.028` we sent, matched via `status_requests.msg_id`).
+  `INVESTIGATION` (if the `pacs.002` answers a `pacs.028` we sent, matched via `status_requests.msg_id`). Its
+  `OrgnlMsgId` is then the `pacs.028`'s, so the `OrgnlMsgId` fallback also looks it up there.
 - `ACCP` on an outgoing transfer is informational (beneficiary accepted, settlement pending) — journal only.
 
 ### 6.5 Transmitter
@@ -252,6 +255,18 @@ Listener transaction; per direction:
 | final status known | re-publish the final event (orchestrator dedups) |
 | `SENT`, no final status | insert `status_requests` row (`debtor_agent_bic` = own BIC), build `pacs.028` for `OrgnlTxId`, journal, transmit (UC-05 3) |
 
+- Deduplicated per attempt (`RequestPaymentStatus:<debtorAgentBic>:<txId>:<attempt>`, 02 §3): a redelivered command
+  sends no second `pacs.028`, the next attempt sends a new one with its own `MsgId`.
+- "None" publishes `CreditTransferNotSent(AB03)` with `sendBy` = `decidedAt` = now (the gateway never saw the
+  command's `sendBy`), and takes the `SendCreditTransfer`'s inbox key, so one arriving later (e.g. replayed from
+  the DLT) is a duplicate and is never sent.
+- A re-published `CreditTransferNotSent` has `decidedAt` = now; a re-published final event carries the recorded
+  `final_at`, reason and `final_source`.
+- The `pacs.028` carries the `pacs.008`'s `MsgId` (`OrgnlMsgId`), `TxId`, `EndToEndId` (read from the journalled
+  `pacs.008`) and `UETR`, from our BIC to `tpe.csm.bic`. It is journalled `OUT` and transmitted like a `pacs.008`
+  (§6.5), on the payment's trace.
+- A `RequestPaymentStatus` for an incoming transfer goes to the DLT until the incoming flow exists (GW-AC-17).
+
 Incoming: look up `incoming_transfers` by the command's (`debtorAgentBic`, `txId`); final status known → re-publish;
 else insert a `status_requests` row with that `debtor_agent_bic` and send a `pacs.028` (with `OrgnlTxRef/DbtrAgt`) as
 above; no record → journal + alert.
@@ -261,6 +276,7 @@ above; no record → journal + alert.
 | Property | Default |
 |---|---|
 | `tpe.csm.base-url` | `http://csm-simulator:8090` |
+| `tpe.csm.bic` | `TIPSXXXXXXX` (the CSM's BIC: the instructed agent of a `pacs.028`) |
 | `tpe.csm.answer-deadline-offset` | `5s` |
 | `tpe.csm.answer-transmit-window` | `1s` (after `answer_deadline`; `answer-deadline-offset` + this ≤ the CSM's answer timeout, [20 §2.1](20-testing-strategy.md#21-systemtest-profile)) |
 | `tpe.csm.transmit.lease` | `2s` |

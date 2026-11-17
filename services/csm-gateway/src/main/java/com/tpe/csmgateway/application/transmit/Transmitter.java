@@ -14,6 +14,8 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 /**
  * Transmits the rows of one {@link TransmissionQueue} to the CSM (specs/15-csm-gateway.md §6.5, ADR-011): claim (a
@@ -55,6 +57,19 @@ public class Transmitter {
     /** The {@code afterCommit} fast path: the first attempt, soon, on the transmit executor. */
     public void transmitSoon(MsgId msgId) {
         executor.execute(() -> attemptOrGiveUp(msgId, false));
+    }
+
+    /**
+     * {@link #transmitSoon} once the current transaction commits: the row is visible to the claim, and nothing is
+     * sent for a transaction that rolls back. The worker's poll is the fallback.
+     */
+    public void transmitAfterCommit(MsgId msgId) {
+        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+            @Override
+            public void afterCommit() {
+                transmitSoon(msgId);
+            }
+        });
     }
 
     /**

@@ -18,6 +18,8 @@ tpe:
   # specs/15-csm-gateway.md §7
   csm:
     base-url: http://csm-simulator:8090
+    # the CSM's BIC: the instructed agent of the pacs.028 the gateway sends (§6.6)
+    bic: TIPSXXXXXXX
     transmit:
       # a claimed transmission is not taken again before this (§6.5)
       lease: 2s

@@ -1,20 +1,13 @@
 package com.tpe.csmgateway.application.outgoing;
 
-import com.tpe.contracts.CreditTransferNotSent;
-import com.tpe.contracts.Direction;
 import com.tpe.csmgateway.application.GatewayMetrics;
 import com.tpe.csmgateway.application.journal.MessageJournal;
 import com.tpe.csmgateway.application.transmit.TransmissionQueue;
 import com.tpe.csmgateway.domain.outgoing.OutgoingTransfer;
 import com.tpe.csmgateway.domain.outgoing.OutgoingTransfer.TransmitStatus;
 import com.tpe.iso20022model.CsmMessageType;
-import com.tpe.messaging.outbox.OutboxWriter;
-import com.tpe.observability.context.Spans;
-import com.tpe.paymentdomain.Bic;
 import com.tpe.paymentdomain.MsgId;
 import com.tpe.paymentdomain.ReasonCode;
-import io.micrometer.tracing.Span;
-import io.micrometer.tracing.Tracer;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
@@ -35,20 +28,15 @@ public class OutgoingTransmissions implements TransmissionQueue {
 
     private final OutgoingTransfers transfers;
     private final MessageJournal journal;
-    private final OutboxWriter outbox;
+    private final OutgoingEvents events;
     private final GatewayMetrics metrics;
-    private final Spans spans;
-    private final Bic ownBic;
 
-    /** @param ownBic the debtor agent of every outgoing transfer */
-    public OutgoingTransmissions(OutgoingTransfers transfers, MessageJournal journal, OutboxWriter outbox,
-            GatewayMetrics metrics, Spans spans, Bic ownBic) {
+    public OutgoingTransmissions(OutgoingTransfers transfers, MessageJournal journal, OutgoingEvents events,
+            GatewayMetrics metrics) {
         this.transfers = transfers;
         this.journal = journal;
-        this.outbox = outbox;
+        this.events = events;
         this.metrics = metrics;
-        this.spans = spans;
-        this.ownBic = ownBic;
     }
 
     @Override
@@ -102,16 +90,7 @@ public class OutgoingTransmissions implements TransmissionQueue {
         log.warn("pacs.008 {} of {} was never attempted before sendBy: NOT_SENT AB03", msgId.value(),
                 transfer.txId().value());
         transfers.gaveUpNotSent(msgId, ReasonCode.AB03);
-        // the event continues the payment's trace (ADR-014 §2)
-        Span span = (transfer.traceContext() == null ? spans.newTrace("csm.give-up")
-                : spans.childOf("csm.give-up", transfer.traceContext())).start();
-        try (Tracer.SpanInScope ignored = spans.inScope(span)) {
-            outbox.write(CreditTransferSending.EVENTS, transfer.txId().value(), new CreditTransferNotSent(
-                    transfer.txId(), ownBic, Direction.OUTGOING, transfer.paymentId(), ReasonCode.AB03,
-                    transfer.sendBy(), now));
-        } finally {
-            span.end();
-        }
+        events.notSent(transfer, ReasonCode.AB03, now, "csm.give-up");
         metrics.notSent(ReasonCode.AB03.code());
     }
 }
