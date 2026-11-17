@@ -8,11 +8,13 @@ import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.Base64;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -39,6 +41,8 @@ public final class ServiceProcess {
     private static final Duration SHUTDOWN = Duration.ofSeconds(30);
 
     private static final Map<String, ServiceProcess> RUNNING = new HashMap<>();
+
+    private static final boolean WINDOWS = System.getProperty("os.name").startsWith("Windows");
 
     private final String name;
     private final ServiceJar service;
@@ -116,6 +120,49 @@ public final class ServiceProcess {
             if (!process.waitFor(SHUTDOWN.toMillis(), TimeUnit.MILLISECONDS)) {
                 process.destroyForcibly().waitFor();
             }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new IllegalStateException(e);
+        }
+    }
+
+    /**
+     * Suspends the running process: every thread stops, sockets and leases are kept, nothing is answered or consumed
+     * until {@link #thaw}. A service down for less than its cold start (E2E-O-12: the 3 s between {@code sendBy} and
+     * the deadline), which {@link #stop} and {@link #start} cannot give. {@code SIGSTOP}, on Windows
+     * {@code NtSuspendProcess}.
+     */
+    public synchronized void freeze() {
+        signal("STOP", "NtSuspendProcess");
+    }
+
+    /** Resumes a {@link #freeze frozen} process where it stopped. {@code SIGCONT}, on Windows {@code NtResumeProcess}. */
+    public synchronized void thaw() {
+        signal("CONT", "NtResumeProcess");
+    }
+
+    private void signal(String unixSignal, String windowsCall) {
+        if (!isRunning()) {
+            throw new IllegalStateException(name + " is not running");
+        }
+        long pid = process.pid();
+        // encoded: the quotes of the script would not survive Windows' command line parsing
+        String script = """
+                Add-Type -Namespace Tpe -Name Nt -MemberDefinition '[DllImport("ntdll.dll")] public static \
+                extern int %1$s(IntPtr handle);'; $p = [Diagnostics.Process]::GetProcessById(%2$d); \
+                exit [Tpe.Nt]::%1$s($p.Handle)""".formatted(windowsCall, pid);
+        List<String> command = WINDOWS
+                ? List.of("powershell", "-NoProfile", "-NonInteractive", "-EncodedCommand",
+                        Base64.getEncoder().encodeToString(script.getBytes(StandardCharsets.UTF_16LE)))
+                : List.of("kill", "-" + unixSignal, Long.toString(pid));
+        try {
+            Process signalled = new ProcessBuilder(command).redirectErrorStream(true).start();
+            String output = new String(signalled.getInputStream().readAllBytes());
+            if (signalled.waitFor() != 0) {
+                throw new IllegalStateException(String.join(" ", command) + " failed: " + output);
+            }
+        } catch (IOException e) {
+            throw new IllegalStateException("cannot signal " + name, e);
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             throw new IllegalStateException(e);

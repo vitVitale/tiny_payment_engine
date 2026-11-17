@@ -129,7 +129,7 @@ every PR. New ids are appended; existing ids are never renumbered ([30](30-deliv
 | E2E-O-09 | No `pacs.002`, settled | `SILENT` | `INVESTIGATING` (status `PDNG`) → `pacs.028` → `ACSC`; payer debited |
 | E2E-O-10 | No `pacs.002`, unknown | `LOST` | `INVESTIGATING` → `UNKNOWN_TX` after deadline → `RJCT AB05`; released |
 | E2E-O-11 | Investigation unanswered | `SILENT` + `INVESTIGATION_SILENT` | retries, then `UNRESOLVED_INVESTIGATION` case; hold stays; status `PDNG`; operator resolves → final. Variant: operator chooses `RETRY_INVESTIGATION` after clearing `INVESTIGATION_SILENT` → a new `pacs.028` reaches the simulator → `ACSC` |
-| E2E-O-12 | Gateway down past `sendBy` | stop csm-gateway before submit, start it between `sendBy` and the deadline | `RJCT AB03` from `SENT_TO_CSM`; simulator received nothing |
+| E2E-O-12 | Gateway down past `sendBy` | csm-gateway down before submit, back between `sendBy` and the deadline: frozen (`SIGSTOP` / `SIGCONT`; on Windows `NtSuspendProcess` / `NtResumeProcess`), since a cold start takes longer than that window | `RJCT AB03` from `SENT_TO_CSM`; simulator received nothing |
 | E2E-O-13 | CSM unreachable past `sendBy` | simulator outage `DOWN` (variant: `RESET`) from submit until after the deadline, then `UP` | no `pacs.008` after `sendBy`; investigation → `UNKNOWN_TX` → `RJCT AB05`; released |
 | E2E-O-14 | Late contradicting `pacs.002` | `REJECT` then inject `ACSC` via raw endpoint; variant: `ACCEPT` then inject `RJCT` | first outcome kept (`RJCT` / `ACSC`); `CONTRADICTING_CSM_OUTCOME` case; no money movement after the first outcome |
 | E2E-O-15 | On-us payee blocked | block payee | `RJCT AC06`; hold released |
