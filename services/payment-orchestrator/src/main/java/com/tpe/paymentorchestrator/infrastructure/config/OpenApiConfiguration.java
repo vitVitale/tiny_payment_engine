@@ -9,7 +9,9 @@ import com.tpe.paymentdomain.RemittanceInformation;
 import com.tpe.paymentdomain.StatusReason;
 import com.tpe.paymentdomain.TxId;
 import com.tpe.paymentdomain.Uetr;
+import io.swagger.v3.oas.models.Components;
 import io.swagger.v3.oas.models.media.IntegerSchema;
+import io.swagger.v3.oas.models.security.SecurityScheme;
 import io.swagger.v3.oas.models.media.Schema;
 import io.swagger.v3.oas.models.media.StringSchema;
 import java.math.BigDecimal;
@@ -38,6 +40,21 @@ class OpenApiConfiguration {
                 .replaceWithClass(EndToEndId.class, String.class)
                 .replaceWithClass(RemittanceInformation.class, String.class)
                 .replaceWithClass(StatusReason.class, String.class);
+    }
+
+    /**
+     * The staff JWT the exception case API needs (§3.2, 00 §12.1); the internal APIs take none until M5 (ADR-012).
+     */
+    @Bean
+    OpenApiCustomizer staffJwt() {
+        return openApi -> {
+            if (openApi.getComponents() == null) {
+                openApi.setComponents(new Components());
+            }
+            openApi.getComponents().addSecuritySchemes("staffJwt", new SecurityScheme()
+                    .type(SecurityScheme.Type.HTTP).scheme("bearer").bearerFormat("JWT")
+                    .description("staff: roles claim BACKOFFICE_OPERATOR"));
+        };
     }
 
     /** {@code amount} is {@code @JsonUnwrapped}; springdoc does not see the mixin's members. */

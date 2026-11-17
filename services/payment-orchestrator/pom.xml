@@ -39,6 +39,11 @@
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-actuator</artifactId>
         </dependency>
+        <!-- staff JWTs for the exception case API (specs/11-payment-orchestrator.md §3.2, 00 §12.1) -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-security-oauth2-resource-server</artifactId>
+        </dependency>
         <!-- tracing: the submit's trace is stored with the payment (ADR-014, specs/26-observability.md §4, §5) -->
         <dependency>
             <groupId>org.springframework.boot</groupId>
