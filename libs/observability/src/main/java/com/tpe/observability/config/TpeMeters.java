@@ -62,6 +62,7 @@ public final class TpeMeters {
         // specs/15-csm-gateway.md §8
         meters.put("tpe.csm.messages", Set.of("direction", "type"));
         meters.put("tpe.csm.uncorrelated", Set.of());
+        meters.put("tpe.csm.transmit.attempts", Set.of("type"));
         meters.put("tpe.vop.requests", Set.of("role", "route", "result", "cause"));
         meters.put("tpe.vop.retention.overdue", Set.of());
         meters.put("tpe.risk.assessment.duration", Set.of("direction", "decision"));

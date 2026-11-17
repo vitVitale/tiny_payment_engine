@@ -21,6 +21,8 @@ tpe:
     transmit:
       # a claimed transmission is not taken again before this (§6.5)
       lease: 2s
+      # how often the worker looks for due and expired transmissions (§6.5)
+      poll-interval: 50ms
     timeouts:
       connect: 200ms
       read: 1s

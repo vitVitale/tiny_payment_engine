@@ -6,9 +6,11 @@ import com.tpe.csmgateway.application.correlation.StatusReportCorrelation;
 import com.tpe.csmgateway.application.journal.MessageJournal;
 import com.tpe.csmgateway.application.outgoing.CreditTransferSending;
 import com.tpe.csmgateway.application.outgoing.OutgoingTransfers;
+import com.tpe.csmgateway.application.outgoing.OutgoingTransmissions;
 import com.tpe.csmgateway.application.transmit.CsmClient;
 import com.tpe.csmgateway.application.transmit.Transmitter;
 import com.tpe.csmgateway.infrastructure.csm.HttpCsmClient;
+import com.tpe.csmgateway.infrastructure.transmit.TransmitWorker;
 import com.tpe.messaging.inbox.InboxGuard;
 import com.tpe.messaging.outbox.OutboxWriter;
 import com.tpe.observability.context.Spans;
@@ -18,6 +20,7 @@ import java.net.URI;
 import java.security.SecureRandom;
 import java.time.Clock;
 import java.time.Duration;
+import java.util.List;
 import java.util.Objects;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -36,7 +39,7 @@ class GatewayConfiguration {
     @ConfigurationProperties("tpe.csm")
     record CsmProperties(URI baseUrl, Transmit transmit, Timeouts timeouts) {
 
-        record Transmit(Duration lease) {}
+        record Transmit(Duration lease, Duration pollInterval) {}
 
         record Timeouts(Duration connect, Duration read) {}
 
@@ -44,6 +47,7 @@ class GatewayConfiguration {
             Objects.requireNonNull(baseUrl, "tpe.csm.base-url");
             Objects.requireNonNull(transmit, "tpe.csm.transmit");
             Objects.requireNonNull(transmit.lease(), "tpe.csm.transmit.lease");
+            Objects.requireNonNull(transmit.pollInterval(), "tpe.csm.transmit.poll-interval");
             Objects.requireNonNull(timeouts, "tpe.csm.timeouts");
             Objects.requireNonNull(timeouts.connect(), "tpe.csm.timeouts.connect");
             Objects.requireNonNull(timeouts.read(), "tpe.csm.timeouts.read");
@@ -71,16 +75,27 @@ class GatewayConfiguration {
         return new HttpCsmClient(builder, csm.baseUrl(), csm.timeouts().connect(), csm.timeouts().read());
     }
 
-    /** The transmissions of the {@code afterCommit} fast path, one virtual thread each. */
+    /** The transmissions, of the {@code afterCommit} fast path and of the worker's polls, one virtual thread each. */
     @Bean(destroyMethod = "close")
     ExecutorService transmissions() {
         return Executors.newThreadPerTaskExecutor(Thread.ofVirtual().name("csm-transmit-", 0).factory());
     }
 
     @Bean
-    Transmitter transmitter(OutgoingTransfers transfers, MessageJournal journal, CsmClient csm, Clock clock,
-            CsmProperties properties, ExecutorService transmissions, Spans spans) {
-        return new Transmitter(transfers, journal, csm, clock, properties.transmit().lease(), transmissions, spans);
+    OutgoingTransmissions outgoingTransmissions(OutgoingTransfers transfers, MessageJournal journal,
+            OutboxWriter outbox, GatewayMetrics metrics, Spans spans, BankDirectory directory) {
+        return new OutgoingTransmissions(transfers, journal, outbox, metrics, spans, directory.ownBic());
+    }
+
+    @Bean
+    Transmitter transmitter(OutgoingTransmissions outgoing, CsmClient csm, Clock clock, CsmProperties properties,
+            ExecutorService transmissions, Spans spans, GatewayMetrics metrics) {
+        return new Transmitter(outgoing, csm, clock, properties.transmit().lease(), transmissions, spans, metrics);
+    }
+
+    @Bean
+    TransmitWorker transmitWorker(List<Transmitter> transmitters, CsmProperties properties) {
+        return new TransmitWorker(transmitters, properties.transmit().pollInterval());
     }
 
     @Bean

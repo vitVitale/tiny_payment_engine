@@ -5,14 +5,18 @@ import com.tpe.csmgateway.domain.outgoing.FinalStatus;
 import com.tpe.csmgateway.domain.outgoing.OutgoingTransfer;
 import com.tpe.csmgateway.domain.outgoing.OutgoingTransfer.SendStatus;
 import com.tpe.csmgateway.domain.outgoing.OutgoingTransfer.TransmitStatus;
+import com.tpe.paymentdomain.MsgId;
 import com.tpe.paymentdomain.PaymentId;
+import com.tpe.paymentdomain.ReasonCode;
 import com.tpe.paymentdomain.TxId;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Timestamp;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.List;
 import java.util.Optional;
+import java.util.OptionalInt;
 import java.util.UUID;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Repository;
@@ -89,26 +93,68 @@ class JdbcOutgoingTransfers implements OutgoingTransfers {
     }
 
     @Override
-    public boolean claimTransmission(TxId txId, Instant now, Duration lease) {
+    public List<MsgId> dueTransmissions(Instant now, int limit) {
+        return jdbc.sql("""
+                SELECT msg_id FROM outgoing_transfers
+                 WHERE transmit_status = 'PENDING' AND next_transmit_at <= :now
+                 ORDER BY next_transmit_at LIMIT :limit""")
+                .param("now", timestamp(now)).param("limit", limit)
+                .query(String.class).list().stream().map(MsgId::new).toList();
+    }
+
+    @Override
+    public OptionalInt claimTransmission(MsgId msgId, Instant now, Duration lease) {
         return jdbc.sql("""
                 UPDATE outgoing_transfers
                    SET transmit_attempts = transmit_attempts + 1, next_transmit_at = :leaseUntil,
                        version = version + 1
-                 WHERE tx_id = :txId AND transmit_status = 'PENDING' AND next_transmit_at <= :now
-                   AND send_by > :now""")
+                 WHERE msg_id = :msgId AND transmit_status = 'PENDING' AND next_transmit_at <= :now
+                   AND send_by > :now
+                RETURNING transmit_attempts""")
                 .param("leaseUntil", timestamp(now.plus(lease))).param("now", timestamp(now))
-                .param("txId", txId.value())
-                .update() == 1;
+                .param("msgId", msgId.value())
+                .query(Integer.class).optional()
+                .map(OptionalInt::of).orElse(OptionalInt.empty());
     }
 
     @Override
-    public void delivered(TxId txId, Instant at) {
+    public void delivered(MsgId msgId, Instant at) {
         jdbc.sql("""
                 UPDATE outgoing_transfers
                    SET transmit_status = 'DELIVERED', delivered_at = :at, next_transmit_at = NULL,
                        version = version + 1
-                 WHERE tx_id = :txId AND transmit_status = 'PENDING'""")
-                .param("at", timestamp(at)).param("txId", txId.value())
+                 WHERE msg_id = :msgId AND transmit_status = 'PENDING'""")
+                .param("at", timestamp(at)).param("msgId", msgId.value())
+                .update();
+    }
+
+    @Override
+    public void retryAt(MsgId msgId, int attempt, Instant at) {
+        jdbc.sql("""
+                UPDATE outgoing_transfers SET next_transmit_at = :at, version = version + 1
+                 WHERE msg_id = :msgId AND transmit_status = 'PENDING' AND transmit_attempts = :attempt""")
+                .param("at", timestamp(at)).param("msgId", msgId.value()).param("attempt", attempt)
+                .update();
+    }
+
+    @Override
+    public void gaveUp(MsgId msgId) {
+        jdbc.sql("""
+                UPDATE outgoing_transfers
+                   SET transmit_status = 'GAVE_UP', next_transmit_at = NULL, version = version + 1
+                 WHERE msg_id = :msgId AND transmit_status = 'PENDING'""")
+                .param("msgId", msgId.value())
+                .update();
+    }
+
+    @Override
+    public void gaveUpNotSent(MsgId msgId, ReasonCode reason) {
+        jdbc.sql("""
+                UPDATE outgoing_transfers
+                   SET transmit_status = 'GAVE_UP', next_transmit_at = NULL, send_status = 'NOT_SENT',
+                       not_sent_reason = :reason, version = version + 1
+                 WHERE msg_id = :msgId AND transmit_status = 'PENDING'""")
+                .param("reason", reason.code()).param("msgId", msgId.value())
                 .update();
     }
 
@@ -116,6 +162,12 @@ class JdbcOutgoingTransfers implements OutgoingTransfers {
     public Optional<OutgoingTransfer> find(TxId txId) {
         return jdbc.sql("SELECT " + COLUMNS + " FROM outgoing_transfers WHERE tx_id = :txId")
                 .param("txId", txId.value()).query(JdbcOutgoingTransfers::row).optional();
+    }
+
+    @Override
+    public Optional<OutgoingTransfer> findByMsgId(MsgId msgId) {
+        return jdbc.sql("SELECT " + COLUMNS + " FROM outgoing_transfers WHERE msg_id = :msgId")
+                .param("msgId", msgId.value()).query(JdbcOutgoingTransfers::row).optional();
     }
 
     private static OutgoingTransfer row(ResultSet rs, int rowNum) throws SQLException {

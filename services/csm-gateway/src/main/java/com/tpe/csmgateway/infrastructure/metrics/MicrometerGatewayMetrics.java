@@ -40,6 +40,15 @@ class MicrometerGatewayMetrics implements GatewayMetrics {
     }
 
     @Override
+    public void transmitAttempt(String type) {
+        Counter.builder("tpe.csm.transmit.attempts")
+                .description("Transmission attempts to the CSM, by message version")
+                .tag("type", type)
+                .register(registry)
+                .increment();
+    }
+
+    @Override
     public void uncorrelated() {
         uncorrelated.increment();
     }

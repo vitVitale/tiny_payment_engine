@@ -116,7 +116,7 @@ public class CreditTransferSending {
         TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
             @Override
             public void afterCommit() {
-                transmitter.transmitSoon(command.txId());
+                transmitter.transmitSoon(msgId);
             }
         });
     }

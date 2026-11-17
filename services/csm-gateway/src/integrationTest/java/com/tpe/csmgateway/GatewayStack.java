@@ -135,6 +135,12 @@ public abstract class GatewayStack {
                 .query((rs, n) -> new Event(rs.getString("message_type"), rs.getString("payload"))).list();
     }
 
+    /** The {@code outgoing_transfers} row of {@code txId}, empty if there is none. */
+    protected Map<String, Object> transfer(String txId) {
+        return jdbc.sql("SELECT * FROM outgoing_transfers WHERE tx_id = :txId").param("txId", txId).query()
+                .listOfRows().stream().findFirst().orElse(Map.of());
+    }
+
     /** A message from the CSM to {@code POST /csm/v1/inbound}. */
     protected org.springframework.http.ResponseEntity<String> inbound(String envelope) {
         return http().post().uri("/csm/v1/inbound").contentType(MediaType.APPLICATION_XML).body(envelope)

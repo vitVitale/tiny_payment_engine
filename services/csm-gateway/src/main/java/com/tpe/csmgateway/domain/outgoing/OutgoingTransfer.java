@@ -11,7 +11,8 @@ import java.util.UUID;
  * {@code SendCreditTransfer} and what became of it.
  *
  * @param notSentReason {@code AB03} or {@code FF01} when {@code NOT_SENT}
- * @param transmitStatus {@code null} when {@code NOT_SENT}
+ * @param transmitStatus {@code null} when decided {@code NOT_SENT} at consumption; {@code GAVE_UP} when turned
+ *     {@code NOT_SENT} because no attempt was made before {@code sendBy} (ADR-011)
  * @param finalReason the reason code of a rejection
  * @param traceContext the payment's W3C traceparent (ADR-014), {@code null} if there was none
  */
