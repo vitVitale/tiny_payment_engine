@@ -6,6 +6,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -44,6 +45,17 @@ public final class ServiceProfile {
             layers.add(load(resources.resolve("application-" + profile + ".yml")));
         }
         return new ServiceProfile(layers);
+    }
+
+    /** The comma-separated durations at the dotted {@code key} (e.g. a back-off), from the last layer that sets it. */
+    public List<Duration> durations(String key) {
+        for (int i = layers.size() - 1; i >= 0; i--) {
+            Object value = lookup(layers.get(i), key);
+            if (value != null) {
+                return Arrays.stream(value.toString().split(",")).map(ServiceProfile::parse).toList();
+            }
+        }
+        return List.of();
     }
 
     /** The duration at the dotted {@code key}, from the last layer that sets it. */
