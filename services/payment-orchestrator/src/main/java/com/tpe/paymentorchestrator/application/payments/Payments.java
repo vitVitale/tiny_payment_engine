@@ -32,9 +32,22 @@ public interface Payments {
 
     Optional<Payment> findByCommand(CommandId commandId);
 
-    /** A row of {@code payment_transitions}; {@code from} is {@code null} for the first one. */
+    /** A row of {@code payment_transitions} by the system; {@code from} is {@code null} for the first one. */
+    default void recordTransition(PaymentId paymentId, PaymentState from, PaymentState to, StatusReason reason,
+            String cause, Instant at) {
+        recordTransition(paymentId, from, to, reason, cause, SYSTEM, at);
+    }
+
+    /**
+     * A row of {@code payment_transitions}; {@code from} is {@code null} for the first one.
+     *
+     * @param actor {@link #SYSTEM} or the operator's {@code sub} (specs/11-payment-orchestrator.md §3.2)
+     */
     void recordTransition(PaymentId paymentId, PaymentState from, PaymentState to, StatusReason reason, String cause,
-            Instant at);
+            String actor, Instant at);
+
+    /** The {@code actor} of what the service does by itself. */
+    String SYSTEM = "system";
 
     /** A {@code SCHEDULED} timer with {@code attempt} 0. */
     default void scheduleTimer(PaymentId paymentId, TimerType type, Instant dueAt, Instant now) {
@@ -79,6 +92,27 @@ public interface Payments {
      * @return the new request's {@code attempt}
      */
     int nextStatusRequestAttempt(PaymentId paymentId, Instant now);
+
+    /**
+     * Restarts the investigation of the payment, whose row the current transaction locked:
+     * {@code investigation_started_at = now} ({@code RETRY_INVESTIGATION}, §3.2, §6.4).
+     */
+    void restartInvestigation(PaymentId paymentId, Instant now);
+
+    /**
+     * Makes the payment's pending {@code action} due at once, pending since {@code now} ({@code RETRY_NOW}, §3.2,
+     * §6.3). A claim in flight is discarded by the new version; the ledger calls are idempotent, so a second call
+     * meanwhile is safe.
+     *
+     * @return {@code false} if {@code action} is not pending any more
+     */
+    boolean retryActionNow(PaymentId paymentId, PendingAction action, Instant now);
+
+    /**
+     * Cancels the payment's {@code SCHEDULED} timers of {@code type}, skipping one the timer worker is firing
+     * ({@code SKIP LOCKED}, as recording a CSM outcome does, §6.5).
+     */
+    void cancelTimers(PaymentId paymentId, TimerType type);
 
     /**
      * Claims the payment's pending action if it is one of {@code actions} and due at {@code now}: the action belongs

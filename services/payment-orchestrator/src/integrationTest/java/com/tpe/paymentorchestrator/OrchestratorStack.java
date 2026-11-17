@@ -40,7 +40,7 @@ import tools.jackson.databind.node.ObjectNode;
  * risk-service answers what {@link #riskAnswers} loaded last, ledger-service what {@link #ledgerAnswers} did.
  */
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
-@Import(OrchestratorStack.TestClock.class)
+@Import({OrchestratorStack.TestClock.class, StaffTokens.Config.class})
 public abstract class OrchestratorStack {
 
     /** The service's time (specs/20-testing-strategy.md §2); it does not advance by itself. */

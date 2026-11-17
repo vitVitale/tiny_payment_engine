@@ -66,6 +66,19 @@ public class InvestigationTimer {
         requestStatus(investigating, 1, now);
     }
 
+    /**
+     * Restarts the investigation of the payment, still {@code INVESTIGATING} without an outcome
+     * ({@code RETRY_INVESTIGATION}, specs/11-payment-orchestrator.md §3.2, §6.4): it starts now, the next status
+     * request goes out at once with the payment's next attempt, and the back-off starts again from its first value.
+     * Must run in the transaction that locked the payment.
+     */
+    public void restart(Payment investigating, Instant now) {
+        // one retry chain per investigation: a retry still scheduled would start a second
+        payments.cancelTimers(investigating.paymentId(), TimerType.INVESTIGATION_RETRY);
+        payments.restartInvestigation(investigating.paymentId(), now);
+        requestStatus(investigating, 1, now);
+    }
+
     /** {@code INVESTIGATION_RETRY}; must run in the transaction that locked {@code timer}'s row. */
     public void fire(DueTimer timer) {
         Instant now = clock.instant();

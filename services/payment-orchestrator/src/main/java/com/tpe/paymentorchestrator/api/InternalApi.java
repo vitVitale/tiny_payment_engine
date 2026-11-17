@@ -14,4 +14,8 @@ import java.lang.annotation.Target;
 @Documented
 @Retention(RetentionPolicy.RUNTIME)
 @Target(ElementType.TYPE)
-public @interface InternalApi {}
+public @interface InternalApi {
+
+    /** The paths of the internal APIs, which the security configuration opens without a token until M5. */
+    String[] PATHS = {"/v1/payments", "/v1/payments/**"};
+}

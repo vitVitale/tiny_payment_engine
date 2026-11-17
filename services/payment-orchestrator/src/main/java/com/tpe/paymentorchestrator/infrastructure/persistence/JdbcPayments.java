@@ -131,15 +131,16 @@ class JdbcPayments implements Payments {
 
     @Override
     public void recordTransition(PaymentId paymentId, PaymentState from, PaymentState to, StatusReason reason,
-            String cause, Instant at) {
+            String cause, String actor, Instant at) {
         jdbc.sql("""
-                        INSERT INTO payment_transitions (payment_id, from_state, to_state, reason_code, cause, at)
-                        VALUES (?, ?, ?, ?, ?, ?)""")
+                        INSERT INTO payment_transitions (payment_id, from_state, to_state, reason_code, cause, actor, at)
+                        VALUES (?, ?, ?, ?, ?, ?, ?)""")
                 .param(paymentId.value())
                 .param(from == null ? null : from.name())
                 .param(to.name())
                 .param(reason == null ? null : reason.code())
                 .param(cause)
+                .param(actor)
                 .param(timestamp(at))
                 .update();
     }
@@ -230,6 +231,40 @@ class JdbcPayments implements Payments {
         jdbc.sql("UPDATE payments SET investigation_started_at = ? WHERE payment_id = ?")
                 .param(timestamp(now))
                 .param(next.paymentId().value())
+                .update();
+    }
+
+    @Override
+    public void restartInvestigation(PaymentId paymentId, Instant now) {
+        jdbc.sql("""
+                        UPDATE payments SET investigation_started_at = :now, version = version + 1, updated_at = :now
+                        WHERE payment_id = :paymentId""")
+                .param("now", timestamp(now))
+                .param("paymentId", paymentId.value())
+                .update();
+    }
+
+    @Override
+    public boolean retryActionNow(PaymentId paymentId, PendingAction action, Instant now) {
+        return jdbc.sql("""
+                        UPDATE payments
+                        SET next_action_at = :now, action_since = :now, version = version + 1, updated_at = :now
+                        WHERE payment_id = :paymentId AND pending_action = :action""")
+                .param("now", timestamp(now))
+                .param("paymentId", paymentId.value())
+                .param("action", action.name())
+                .update() == 1;
+    }
+
+    @Override
+    public void cancelTimers(PaymentId paymentId, TimerType type) {
+        jdbc.sql("""
+                        UPDATE payment_timers SET status = 'CANCELLED'
+                        WHERE timer_id IN (SELECT timer_id FROM payment_timers
+                                           WHERE payment_id = ? AND type = ? AND status = 'SCHEDULED'
+                                           FOR UPDATE SKIP LOCKED)""")
+                .param(paymentId.value())
+                .param(type.name())
                 .update();
     }
 

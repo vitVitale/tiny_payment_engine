@@ -3,6 +3,10 @@ package com.tpe.paymentorchestrator.api;
 import static com.tpe.paymentorchestrator.api.Problems.problem;
 
 import com.tpe.paymentdomain.DomainValidationException;
+import com.tpe.paymentorchestrator.application.cases.CaseAlreadyResolvedException;
+import com.tpe.paymentorchestrator.application.cases.CaseNotFoundException;
+import com.tpe.paymentorchestrator.application.cases.CaseOutdatedException;
+import com.tpe.paymentorchestrator.application.cases.ResolutionNotAllowedException;
 import com.tpe.paymentorchestrator.application.outgoing.CommandConflictException;
 import com.tpe.paymentorchestrator.application.outgoing.CreditorAgentNotReachableException;
 import com.tpe.paymentorchestrator.application.payments.PaymentNotFoundException;
@@ -55,6 +59,26 @@ class ApiProblems extends ResponseEntityExceptionHandler {
         LOG.error("409 COMMAND_CONFLICT: {}", e.getMessage());
         return problem(HttpStatus.CONFLICT, "COMMAND_CONFLICT",
                 "The commandId already has a payment for a different request");
+    }
+
+    @ExceptionHandler
+    ProblemDetail caseNotFound(CaseNotFoundException e) {
+        return problem(HttpStatus.NOT_FOUND, "CASE_NOT_FOUND", "No exception case with this id");
+    }
+
+    @ExceptionHandler
+    ProblemDetail caseAlreadyResolved(CaseAlreadyResolvedException e) {
+        return problem(HttpStatus.CONFLICT, "CASE_ALREADY_RESOLVED", "The case is resolved already");
+    }
+
+    @ExceptionHandler
+    ProblemDetail caseOutdated(CaseOutdatedException e) {
+        return problem(HttpStatus.CONFLICT, "CASE_OUTDATED", e.getMessage());
+    }
+
+    @ExceptionHandler
+    ProblemDetail resolutionNotAllowed(ResolutionNotAllowedException e) {
+        return problem(HttpStatus.UNPROCESSABLE_CONTENT, "RESOLUTION_NOT_ALLOWED", e.getMessage());
     }
 
     @ExceptionHandler

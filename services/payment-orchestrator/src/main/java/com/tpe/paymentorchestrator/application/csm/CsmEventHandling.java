@@ -97,7 +97,7 @@ public class CsmEventHandling {
         }
         Payment payment = locked.payment();
         switch (CsmEventDecision.decide(payment, locked.csmOutcomeRecorded(), received.event(), now)) {
-            case Apply apply -> apply(locked, apply, received, now);
+            case Apply apply -> apply(locked, apply, apply.cause(), Payments.SYSTEM, false, now);
             case NoOp noOp -> LOG.info("payment {} {}: {}", payment.paymentId().value(), received.type(),
                     noOp.why());
             case Contradiction contradiction -> {
@@ -110,17 +110,36 @@ public class CsmEventHandling {
         }
     }
 
-    private void apply(LockedPayment locked, Apply apply, Received received, Instant now) {
+    /**
+     * An outcome an operator confirmed for a payment in investigation ({@code CONFIRMED_SETTLED},
+     * {@code CONFIRMED_REJECTED}, specs/11-payment-orchestrator.md §3.2): applied as the CSM's event would be, in the
+     * caller's transaction, which locked the payment; the transition is recorded as the operator's even where the
+     * state stays.
+     *
+     * @throws IllegalStateException if the event would not move the payment on
+     */
+    public void applyConfirmed(LockedPayment locked, OutgoingCsmEvent event, String cause, String operator,
+            Instant now) {
+        if (!(CsmEventDecision.decide(locked.payment(), locked.csmOutcomeRecorded(), event, now)
+                instanceof Apply apply)) {
+            throw new IllegalStateException(event + " does not apply to " + locked.payment());
+        }
+        apply(locked, apply, cause, operator, true, now);
+    }
+
+    /** @param recordUnchanged a transition row also when the state stays (an operator's decision is recorded) */
+    private void apply(LockedPayment locked, Apply apply, String cause, String actor, boolean recordUnchanged,
+            Instant now) {
         Payment payment = locked.payment();
         Payment next = apply.next();
         boolean finalEvent = next.state().isFinal() && next.pendingAction() == null;
         payments.applyCsmOutcome(locked, next, apply.outcome(), finalEvent, now);
-        if (next.state() != payment.state()) {
-            payments.recordTransition(next.paymentId(), payment.state(), next.state(), next.reasonCode(),
-                    apply.cause(), now);
+        if (next.state() != payment.state() || recordUnchanged) {
+            payments.recordTransition(next.paymentId(), payment.state(), next.state(), next.reasonCode(), cause,
+                    actor, now);
             // one line per state transition (specs/26-observability.md §4.3); no parties or amounts
             LOG.info("payment {} txId {} {} -> {} ({}){}", next.paymentId().value(), next.txId().value(),
-                    payment.state(), next.state(), apply.cause(),
+                    payment.state(), next.state(), cause,
                     next.reasonCode() == null ? "" : " " + next.reasonCode().code());
         }
         if (finalEvent) {

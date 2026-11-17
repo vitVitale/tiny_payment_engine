@@ -5,6 +5,127 @@
     "version" : "v0"
   },
   "paths" : {
+    "/v1/exception-cases" : {
+      "get" : {
+        "operationId" : "listCases",
+        "parameters" : [ {
+          "in" : "query",
+          "name" : "status",
+          "required" : false,
+          "schema" : {
+            "type" : "string"
+          }
+        }, {
+          "in" : "query",
+          "name" : "type",
+          "required" : false,
+          "schema" : {
+            "type" : "string"
+          }
+        }, {
+          "in" : "query",
+          "name" : "cursor",
+          "required" : false,
+          "schema" : {
+            "type" : "string"
+          }
+        }, {
+          "in" : "query",
+          "name" : "limit",
+          "required" : false,
+          "schema" : {
+            "type" : "integer",
+            "format" : "int32"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/CasePage"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "security" : [ {
+          "staffJwt" : [ ]
+        } ],
+        "tags" : [ "exception-case-controller" ]
+      }
+    },
+    "/v1/exception-cases/{caseId}" : {
+      "get" : {
+        "operationId" : "getCase",
+        "parameters" : [ {
+          "in" : "path",
+          "name" : "caseId",
+          "required" : true,
+          "schema" : {
+            "type" : "string",
+            "format" : "uuid"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/CaseDetail"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "security" : [ {
+          "staffJwt" : [ ]
+        } ],
+        "tags" : [ "exception-case-controller" ]
+      }
+    },
+    "/v1/exception-cases/{caseId}/resolve" : {
+      "post" : {
+        "operationId" : "resolveCase",
+        "parameters" : [ {
+          "in" : "path",
+          "name" : "caseId",
+          "required" : true,
+          "schema" : {
+            "type" : "string",
+            "format" : "uuid"
+          }
+        } ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/ResolveRequest"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "200" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/CaseView"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "security" : [ {
+          "staffJwt" : [ ]
+        } ],
+        "tags" : [ "exception-case-controller" ]
+      }
+    },
     "/v1/payments" : {
       "post" : {
         "operationId" : "submit",
@@ -63,6 +184,115 @@
   },
   "components" : {
     "schemas" : {
+      "CaseDetail" : {
+        "type" : "object",
+        "properties" : {
+          "caseId" : {
+            "type" : "string",
+            "format" : "uuid"
+          },
+          "comment" : {
+            "type" : "string"
+          },
+          "csmEvents" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/CsmEvent"
+            }
+          },
+          "details" : {
+            "type" : "object",
+            "additionalProperties" : { }
+          },
+          "openedAt" : {
+            "type" : "string",
+            "format" : "date-time"
+          },
+          "payment" : {
+            "$ref" : "#/components/schemas/PaymentView"
+          },
+          "paymentId" : {
+            "type" : "string",
+            "format" : "uuid"
+          },
+          "resolution" : {
+            "type" : "string"
+          },
+          "resolvedAt" : {
+            "type" : "string",
+            "format" : "date-time"
+          },
+          "resolvedBy" : {
+            "type" : "string"
+          },
+          "status" : {
+            "type" : "string"
+          },
+          "transitions" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/Transition"
+            }
+          },
+          "type" : {
+            "type" : "string"
+          }
+        }
+      },
+      "CasePage" : {
+        "type" : "object",
+        "properties" : {
+          "cases" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/CaseView"
+            }
+          },
+          "nextCursor" : {
+            "type" : "string"
+          }
+        }
+      },
+      "CaseView" : {
+        "type" : "object",
+        "properties" : {
+          "caseId" : {
+            "type" : "string",
+            "format" : "uuid"
+          },
+          "comment" : {
+            "type" : "string"
+          },
+          "details" : {
+            "type" : "object",
+            "additionalProperties" : { }
+          },
+          "openedAt" : {
+            "type" : "string",
+            "format" : "date-time"
+          },
+          "paymentId" : {
+            "type" : "string",
+            "format" : "uuid"
+          },
+          "resolution" : {
+            "type" : "string"
+          },
+          "resolvedAt" : {
+            "type" : "string",
+            "format" : "date-time"
+          },
+          "resolvedBy" : {
+            "type" : "string"
+          },
+          "status" : {
+            "type" : "string"
+          },
+          "type" : {
+            "type" : "string"
+          }
+        }
+      },
       "Creditor" : {
         "type" : "object",
         "properties" : {
@@ -73,6 +303,25 @@
             "type" : "string"
           },
           "name" : {
+            "type" : "string"
+          }
+        }
+      },
+      "CsmEvent" : {
+        "type" : "object",
+        "properties" : {
+          "eventId" : {
+            "type" : "string",
+            "format" : "uuid"
+          },
+          "outcome" : {
+            "type" : "string"
+          },
+          "receivedAt" : {
+            "type" : "string",
+            "format" : "date-time"
+          },
+          "type" : {
             "type" : "string"
           }
         }
@@ -176,6 +425,20 @@
           }
         }
       },
+      "ResolveRequest" : {
+        "type" : "object",
+        "properties" : {
+          "comment" : {
+            "type" : "string"
+          },
+          "reasonCode" : {
+            "type" : "string"
+          },
+          "resolution" : {
+            "type" : "string"
+          }
+        }
+      },
       "SubmitPayment" : {
         "type" : "object",
         "properties" : {
@@ -216,6 +479,38 @@
             "enum" : [ "MATCH", "CLOSE_MATCH", "NO_MATCH", "NOT_POSSIBLE" ]
           }
         }
+      },
+      "Transition" : {
+        "type" : "object",
+        "properties" : {
+          "actor" : {
+            "type" : "string"
+          },
+          "at" : {
+            "type" : "string",
+            "format" : "date-time"
+          },
+          "cause" : {
+            "type" : "string"
+          },
+          "from" : {
+            "type" : "string"
+          },
+          "reasonCode" : {
+            "type" : "string"
+          },
+          "to" : {
+            "type" : "string"
+          }
+        }
+      }
+    },
+    "securitySchemes" : {
+      "staffJwt" : {
+        "bearerFormat" : "JWT",
+        "description" : "staff: roles claim BACKOFFICE_OPERATOR",
+        "scheme" : "bearer",
+        "type" : "http"
       }
     }
   }

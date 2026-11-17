@@ -1,6 +1,5 @@
 package com.tpe.paymentorchestrator.api.command;
 
-import com.tpe.contracts.Direction;
 import com.tpe.contracts.payment.PaymentAccepted;
 import com.tpe.contracts.payment.PaymentState;
 import com.tpe.contracts.payment.PaymentView;
@@ -9,13 +8,13 @@ import com.tpe.paymentdomain.CommandId;
 import com.tpe.paymentdomain.PaymentId;
 import com.tpe.paymentorchestrator.api.FieldError;
 import com.tpe.paymentorchestrator.api.InternalApi;
+import com.tpe.paymentorchestrator.api.PaymentViews;
 import com.tpe.paymentorchestrator.api.ValidationFailedException;
 import com.tpe.paymentorchestrator.application.outgoing.PaymentSubmission;
 import com.tpe.paymentorchestrator.application.payments.PaymentReader;
 import com.tpe.paymentorchestrator.domain.payment.OutgoingCommand;
 import com.tpe.paymentorchestrator.domain.payment.PayeeVerification;
 import com.tpe.paymentorchestrator.domain.payment.Payment;
-import com.tpe.paymentorchestrator.domain.payment.PaymentParty;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
@@ -65,15 +64,7 @@ class PaymentCommandController {
     /** {@code 404 PAYMENT_NOT_FOUND} for an unknown id. */
     @GetMapping(PAYMENTS + "/{paymentId}")
     PaymentView get(@PathVariable UUID paymentId) {
-        Payment payment = reader.get(new PaymentId(paymentId));
-        return new PaymentView(payment.paymentId(), Direction.valueOf(payment.direction().name()), payment.onUs(),
-                PaymentState.valueOf(payment.state().name()), payment.reasonCode(), payment.txId(), payment.uetr(),
-                payment.endToEndId(), payment.amount(), holder(payment.debtor()), holder(payment.creditor()),
-                payment.remittance(), payment.acceptedAt(), payment.finalisedAt());
-    }
-
-    private static PaymentView.Holder holder(PaymentParty party) {
-        return new PaymentView.Holder(party.name(), party.iban());
+        return PaymentViews.of(reader.get(new PaymentId(paymentId)));
     }
 
     private static OutgoingCommand command(SubmitPayment request) {

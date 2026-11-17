@@ -118,6 +118,33 @@ Resolve body: `{ "resolution": "<value>", "reasonCode": "AB05", "comment": "…"
 
 Every resolution is written to `exception_cases` and `payment_transitions` with the operator's `sub`.
 
+- **List:** `?status=&type=&cursor=&limit=` (`limit` 1 … 100, default 100), oldest first (by `case_id`, a UUID v7):
+  `{ "cases": [ <case> ], "nextCursor": "…" | null }`. `cursor` is the opaque `nextCursor` of the previous page; a
+  cursor this service did not issue is `400 VALIDATION_FAILED` (`cursor INVALID_CURSOR`). A `<case>` is `caseId`,
+  `paymentId`, `type`, `status`, `details`, `openedAt`, `resolution`, `resolvedBy`, `resolvedAt`, `comment`.
+- **Case:** the `<case>` plus `payment` (as `GET /v1/payments/{paymentId}`), `transitions` (`from`, `to`,
+  `reasonCode`, `cause`, `actor`, `at`) and `csmEvents` (the inbox entries of its transaction: `type`, `outcome` as
+  in the dedup key, `eventId`, `receivedAt`); the last three are `null` for a case without a payment.
+  `404 CASE_NOT_FOUND`.
+- **Resolve:** `200` with the resolved `<case>`. One transaction locks the payment, then the case. The transition
+  row has `cause = OPERATOR_<resolution>` and `actor` = the operator's `sub`; where the resolution leaves the state
+  as it is (`RETRY_INVESTIGATION`, `CONFIRMED_SETTLED` until the hold is settled, `ACKNOWLEDGED`, `RETRY_NOW`) it is a
+  row from the state to itself. `reasonCode` must be a known ISO 20022 code. Errors: `404 CASE_NOT_FOUND`,
+  `409 CASE_ALREADY_RESOLVED`, `422 RESOLUTION_NOT_ALLOWED` (not one of the type's), `409 CASE_OUTDATED`, `400
+  VALIDATION_FAILED` (`resolution` missing or unknown, `reasonCode` missing for `CONFIRMED_REJECTED` or unknown,
+  `comment` over 1000 characters).
+- **The CSM answered after all:** an `UNRESOLVED_INVESTIGATION` whose payment recorded a CSM outcome since the case
+  opened is closed by the confirmation that agrees with that outcome (`CONFIRMED_SETTLED` after a settlement,
+  `CONFIRMED_REJECTED` after a rejection), which changes nothing else; `RETRY_INVESTIGATION` or the other
+  confirmation is `409 CASE_OUTDATED`.
+- `RETRY_INVESTIGATION` cancels a still `SCHEDULED` `INVESTIGATION_RETRY` (`SKIP LOCKED`, as in §6.5), so one retry
+  chain runs. `RETRY_NOW` resets only the action named in the case's `details.action`; if that action is no longer
+  pending the case is resolved without a reset. A claim of that action still in flight is discarded by the new
+  version; the ledger calls are idempotent, so the second call meanwhile is safe.
+- Without a token every endpoint answers `401 UNAUTHENTICATED`, without `BACKOFFICE_OPERATOR` `403 FORBIDDEN`
+  (checked for every operation of the OpenAPI document that declares `staffJwt`). The payment command API (§3.1)
+  stays `@InternalApi` without a token until M5; probes, `/actuator/prometheus` and the OpenAPI document are open.
+
 ## 4. Messaging
 
 | Direction | Topic | Messages | Dedup |

@@ -6,6 +6,8 @@ import com.tpe.messaging.worker.PollingWorker;
 import com.tpe.observability.context.Spans;
 import com.tpe.observability.payment.PaymentTelemetry;
 import com.tpe.paymentdomain.PaymentId;
+import com.tpe.paymentorchestrator.application.cases.CaseResolutions;
+import com.tpe.paymentorchestrator.application.cases.ExceptionCases;
 import com.tpe.paymentorchestrator.application.csm.CsmEventHandling;
 import com.tpe.paymentorchestrator.application.ledger.Ledger;
 import com.tpe.paymentorchestrator.application.outgoing.AssessPayeeRiskAction;
@@ -172,6 +174,12 @@ class SagaConfiguration {
     InvestigationTimer investigationTimer(Payments payments, OutboxWriter outbox, InvestigationPolicy policy,
             SagaTelemetry telemetry, Clock clock) {
         return new InvestigationTimer(payments, outbox, policy, telemetry, clock);
+    }
+
+    @Bean
+    CaseResolutions caseResolutions(ExceptionCases cases, Payments payments, InvestigationTimer investigation,
+            CsmEventHandling csmEvents, SagaRunner runner, Clock clock) {
+        return new CaseResolutions(cases, payments, investigation, csmEvents, runner, clock);
     }
 
     @Bean
