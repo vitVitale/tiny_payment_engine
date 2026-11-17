@@ -16,6 +16,7 @@ import com.tpe.paymentdomain.UuidV7Generator;
 import com.tpe.paymentorchestrator.application.payments.Payments;
 import com.tpe.paymentorchestrator.application.payments.ActionClaim;
 import com.tpe.paymentorchestrator.application.payments.LockedPayment;
+import com.tpe.paymentorchestrator.domain.payment.CsmOutcome;
 import com.tpe.paymentorchestrator.domain.payment.ExceptionCaseType;
 import com.tpe.paymentorchestrator.domain.payment.PayeeVerification;
 import com.tpe.paymentorchestrator.domain.payment.Payment;
@@ -29,6 +30,7 @@ import java.sql.SQLException;
 import java.sql.Timestamp;
 import java.time.Instant;
 import java.util.Currency;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
@@ -168,6 +170,42 @@ class JdbcPayments implements Payments {
     }
 
     @Override
+    public Optional<PaymentId> findOnlyByTxId(TxId txId) {
+        List<UUID> found = jdbc.sql("SELECT payment_id FROM payments WHERE tx_id = ? LIMIT 2")
+                .param(txId.value())
+                .query(UUID.class)
+                .list();
+        return found.size() == 1 ? Optional.of(new PaymentId(found.getFirst())) : Optional.empty();
+    }
+
+    @Override
+    public Optional<LockedPayment> lockByTransaction(PaymentDirection direction, Bic debtorAgentBic, TxId txId) {
+        return jdbc.sql("SELECT " + COLUMNS + """
+                        , version, csm_outcome FROM payments
+                        WHERE direction = ? AND debtor_agent_bic = ? AND tx_id = ? FOR UPDATE""")
+                .param(direction.name())
+                .param(debtorAgentBic.value())
+                .param(txId.value())
+                .query((rs, n) -> new LockedPayment(payment(rs, n), rs.getLong("version"),
+                        rs.getString("csm_outcome") != null))
+                .optional();
+    }
+
+    @Override
+    public void applyCsmOutcome(LockedPayment locked, Payment next, CsmOutcome outcome, boolean finalEventEmitted,
+            Instant now) {
+        applyTimer(locked, next, finalEventEmitted, now);
+        jdbc.sql("UPDATE payments SET csm_outcome = ?, csm_outcome_at = ? WHERE payment_id = ?")
+                .param(outcome.name())
+                .param(timestamp(now))
+                .param(next.paymentId().value())
+                .update();
+        jdbc.sql("UPDATE payment_timers SET status = 'CANCELLED' WHERE payment_id = ? AND status = 'SCHEDULED'")
+                .param(next.paymentId().value())
+                .update();
+    }
+
+    @Override
     public void applyTimer(LockedPayment locked, Payment next, boolean finalEventEmitted, Instant now) {
         int updated = store(next, finalEventEmitted, now, "payment_id = :paymentId AND version = :version")
                 .param("paymentId", next.paymentId().value())
@@ -253,6 +291,21 @@ class JdbcPayments implements Payments {
 
     @Override
     public boolean openCase(PaymentId paymentId, ExceptionCaseType type, Map<String, Object> details, Instant now) {
+        if (paymentId == null) {
+            // no unique index holds a case without a payment: the same details open one, so a redelivery opens none
+            return jdbc.sql("""
+                            INSERT INTO exception_cases (case_id, payment_id, type, status, details, opened_at)
+                            SELECT ?, NULL, ?, 'OPEN', CAST(? AS JSONB), ?
+                            WHERE NOT EXISTS (SELECT 1 FROM exception_cases WHERE payment_id IS NULL AND type = ?
+                                                AND status = 'OPEN' AND details = CAST(? AS JSONB))""")
+                    .param(ids.next())
+                    .param(type.name())
+                    .param(JSON.writeValueAsString(details))
+                    .param(timestamp(now))
+                    .param(type.name())
+                    .param(JSON.writeValueAsString(details))
+                    .update() == 1;
+        }
         return jdbc.sql("""
                         INSERT INTO exception_cases (case_id, payment_id, type, status, details, opened_at)
                         VALUES (?, ?, ?, 'OPEN', CAST(? AS JSONB), ?)

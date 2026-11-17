@@ -29,6 +29,7 @@ Not responsible for: idempotency of the customer request (payment-api), ISO XML 
 | `application.outgoing` | Outgoing payment saga |
 | `application.incoming` | Incoming payment saga |
 | `application.payments` | Payment repository port, payment lookup |
+| `application.csm` | CSM event handling (§6.5) |
 | `application.runner` | Saga runner (§6.3) |
 | `application.timers` | Deadline scheduler handlers |
 | `application.cases` | Exception case service |
@@ -126,7 +127,11 @@ Every resolution is written to `exception_cases` and `payment_transitions` with 
 | consume | `csm.inbound.events` | `CreditTransferReceived`, `AnswerSent`, `CreditTransferSettled`, `CreditTransferRejected`, `CreditTransferNotSent` | `<debtorAgentBic>:<txId>:<type>:<outcome>` ([02 §4](02-messaging-contracts.md), ADR-010) |
 
 `DltHook` for `csm.inbound.events.dlt`: open `DLT_MESSAGE` case linked to the payment if the `txId` can be read from
-the key.
+the key (and names exactly one payment; otherwise the case has none). The case's details name the topic, partition,
+offset, key and the failure's type, never the payload.
+
+`SendCreditTransfer` goes to `csm.outbound.commands`, key `txId`, written by the transaction that applies `SEND`
+(§6.2), inside the payment's trace (ADR-014).
 
 ## 5. Data model
 
@@ -341,6 +346,17 @@ Listener transaction: validate → inbox → load payment by `(direction, debtor
 | `CreditTransferRejected` INCOMING | `ACCEPTED`, `INVESTIGATING`, `ACCEPT_REQUESTED` | `REJECTED` with reason, next `CANCEL_CREDIT` (UC-06 8a) |
 | any OUTGOING event | `RECEIVED`, `RISK_CHECKED`, `FUNDS_RESERVED` | contradiction case (gateway cannot know the payment yet) |
 | any event for unknown `txId` | — | `DLT_MESSAGE`-style case with no payment; message acknowledged |
+
+- The payment is found by (`direction`, `debtorAgentBic`, `txId`) and locked (`FOR UPDATE`) like a timer's (§6.6).
+  Recording an outcome stores `csm_outcome` and `csm_outcome_at` and cancels the payment's `SCHEDULED` timers in the
+  same transaction; the next action runs after the commit.
+- `CreditTransferSettled` while `SETTLE_HOLD` is pending (the outcome is recorded, the hold not yet settled) is a
+  no-op; a rejection or `CreditTransferNotSent` then is a contradiction case.
+- A contradiction case changes nothing else: no transition, no ledger call, no final event.
+- `CreditTransferSettled` / `CreditTransferRejected` INCOMING, `CreditTransferReceived` and `AnswerSent` go to the DLT
+  until the incoming flow exists (M4).
+- `SETTLE_HOLD` answered `HOLD_RELEASED` leaves the payment in its state with `pending_action` cleared and opens the
+  case, without a final event (§6.2): the CSM moved the money, the payer's funds came free.
 
 ### 6.6 Concurrency
 

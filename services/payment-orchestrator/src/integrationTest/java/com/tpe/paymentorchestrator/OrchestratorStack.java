@@ -3,12 +3,21 @@ package com.tpe.paymentorchestrator;
 import com.github.tomakehurst.wiremock.WireMockServer;
 import com.github.tomakehurst.wiremock.core.WireMockConfiguration;
 import com.github.tomakehurst.wiremock.stubbing.StubMapping;
+import com.tpe.contracts.Message;
+import com.tpe.messaging.MessageHeaders;
 import com.tpe.paymentdomain.MutableClock;
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
+import java.util.Map;
+import java.util.UUID;
+import org.apache.kafka.clients.producer.KafkaProducer;
+import org.apache.kafka.clients.producer.ProducerConfig;
+import org.apache.kafka.clients.producer.ProducerRecord;
+import org.apache.kafka.common.serialization.StringSerializer;
 import org.junit.jupiter.api.AfterEach;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.config.BeanPostProcessor;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.context.TestConfiguration;
@@ -134,6 +143,10 @@ public abstract class OrchestratorStack {
     @LocalServerPort
     protected int port;
 
+    /** The service's own mapper: the contracts' value objects as strings. */
+    @Autowired
+    private JsonMapper contracts;
+
     @DynamicPropertySource
     static void stack(DynamicPropertyRegistry registry) {
         registry.add("spring.datasource.url", POSTGRES::getJdbcUrl);
@@ -144,6 +157,29 @@ public abstract class OrchestratorStack {
         registry.add("tpe.clients.ledger.base-url", LEDGER::baseUrl);
         // spans are made, so the submit's trace is stored (ADR-014), but there is no collector to send them to
         registry.add("management.tracing.export.enabled", () -> "false");
+    }
+
+    /**
+     * As csm-gateway's relay publishes an event on {@code csm.inbound.events}, key {@code txId}, under
+     * {@code eventId}.
+     */
+    protected void publishCsmEvent(Message event, String txId, UUID eventId) {
+        var contract = Message.contractOf(event.getClass());
+        publish("csm.inbound.events", txId, contracts.writeValueAsString(event), Map.of(
+                MessageHeaders.EVENT_ID, eventId.toString(), MessageHeaders.MESSAGE_TYPE, contract.type(),
+                MessageHeaders.SCHEMA_VERSION, Integer.toString(contract.version())));
+    }
+
+    /** A record as it is, e.g. one that is no valid event. */
+    protected static void publish(String topic, String key, String value, Map<String, String> headers) {
+        var record = new ProducerRecord<>(topic, key, value);
+        headers.forEach((name, header) -> record.headers().add(name, header.getBytes(StandardCharsets.UTF_8)));
+        try (var producer = new KafkaProducer<String, String>(Map.of(
+                ProducerConfig.BOOTSTRAP_SERVERS_CONFIG, KAFKA.getBootstrapServers(),
+                ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG, StringSerializer.class,
+                ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG, StringSerializer.class))) {
+            producer.send(record);
+        }
     }
 
     protected RestClient http() {

@@ -128,6 +128,24 @@ class LedgerServicePactTest {
     }
 
     @Pact(consumer = CONSUMER)
+    V4Pact settleHold(PactDslWithProvider builder) {
+        return settledToTheCsm(settleHold(builder.given("hold is ACTIVE", Map.of("amountMinor", AMOUNT_MINOR)),
+                "settle hold: settled"));
+    }
+
+    @Pact(consumer = CONSUMER)
+    V4Pact settleHoldReplayed(PactDslWithProvider builder) {
+        return settledToTheCsm(settleHold(builder.given("hold is SETTLED to the CSM",
+                Map.of("amountMinor", AMOUNT_MINOR)), "settle hold: a retry answers the settlement"));
+    }
+
+    @Pact(consumer = CONSUMER)
+    V4Pact settleReleasedHold(PactDslWithProvider builder) {
+        return refused(settleHold(builder.given("hold was released", Map.of("availableMinor", 100_000)),
+                "settle hold: a released hold is not settled"), 409, "HOLD_RELEASED");
+    }
+
+    @Pact(consumer = CONSUMER)
     V4Pact settleOnUsReplayed(PactDslWithProvider builder) {
         return settled(settleOnUs(builder.given("hold is SETTLED on-us", Map.of("amountMinor", AMOUNT_MINOR)),
                 "settle on-us: a retry answers the settlement"));
@@ -196,6 +214,26 @@ class LedgerServicePactTest {
     void PACT_P04_anOnUsSettlementBooksTheEntryToThePayee(MockServer server) {
         assertThat(client(server).settleOnUs(payment(), TIMEOUT))
                 .isEqualTo(new LedgerAnswer.Done<>(new Ledger.SettledOnUs(ENTRY, PAYEE_ACCOUNT)));
+    }
+
+    @Test
+    @PactTestFor(pactMethod = "settleHold")
+    void PACT_P04_aHoldIsSettledToTheCsm(MockServer server) {
+        assertThat(client(server).settleHold(payment(), TIMEOUT))
+                .isEqualTo(new LedgerAnswer.Done<>(new Ledger.HoldSettled(ENTRY)));
+    }
+
+    @Test
+    @PactTestFor(pactMethod = "settleHoldReplayed")
+    void PACT_P04_aRetriedHoldSettlementAnswersTheSettlement(MockServer server) {
+        assertThat(client(server).settleHold(payment(), TIMEOUT))
+                .isEqualTo(new LedgerAnswer.Done<>(new Ledger.HoldSettled(ENTRY)));
+    }
+
+    @Test
+    @PactTestFor(pactMethod = "settleReleasedHold")
+    void PACT_P04_aReleasedHoldIsNotSettled(MockServer server) {
+        assertThat(client(server).settleHold(payment(), TIMEOUT)).isEqualTo(refusal(LedgerRefusal.HOLD_RELEASED));
     }
 
     @Test
@@ -342,6 +380,24 @@ class LedgerServicePactTest {
                     body.uuid("journalEntryId", ENTRY);
                     body.uuid("creditorAccountId", PAYEE_ACCOUNT);
                 }).build())
+                .toPact(V4Pact.class);
+    }
+
+    private static PactDslResponse settleHold(PactDslWithState given, String description) {
+        return given.uponReceiving(description)
+                .method("POST")
+                .pathFromProviderState("/v1/holds/${holdId}/settle", "/v1/holds/" + HOLD_ID + "/settle")
+                .matchHeader("Content-Type", "application/json.*", "application/json")
+                .matchHeader("Idempotency-Key", "hold-settle:" + UUID_REGEX, "hold-settle:" + HOLD_ID)
+                .body("{}", "application/json")
+                .willRespondWith();
+    }
+
+    /** Only what the orchestrator reads of a settlement to the CSM: its entry. */
+    private static V4Pact settledToTheCsm(PactDslResponse response) {
+        return response.status(200)
+                .matchHeader("Content-Type", "application/json.*", "application/json")
+                .body(newJsonBody(body -> body.uuid("journalEntryId", ENTRY)).build())
                 .toPact(V4Pact.class);
     }
 

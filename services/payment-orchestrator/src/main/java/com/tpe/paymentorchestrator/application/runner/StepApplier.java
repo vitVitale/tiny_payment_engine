@@ -1,5 +1,6 @@
 package com.tpe.paymentorchestrator.application.runner;
 
+import com.tpe.messaging.outbox.OutboxWriter;
 import com.tpe.paymentorchestrator.application.payments.ActionClaim;
 import com.tpe.paymentorchestrator.application.payments.FinalEvents;
 import com.tpe.paymentorchestrator.application.payments.Payments;
@@ -15,19 +16,25 @@ import org.springframework.transaction.annotation.Transactional;
 /**
  * The second transaction of a step (specs/11-payment-orchestrator.md §6.2, ADR-008): applies the outcome only while
  * the payment is still as claimed, records the transition if the state changed, opens the case the step names, and
- * writes the final event when the payment became final with nothing left to undo and no contradiction found.
+ * writes the step's command for csm-gateway, and the final event when the payment became final with nothing left
+ * to undo and no contradiction found.
  */
 @Component
 public class StepApplier {
 
     private static final Logger LOG = LoggerFactory.getLogger(StepApplier.class);
 
+    /** {@code csm.outbound.commands}, key {@code txId} (specs/02-messaging-contracts.md §3). */
+    static final String CSM_COMMANDS = "csm.outbound.commands";
+
     private final Payments payments;
     private final FinalEvents finalEvents;
+    private final OutboxWriter outbox;
 
-    StepApplier(Payments payments, FinalEvents finalEvents) {
+    StepApplier(Payments payments, FinalEvents finalEvents, OutboxWriter outbox) {
         this.payments = payments;
         this.finalEvents = finalEvents;
+        this.outbox = outbox;
     }
 
     /** @return {@code false} if the step was overtaken and its outcome discarded */
@@ -45,6 +52,10 @@ public class StepApplier {
             payments.openCase(next.paymentId(), moved.openCase(), Map.of("action", claim.action().name(),
                     "cause", moved.cause()), now);
             LOG.warn("payment {} {}: {} case opened", next.paymentId().value(), moved.cause(), moved.openCase());
+        }
+        if (moved.command() != null) {
+            // in the payment's trace: the runner's action span is current
+            outbox.write(CSM_COMMANDS, next.txId().value(), moved.command());
         }
         if (finalEvent) {
             finalEvents.emit(next);

@@ -4,6 +4,12 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.awaitility.Awaitility.await;
 
 import com.github.tomakehurst.wiremock.verification.LoggedRequest;
+import com.tpe.contracts.CreditTransferSettled;
+import com.tpe.contracts.Direction;
+import com.tpe.contracts.SettlementSource;
+import com.tpe.paymentdomain.Bic;
+import com.tpe.paymentdomain.PaymentId;
+import com.tpe.paymentdomain.TxId;
 import com.tpe.paymentorchestrator.SagaProbe.Row;
 import com.tpe.paymentorchestrator.domain.payment.PendingAction;
 import java.time.Duration;
@@ -12,6 +18,7 @@ import java.util.Map;
 import java.util.UUID;
 import java.util.function.Function;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.MethodSource;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -100,6 +107,33 @@ class SagaResumeIT extends OrchestratorStack {
         }
     }
 
+    @Test
+    void aCrashAfterSettlingTheHoldResumesToOneSettlement() {
+        riskAnswers("allow");
+        ledgerAnswers("create-hold-created", "settle-hold-settled");
+        String payee = Ibans.peer();
+        ActionInterference.crashAfter(PendingAction.SETTLE_HOLD, payee);
+        UUID paymentId = submit(payee);
+        await().atMost(AWAIT).until(() -> "SENT_TO_CSM".equals(probe.row(paymentId).state()));
+        String txId = probe.txId(paymentId);
+
+        publishCsmEvent(new CreditTransferSettled(new TxId(txId), new Bic("TPEBDEFFXXX"), Direction.OUTGOING,
+                new PaymentId(paymentId), CLOCK.instant(), SettlementSource.STATUS_REPORT), txId, UUID.randomUUID());
+
+        await().atMost(AWAIT).untilAsserted(() -> {
+            assertThat(probe.row(paymentId).pendingAction()).isEqualTo("SETTLE_HOLD");
+            assertThat(probe.settleCalls(paymentId)).hasSize(1);
+            assertThat(probe.leased(paymentId)).as("leased").isTrue();
+        });
+        CLOCK.advance(PAST_LEASE);
+
+        await().atMost(AWAIT).untilAsserted(() -> assertThat(probe.row(paymentId)).isEqualTo(
+                new Row("SETTLED", null, null, true)));
+        assertThat(probe.finalEvents(paymentId)).containsExactly("PaymentSettled|");
+        assertThat(probe.settleCalls(paymentId)).hasSize(2);
+        assertSameCall(probe.settleCalls(paymentId));
+    }
+
     /** Both calls are one request: the same key, the same body (the ledger replays its stored answer). */
     private static void assertSameCall(List<LoggedRequest> calls) {
         assertThat(calls).extracting(call -> call.getHeader("Idempotency-Key")).containsOnly(
@@ -117,12 +151,13 @@ class SagaResumeIT extends OrchestratorStack {
             case CREATE_HOLD -> probe::holdCalls;
             case SETTLE_ON_US -> probe::settleOnUsCalls;
             case RELEASE_HOLD -> probe::releaseCalls;
+            case SETTLE_HOLD -> probe::settleCalls;
             default -> throw new IllegalArgumentException(action + " is not an M2 action");
         };
         return calls.apply(paymentId);
     }
 
-    /** An on-us payment: payer and payee at the own bank. */
+    /** A payment from the own bank to {@code payee}: on-us if the payee is at the own bank. */
     private UUID submit(String payee) {
         Map<String, Object> request = PaymentCommandIT.request(Ibans.own(), payee);
         String body = http().post().uri("/v1/payments").contentType(MediaType.APPLICATION_JSON)

@@ -14,6 +14,7 @@ final class FakeLedger implements Ledger {
     LedgerAnswer<HoldCreated> hold;
     LedgerAnswer<SettledOnUs> settlement;
     LedgerAnswer<Released> release;
+    LedgerAnswer<HoldSettled> holdSettlement;
 
     @Override
     public LedgerAnswer<HoldCreated> createHold(Payment payment, Duration readTimeout) {
@@ -25,6 +26,12 @@ final class FakeLedger implements Ledger {
     public LedgerAnswer<SettledOnUs> settleOnUs(Payment payment, Duration readTimeout) {
         timeouts.add(readTimeout);
         return settlement;
+    }
+
+    @Override
+    public LedgerAnswer<HoldSettled> settleHold(Payment payment, Duration readTimeout) {
+        timeouts.add(readTimeout);
+        return holdSettlement;
     }
 
     @Override

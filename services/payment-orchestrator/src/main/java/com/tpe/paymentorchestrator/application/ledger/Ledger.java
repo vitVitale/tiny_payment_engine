@@ -20,6 +20,12 @@ public interface Ledger {
     LedgerAnswer<SettledOnUs> settleOnUs(Payment payment, Duration readTimeout);
 
     /**
+     * {@code POST /v1/holds/{holdId}/settle}: one entry Dr payer / Cr the CSM settlement account, after the CSM settled
+     * the payment. Never throws.
+     */
+    LedgerAnswer<HoldSettled> settleHold(Payment payment, Duration readTimeout);
+
+    /**
      * {@code POST /v1/holds/{holdId}/release}: frees the payer's funds; for a hold that never came, a tombstone that
      * refuses a late create (ADR-009). Never throws.
      */
@@ -42,6 +48,14 @@ public interface Ledger {
         public SettledOnUs {
             Objects.requireNonNull(journalEntryId, "journalEntryId");
             Objects.requireNonNull(creditorAccountId, "creditorAccountId");
+        }
+    }
+
+    /** @param journalEntryId the entry that moved the money, {@code bookingEntryId} of {@code PaymentSettled} */
+    record HoldSettled(UUID journalEntryId) {
+
+        public HoldSettled {
+            Objects.requireNonNull(journalEntryId, "journalEntryId");
         }
     }
 

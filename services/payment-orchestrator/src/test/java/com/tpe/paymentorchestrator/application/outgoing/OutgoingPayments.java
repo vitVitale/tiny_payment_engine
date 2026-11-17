@@ -47,6 +47,16 @@ final class OutgoingPayments {
         return submitted(onUs).riskChecked();
     }
 
+    /** To another bank, {@code FUNDS_RESERVED}, its {@code SEND} pending. */
+    static Payment held() {
+        return riskChecked(false).fundsReserved(UUID.randomUUID());
+    }
+
+    /** To another bank, settled by the CSM, its {@code SETTLE_HOLD} pending. */
+    static Payment csmSettled() {
+        return held().sent().csmSettled();
+    }
+
     /** On-us, {@code FUNDS_RESERVED}, its {@code ASSESS_PAYEE_RISK} pending. */
     static Payment heldOnUs() {
         return riskChecked(true).fundsReserved(UUID.randomUUID());

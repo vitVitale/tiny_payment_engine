@@ -1,5 +1,6 @@
 package com.tpe.paymentorchestrator.application.runner;
 
+import com.tpe.contracts.Message;
 import com.tpe.paymentorchestrator.domain.payment.ExceptionCaseType;
 import com.tpe.paymentorchestrator.domain.payment.Payment;
 import com.tpe.paymentorchestrator.domain.payment.RejectionCause;
@@ -15,8 +16,10 @@ public sealed interface StepOutcome {
      * @param rejection why the payment was rejected; {@code null} unless this step rejected it
      * @param openCase the exception case the step opens; one for a contradiction means no final event, as the
      *     payment's record and the money disagree; {@code null} for none
+     * @param command the command for csm-gateway the step's transaction writes to the outbox ({@code SEND}); {@code null}
+     *     for none
      */
-    record Moved(Payment next, String cause, RejectionCause rejection, ExceptionCaseType openCase)
+    record Moved(Payment next, String cause, RejectionCause rejection, ExceptionCaseType openCase, Message command)
             implements StepOutcome {
 
         public Moved {
@@ -24,8 +27,12 @@ public sealed interface StepOutcome {
             Objects.requireNonNull(cause, "cause");
         }
 
+        public Moved(Payment next, String cause, RejectionCause rejection, ExceptionCaseType openCase) {
+            this(next, cause, rejection, openCase, null);
+        }
+
         public Moved(Payment next, String cause, RejectionCause rejection) {
-            this(next, cause, rejection, null);
+            this(next, cause, rejection, null, null);
         }
     }
 
