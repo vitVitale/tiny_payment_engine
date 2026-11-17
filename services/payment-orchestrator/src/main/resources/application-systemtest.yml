@@ -5,3 +5,7 @@ tpe:
     send-by-offset: 3s
     deadline-offset: 6s
     hold-give-up-margin: 1s
+  investigation:
+    # E2E-O-11
+    backoff: 500ms,1s
+    budget: 10s

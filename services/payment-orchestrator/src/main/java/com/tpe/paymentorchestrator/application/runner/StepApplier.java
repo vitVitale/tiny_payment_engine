@@ -25,7 +25,7 @@ public class StepApplier {
     private static final Logger LOG = LoggerFactory.getLogger(StepApplier.class);
 
     /** {@code csm.outbound.commands}, key {@code txId} (specs/02-messaging-contracts.md §3). */
-    static final String CSM_COMMANDS = "csm.outbound.commands";
+    public static final String CSM_COMMANDS = "csm.outbound.commands";
 
     private final Payments payments;
     private final FinalEvents finalEvents;

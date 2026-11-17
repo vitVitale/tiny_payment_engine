@@ -53,6 +53,9 @@ class JdbcPayments implements Payments {
             deadline_at, pending_action, finalised_at, debtor_account_id, creditor_account_id, booking_entry_id,
             trace_context""";
 
+    /** What {@link LockedPayment} adds to the payment. */
+    private static final String LOCK_COLUMNS = "version, csm_outcome, investigation_started_at";
+
     private static final JsonMapper JSON = JsonMapper.builder().build();
 
     private final JdbcClient jdbc;
@@ -142,13 +145,14 @@ class JdbcPayments implements Payments {
     }
 
     @Override
-    public void scheduleTimer(PaymentId paymentId, TimerType type, Instant dueAt, Instant now) {
+    public void scheduleTimer(PaymentId paymentId, TimerType type, Instant dueAt, int attempt, Instant now) {
         jdbc.sql("""
-                        INSERT INTO payment_timers (payment_id, type, due_at, status, created_at)
-                        VALUES (?, ?, ?, 'SCHEDULED', ?)""")
+                        INSERT INTO payment_timers (payment_id, type, due_at, attempt, status, created_at)
+                        VALUES (?, ?, ?, ?, 'SCHEDULED', ?)""")
                 .param(paymentId.value())
                 .param(type.name())
                 .param(timestamp(dueAt))
+                .param(attempt)
                 .param(timestamp(now))
                 .update();
     }
@@ -162,10 +166,9 @@ class JdbcPayments implements Payments {
 
     @Override
     public Optional<LockedPayment> lockForTimer(PaymentId paymentId) {
-        return jdbc.sql("SELECT " + COLUMNS + ", version, csm_outcome FROM payments WHERE payment_id = ? FOR UPDATE")
+        return jdbc.sql("SELECT " + COLUMNS + ", " + LOCK_COLUMNS + " FROM payments WHERE payment_id = ? FOR UPDATE")
                 .param(paymentId.value())
-                .query((rs, n) -> new LockedPayment(payment(rs, n), rs.getLong("version"),
-                        rs.getString("csm_outcome") != null))
+                .query(JdbcPayments::locked)
                 .optional();
     }
 
@@ -180,14 +183,13 @@ class JdbcPayments implements Payments {
 
     @Override
     public Optional<LockedPayment> lockByTransaction(PaymentDirection direction, Bic debtorAgentBic, TxId txId) {
-        return jdbc.sql("SELECT " + COLUMNS + """
-                        , version, csm_outcome FROM payments
+        return jdbc.sql("SELECT " + COLUMNS + ", " + LOCK_COLUMNS + """
+                         FROM payments
                         WHERE direction = ? AND debtor_agent_bic = ? AND tx_id = ? FOR UPDATE""")
                 .param(direction.name())
                 .param(debtorAgentBic.value())
                 .param(txId.value())
-                .query((rs, n) -> new LockedPayment(payment(rs, n), rs.getLong("version"),
-                        rs.getString("csm_outcome") != null))
+                .query(JdbcPayments::locked)
                 .optional();
     }
 
@@ -200,7 +202,12 @@ class JdbcPayments implements Payments {
                 .param(timestamp(now))
                 .param(next.paymentId().value())
                 .update();
-        jdbc.sql("UPDATE payment_timers SET status = 'CANCELLED' WHERE payment_id = ? AND status = 'SCHEDULED'")
+        // the timer worker locks a timer row before its payment, this the other way round: a row the worker is firing
+        // is skipped, not waited for (no deadlock); the worker then finds csm_outcome set and changes nothing
+        jdbc.sql("""
+                        UPDATE payment_timers SET status = 'CANCELLED'
+                        WHERE timer_id IN (SELECT timer_id FROM payment_timers
+                                           WHERE payment_id = ? AND status = 'SCHEDULED' FOR UPDATE SKIP LOCKED)""")
                 .param(next.paymentId().value())
                 .update();
     }
@@ -215,6 +222,29 @@ class JdbcPayments implements Payments {
             // the row is locked by this transaction, so its version cannot have moved
             throw new IllegalStateException("payment " + next.paymentId().value() + " changed under its lock");
         }
+    }
+
+    @Override
+    public void startInvestigation(LockedPayment locked, Payment next, Instant now) {
+        applyTimer(locked, next, false, now);
+        jdbc.sql("UPDATE payments SET investigation_started_at = ? WHERE payment_id = ?")
+                .param(timestamp(now))
+                .param(next.paymentId().value())
+                .update();
+    }
+
+    @Override
+    public int nextStatusRequestAttempt(PaymentId paymentId, Instant now) {
+        return jdbc.sql("""
+                        UPDATE payments
+                        SET status_request_attempt = status_request_attempt + 1, version = version + 1,
+                            updated_at = :now
+                        WHERE payment_id = :paymentId
+                        RETURNING status_request_attempt""")
+                .param("now", timestamp(now))
+                .param("paymentId", paymentId.value())
+                .query(Integer.class)
+                .single();
     }
 
     @Override
@@ -316,6 +346,11 @@ class JdbcPayments implements Payments {
                 .param(JSON.writeValueAsString(details))
                 .param(timestamp(now))
                 .update() == 1;
+    }
+
+    private static LockedPayment locked(ResultSet rs, int row) throws SQLException {
+        return new LockedPayment(payment(rs, row), rs.getLong("version"), rs.getString("csm_outcome") != null,
+                instant(rs, "investigation_started_at"));
     }
 
     private static Payment payment(ResultSet rs, int row) throws SQLException {

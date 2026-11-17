@@ -191,9 +191,10 @@ public record Payment(
      * The {@code OUTGOING_DEADLINE} timer fired at {@code at} (§6.4): before the payment reaches the CSM, the scheme
      * deadline rejects it {@code AB03}, releasing the hold it may have ({@code RISK_CHECKED}, {@code FUNDS_RESERVED});
      * on {@code RECEIVED} nothing exists to undo. An on-us payment holding its funds has no scheme deadline: its
-     * actions retry to a definitive answer.
+     * actions retry to a definitive answer. A payment the CSM has without an answer goes into investigation
+     * (UC-05 1), keeping its hold: the CSM may have settled it.
      *
-     * @return empty when the deadline changes nothing: final, on-us and held, or past the CSM (M3)
+     * @return empty when the deadline changes nothing: final, on-us and held, or investigating already
      */
     public Optional<Payment> atDeadline(Instant at) {
         return switch (state) {
@@ -201,6 +202,7 @@ public record Payment(
             case RISK_CHECKED -> Optional.of(rejected(ReasonCode.AB03, PendingAction.RELEASE_HOLD, at));
             case FUNDS_RESERVED -> onUs ? Optional.empty()
                     : Optional.of(rejected(ReasonCode.AB03, PendingAction.RELEASE_HOLD, at));
+            case SENT_TO_CSM -> Optional.of(moveTo(PaymentState.INVESTIGATING, null, null, null));
             default -> Optional.empty();
         };
     }

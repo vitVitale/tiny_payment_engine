@@ -1,6 +1,7 @@
 package com.tpe.paymentorchestrator.infrastructure.config;
 
 import com.tpe.messaging.inbox.InboxGuard;
+import com.tpe.messaging.outbox.OutboxWriter;
 import com.tpe.messaging.worker.PollingWorker;
 import com.tpe.observability.context.Spans;
 import com.tpe.observability.payment.PaymentTelemetry;
@@ -23,7 +24,9 @@ import com.tpe.paymentorchestrator.application.runner.SagaAction;
 import com.tpe.paymentorchestrator.application.runner.SagaRunner;
 import com.tpe.paymentorchestrator.application.runner.SagaTelemetry;
 import com.tpe.paymentorchestrator.application.runner.StepApplier;
+import com.tpe.paymentorchestrator.application.timers.InvestigationTimer;
 import com.tpe.paymentorchestrator.application.timers.OutgoingDeadlineTimer;
+import com.tpe.paymentorchestrator.domain.payment.InvestigationPolicy;
 import com.tpe.paymentorchestrator.domain.payment.OutgoingTimings;
 import com.tpe.paymentorchestrator.domain.payment.TimerType;
 import com.tpe.paymentorchestrator.infrastructure.ledger.HttpLedger;
@@ -51,7 +54,7 @@ import org.springframework.web.client.RestClient;
  */
 @Configuration(proxyBeanMethods = false)
 @EnableConfigurationProperties({SagaConfiguration.RunnerProperties.class, SagaConfiguration.RiskProperties.class,
-        SagaConfiguration.LedgerProperties.class})
+        SagaConfiguration.LedgerProperties.class, SagaConfiguration.InvestigationProperties.class})
 class SagaConfiguration {
 
     /** The sweeper's poll: actions whose lease expired or whose retry is due (§6.3). */
@@ -159,28 +162,48 @@ class SagaConfiguration {
         return new CsmEventHandling(payments, inbox, finalEvents, runner, telemetry, clock);
     }
 
+    /** The application does not start with an empty or non-positive back-off or budget. */
+    @Bean
+    InvestigationPolicy investigationPolicy(InvestigationProperties investigation) {
+        return new InvestigationPolicy(investigation.backoff(), investigation.budget());
+    }
+
+    @Bean
+    InvestigationTimer investigationTimer(Payments payments, OutboxWriter outbox, InvestigationPolicy policy,
+            SagaTelemetry telemetry, Clock clock) {
+        return new InvestigationTimer(payments, outbox, policy, telemetry, clock);
+    }
+
     @Bean
     OutgoingDeadlineTimer outgoingDeadlineTimer(Payments payments, FinalEvents finalEvents, SagaRunner runner,
-            SagaTelemetry telemetry, Clock clock) {
-        return new OutgoingDeadlineTimer(payments, finalEvents, runner, telemetry, clock);
+            InvestigationTimer investigation, SagaTelemetry telemetry, Clock clock) {
+        return new OutgoingDeadlineTimer(payments, finalEvents, runner, investigation, telemetry, clock);
     }
 
     /**
      * Fires the due timers the service handles (§6.4), each in the poll's transaction; {@code FOR UPDATE SKIP LOCKED}
-     * spreads them over the instances. The investigation timers of M3 wait until they are handled.
+     * spreads them over the instances. {@code SETTLEMENT_OVERDUE} waits until the incoming flow handles it (M4).
      */
     @Bean
-    PollingWorker<DueTimer> timerWorker(OutgoingDeadlineTimer deadline, JdbcTemplate jdbc,
-            PlatformTransactionManager transactions, Clock clock, MeterRegistry registry,
+    PollingWorker<DueTimer> timerWorker(OutgoingDeadlineTimer deadline, InvestigationTimer investigation,
+            JdbcTemplate jdbc, PlatformTransactionManager transactions, Clock clock, MeterRegistry registry,
             ObjectProvider<Spans> spans) {
-        String due = "status = 'SCHEDULED' AND type = '" + TimerType.OUTGOING_DEADLINE.name() + "' AND due_at <= ?";
+        // enum names, safe to inline
+        String due = "status = 'SCHEDULED' AND type IN ('" + TimerType.OUTGOING_DEADLINE.name() + "', '"
+                + TimerType.INVESTIGATION_RETRY.name() + "') AND due_at <= ?";
         return new PollingWorker<>(new PollingWorker.Settings("payment-timers", 100, TIMER_INTERVAL, 1), jdbc,
                 transactions,
-                "SELECT timer_id, payment_id, type, due_at FROM payment_timers WHERE " + due
+                "SELECT timer_id, payment_id, type, due_at, attempt FROM payment_timers WHERE " + due
                         + " ORDER BY due_at LIMIT ? FOR UPDATE SKIP LOCKED",
                 (rs, n) -> new DueTimer(rs.getLong(1), new PaymentId(rs.getObject(2, UUID.class)),
-                        TimerType.valueOf(rs.getString(3)), rs.getTimestamp(4).toInstant()),
-                deadline::fire,
+                        TimerType.valueOf(rs.getString(3)), rs.getTimestamp(4).toInstant(), rs.getInt(5)),
+                timer -> {
+                    switch (timer.type()) {
+                        case OUTGOING_DEADLINE -> deadline.fire(timer);
+                        case INVESTIGATION_RETRY -> investigation.fire(timer);
+                        case SETTLEMENT_OVERDUE -> throw new IllegalStateException("not picked: " + timer);
+                    }
+                },
                 "SELECT min(due_at) FROM payment_timers WHERE " + due, clock, registry,
                 spans.getIfAvailable(Spans::noop));
     }
@@ -200,6 +223,10 @@ class SagaConfiguration {
          */
         record Timeout(Duration outgoing, Duration incoming) {}
     }
+
+    /** {@code tpe.investigation.*} (§7): the delays between status requests, the last repeating, and the budget. */
+    @ConfigurationProperties("tpe.investigation")
+    record InvestigationProperties(List<Duration> backoff, Duration budget) {}
 
     /** {@code tpe.clients.ledger.*} (§7). */
     @ConfigurationProperties("tpe.clients.ledger")
