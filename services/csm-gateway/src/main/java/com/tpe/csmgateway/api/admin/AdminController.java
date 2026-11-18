@@ -69,8 +69,8 @@ class AdminController {
                     t.answerStatus() == null ? null : t.answerStatus().name(), t.answerReason(),
                     t.answerDecidedBy() == null ? null : t.answerDecidedBy().name(), t.answeredAt(),
                     t.answerMsgId() == null ? null : t.answerMsgId().value(),
-                    t.transmitStatus() == null ? null : t.transmitStatus().name(), t.transmitAttempts(), null, null,
-                    null, null);
+                    t.transmitStatus() == null ? null : t.transmitStatus().name(), t.transmitAttempts(), null,
+                    t.finalStatus() == null ? null : t.finalStatus().name(), t.finalReason(), t.finalAt());
         }
     }
 

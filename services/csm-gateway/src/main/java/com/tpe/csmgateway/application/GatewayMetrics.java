@@ -37,5 +37,6 @@ public interface GatewayMetrics {
     /** One claimed transmission attempt; @param type the message version, e.g. {@code pacs.008.001.08} */
     void transmitAttempt(String type);
 
+    /** A {@code pacs.002}, or a status request, that names no transaction the gateway knows. */
     void uncorrelated();
 }

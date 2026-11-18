@@ -15,8 +15,8 @@ import org.springframework.stereotype.Component;
 
 /**
  * The command listener (specs/15-csm-gateway.md §2, §4): {@code csm.outbound.commands}, group {@code csm-gateway}.
- * A command is read and validated ({@link ConsumedMessages#readOneOf}); an invalid one, or a command this gateway does
- * not handle yet ({@code RequestPaymentStatus} for an incoming transfer), goes to the DLT.
+ * A command is read and validated ({@link ConsumedMessages#readOneOf}); an invalid one, or one of another type, goes
+ * to the DLT.
  */
 @Component
 class CsmCommandListener {

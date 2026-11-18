@@ -2,6 +2,8 @@ package com.tpe.csmgateway.application.incoming;
 
 import com.tpe.csmgateway.domain.incoming.IncomingTransfer;
 import com.tpe.csmgateway.domain.incoming.IncomingTransfer.AnswerStatus;
+import com.tpe.csmgateway.domain.outgoing.FinalStatus;
+import com.tpe.csmgateway.domain.outgoing.StatusSource;
 import com.tpe.paymentdomain.Bic;
 import com.tpe.paymentdomain.MsgId;
 import com.tpe.paymentdomain.StatusReason;
@@ -24,6 +26,16 @@ public interface IncomingTransfers {
 
     /** The transfer, locked for the rest of the transaction. */
     Optional<IncomingTransfer> lock(Bic debtorAgentBic, TxId txId);
+
+    /**
+     * The transfer whose {@code pacs.008} had {@code msgId}, locked for the rest of the transaction: the fallback of
+     * a report that names no debtor agent (§6.4). The earliest if two debtor agents used the same one.
+     */
+    Optional<IncomingTransfer> lockByMsgId(MsgId msgId);
+
+    /** Records the first final status; the row keeps it against any later, contradicting one (§6.4). */
+    void recordFinal(Bic debtorAgentBic, TxId txId, FinalStatus status, String reason, Instant at,
+            StatusSource source);
 
     /** Every transfer with {@code txId}, of any debtor agent; no lock. */
     List<IncomingTransfer> find(TxId txId);

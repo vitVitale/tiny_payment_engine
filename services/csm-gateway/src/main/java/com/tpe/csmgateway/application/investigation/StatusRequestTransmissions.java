@@ -1,9 +1,12 @@
 package com.tpe.csmgateway.application.investigation;
 
+import com.tpe.contracts.Direction;
+import com.tpe.csmgateway.application.incoming.IncomingTransfers;
 import com.tpe.csmgateway.application.investigation.StatusRequests.StatusRequest;
 import com.tpe.csmgateway.application.journal.MessageJournal;
 import com.tpe.csmgateway.application.outgoing.OutgoingTransfers;
 import com.tpe.csmgateway.application.transmit.TransmissionQueue;
+import com.tpe.csmgateway.domain.incoming.IncomingTransfer;
 import com.tpe.csmgateway.domain.outgoing.OutgoingTransfer;
 import com.tpe.iso20022model.CsmMessageType;
 import com.tpe.paymentdomain.MsgId;
@@ -24,11 +27,14 @@ public class StatusRequestTransmissions implements TransmissionQueue {
 
     private final StatusRequests requests;
     private final OutgoingTransfers transfers;
+    private final IncomingTransfers incoming;
     private final MessageJournal journal;
 
-    public StatusRequestTransmissions(StatusRequests requests, OutgoingTransfers transfers, MessageJournal journal) {
+    public StatusRequestTransmissions(StatusRequests requests, OutgoingTransfers transfers, IncomingTransfers incoming,
+            MessageJournal journal) {
         this.requests = requests;
         this.transfers = transfers;
+        this.incoming = incoming;
         this.journal = journal;
     }
 
@@ -51,7 +57,11 @@ public class StatusRequestTransmissions implements TransmissionQueue {
         }
         String envelope = journal.outboundXml(msgId.value())
                 .orElseThrow(() -> new IllegalStateException("no journalled pacs.028 " + msgId.value()));
-        String traceContext = transfers.find(request.txId()).map(OutgoingTransfer::traceContext).orElse(null);
+        String traceContext = request.direction() == Direction.OUTGOING
+                ? transfers.find(request.txId()).map(OutgoingTransfer::traceContext).orElse(null)
+                : incoming.find(request.txId()).stream()
+                        .filter(transfer -> transfer.debtorAgentBic().equals(request.debtorAgentBic()))
+                        .findFirst().map(IncomingTransfer::traceContext).orElse(null);
         var attempt = requests.claim(msgId, now, lease, MAX_ATTEMPTS);
         return attempt.isEmpty() ? Optional.empty()
                 : Optional.of(new Claim(msgId, attempt.getAsInt(), envelope, traceContext));
