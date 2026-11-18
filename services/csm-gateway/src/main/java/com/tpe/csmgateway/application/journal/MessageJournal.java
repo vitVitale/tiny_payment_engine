@@ -50,6 +50,12 @@ public interface MessageJournal {
     /** The {@code pacs.008} journalled {@code OUT} under {@code msgId}, as it is transmitted. */
     Optional<String> outboundXml(String msgId);
 
+    /**
+     * The valid message journalled {@code IN} under {@code msgId} for the transaction ({@code debtorAgentBic},
+     * {@code txId}), as it arrived: the {@code pacs.008} of an incoming transfer.
+     */
+    Optional<String> inboundXml(String msgId, TxId txId, Bic debtorAgentBic);
+
     /** Every message for {@code txId}, oldest first; {@code debtorAgentBic} narrows it to one transaction. */
     List<Journalled> byTransaction(TxId txId, Optional<Bic> debtorAgentBic);
 }

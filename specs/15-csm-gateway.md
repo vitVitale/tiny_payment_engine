@@ -211,10 +211,19 @@ Two writers compete for the same row; both use a conditional update, so exactly 
   ```
 
   1 row → build `pacs.002` (`ACCP`, or `RJCT` + reason), journal, outbox `AnswerSent(status, reason, VERDICT)`.
-  0 rows → late or second verdict: journal note `verdict ignored`, metric `tpe.csm.verdict.ignored`, no event.
+  0 rows → late or second verdict, or one for no known transfer: journal note `verdict ignored` (a row with the
+  command type as `message_type`, the transaction's `tx_id` / `debtor_agent_bic` and an empty `xml`: the verdict is
+  not a CSM message), metric `tpe.csm.verdict.ignored`, no event. A redelivered verdict command is dropped by the
+  inbox (`<type>:<debtorAgentBic>:<txId>`, 02 §3) before any of this.
 - **Deadline** (`PollingWorker`, 50 ms, `WHERE answer_status IS NULL AND answer_deadline <= :now FOR UPDATE SKIP
-  LOCKED`): set `RJCT`, `AB05`, `DEADLINE`, build / journal `pacs.002`, outbox `AnswerSent(RJCT, AB05, DEADLINE)`
-  (UC-06 6b).
+  LOCKED`): set `RJCT`, `AB05`, `DEADLINE` with the same conditional update but `answer_deadline <= :now`, build /
+  journal `pacs.002`, outbox `AnswerSent(RJCT, AB05, DEADLINE)` (UC-06 6b), in a `csm.deadline.answer` span on the
+  payment's trace.
+
+The answer `pacs.002` goes from our BIC to `tpe.csm.bic` with `OrgnlTxRef/DbtrAgt`, the `pacs.008`'s `MsgId`, and
+its `EndToEndId` and `UETR` read from the journalled `pacs.008`. `AnswerSent.sentAt` is `answered_at`, the moment the
+answer was decided; `tpe.csm.answer.margin` (a timer) records `answer_deadline − answered_at`; a negative margin, a
+deadline answer decided a poll after the deadline, is not recorded.
 
 `AnswerSent` is published when the answer is decided and journalled, in the same transaction; transmission follows.
 If transmission ultimately fails, the CSM times the payment out and later reports it rejected (UC-06 8a), which the

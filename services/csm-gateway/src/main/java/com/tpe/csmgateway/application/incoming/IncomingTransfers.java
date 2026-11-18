@@ -1,8 +1,10 @@
 package com.tpe.csmgateway.application.incoming;
 
 import com.tpe.csmgateway.domain.incoming.IncomingTransfer;
+import com.tpe.csmgateway.domain.incoming.IncomingTransfer.AnswerStatus;
 import com.tpe.paymentdomain.Bic;
 import com.tpe.paymentdomain.MsgId;
+import com.tpe.paymentdomain.StatusReason;
 import com.tpe.paymentdomain.TxId;
 import java.time.Duration;
 import java.time.Instant;
@@ -28,6 +30,25 @@ public interface IncomingTransfers {
 
     /** The transfer whose answer has {@code answerMsgId}; no lock. */
     Optional<IncomingTransfer> findByAnswerMsgId(MsgId answerMsgId);
+
+    /**
+     * The verdict's answer, if the transfer has none yet and its deadline has not passed (§6.3): {@code VERDICT},
+     * answered now, due for transmission. The conditional update is what lets exactly one answer win, against the
+     * deadline and another instance alike.
+     *
+     * @param reason the reason of a {@code RJCT}, {@code null} for {@code ACCP}
+     * @return the answered transfer; empty if this verdict decided nothing
+     */
+    Optional<IncomingTransfer> decideByVerdict(Bic debtorAgentBic, TxId txId, AnswerStatus status, StatusReason reason,
+            MsgId answerMsgId, Instant now);
+
+    /**
+     * {@code RJCT AB05} decided by {@code DEADLINE}, if the transfer has no answer yet and its deadline has passed
+     * (§6.3, UC-06 6b).
+     *
+     * @return the answered transfer; empty if it was answered meanwhile
+     */
+    Optional<IncomingTransfer> decideByDeadline(Bic debtorAgentBic, TxId txId, MsgId answerMsgId, Instant now);
 
     /** Its decided answer {@code PENDING} again, due at {@code now}: the same {@code pacs.002} is sent once more. */
     void resendAnswer(Bic debtorAgentBic, TxId txId, Instant now);

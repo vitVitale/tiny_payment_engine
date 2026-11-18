@@ -2,9 +2,11 @@ package com.tpe.csmgateway.infrastructure.config;
 
 import com.tpe.contracts.ContractsModule;
 import com.tpe.csmgateway.application.GatewayMetrics;
+import com.tpe.csmgateway.application.answer.AnswerCoordinator;
 import com.tpe.csmgateway.application.correlation.StatusReportCorrelation;
 import com.tpe.csmgateway.application.inbound.InboundMessages;
 import com.tpe.csmgateway.application.incoming.AnswerTransmissions;
+import com.tpe.csmgateway.application.incoming.Answers;
 import com.tpe.csmgateway.application.incoming.CreditTransferReceiving;
 import com.tpe.csmgateway.application.incoming.IncomingTransfers;
 import com.tpe.csmgateway.application.investigation.PaymentStatusRequesting;
@@ -177,11 +179,24 @@ class GatewayConfiguration {
     }
 
     @Bean
+    Answers answers(MessageJournal journal, @Qualifier("answers") Transmitter answerTransmitter,
+            GatewayMetrics metrics, BankDirectory directory, CsmProperties properties) {
+        return new Answers(journal, answerTransmitter, metrics, directory.ownBic(), new Bic(properties.bic()));
+    }
+
+    @Bean
     CreditTransferReceiving creditTransferReceiving(IncomingTransfers transfers, MessageJournal journal,
-            OutboxWriter outbox, @Qualifier("answers") Transmitter answerTransmitter, GatewayMetrics metrics,
-            Spans spans, UlidGenerator ulids, BankDirectory directory, CsmProperties properties) {
-        return new CreditTransferReceiving(transfers, journal, outbox, answerTransmitter, metrics, spans, ulids,
-                directory.ownBic(), new Bic(properties.bic()), properties.answerDeadlineOffset());
+            OutboxWriter outbox, Answers answers, Spans spans, UlidGenerator ulids, BankDirectory directory,
+            CsmProperties properties) {
+        return new CreditTransferReceiving(transfers, journal, outbox, answers, spans, ulids, directory.ownBic(),
+                properties.answerDeadlineOffset());
+    }
+
+    @Bean
+    AnswerCoordinator answerCoordinator(IncomingTransfers transfers, Answers answers, MessageJournal journal,
+            InboxGuard inbox, OutboxWriter outbox, GatewayMetrics metrics, Spans spans, Clock clock,
+            UlidGenerator ulids) {
+        return new AnswerCoordinator(transfers, answers, journal, inbox, outbox, metrics, spans, clock, ulids);
     }
 
     @Bean

@@ -1,21 +1,16 @@
 package com.tpe.csmgateway.application.incoming;
 
-import com.tpe.csmgateway.application.GatewayMetrics;
 import com.tpe.csmgateway.application.incoming.IncomingCreditTransfer.Refused;
 import com.tpe.csmgateway.application.incoming.IncomingCreditTransfer.Taken;
 import com.tpe.csmgateway.application.journal.MessageJournal;
 import com.tpe.csmgateway.application.journal.MessageJournal.Direction;
 import com.tpe.csmgateway.application.journal.MessageJournal.Entry;
 import com.tpe.csmgateway.application.outgoing.CreditTransferSending;
-import com.tpe.csmgateway.application.transmit.Transmitter;
 import com.tpe.csmgateway.domain.incoming.IncomingTransfer;
 import com.tpe.csmgateway.domain.incoming.IncomingTransfer.DecidedBy;
 import com.tpe.iso20022model.CsmEnvelope;
 import com.tpe.iso20022model.CsmMessageType;
-import com.tpe.iso20022model.EnvelopeCodec;
-import com.tpe.iso20022model.Pacs002Builder;
 import com.tpe.iso20022model.Pacs002Builder.Status;
-import com.tpe.iso20022model.Pacs002Builder.StatusReport;
 import com.tpe.messaging.outbox.OutboxWriter;
 import com.tpe.observability.context.Spans;
 import com.tpe.paymentdomain.Bic;
@@ -58,33 +53,22 @@ public class CreditTransferReceiving {
     private final IncomingTransfers transfers;
     private final MessageJournal journal;
     private final OutboxWriter outbox;
-    private final Transmitter answers;
-    private final GatewayMetrics metrics;
+    private final Answers answers;
     private final Spans spans;
     private final UlidGenerator ulids;
     private final Bic ownBic;
-    private final Bic csmBic;
     private final Duration answerDeadlineOffset;
-    private final EnvelopeCodec envelopes = new EnvelopeCodec();
-    private final Pacs002Builder statusReports = new Pacs002Builder();
 
-    /**
-     * @param answers transmits the answers, after the commit
-     * @param csmBic the CSM's BIC, the instructed agent of an answer
-     * @param answerDeadlineOffset {@code tpe.csm.answer-deadline-offset}
-     */
+    /** @param answerDeadlineOffset {@code tpe.csm.answer-deadline-offset} */
     public CreditTransferReceiving(IncomingTransfers transfers, MessageJournal journal, OutboxWriter outbox,
-            Transmitter answers, GatewayMetrics metrics, Spans spans, UlidGenerator ulids, Bic ownBic, Bic csmBic,
-            Duration answerDeadlineOffset) {
+            Answers answers, Spans spans, UlidGenerator ulids, Bic ownBic, Duration answerDeadlineOffset) {
         this.transfers = transfers;
         this.journal = journal;
         this.outbox = outbox;
         this.answers = answers;
-        this.metrics = metrics;
         this.spans = spans;
         this.ulids = ulids;
         this.ownBic = ownBic;
-        this.csmBic = csmBic;
         this.answerDeadlineOffset = Objects.requireNonNull(answerDeadlineOffset, "answerDeadlineOffset");
     }
 
@@ -131,23 +115,16 @@ public class CreditTransferReceiving {
         }
         log.warn("invalid pacs.008 {} from {}, answered RJCT FF01: {}", identity.txId().value(),
                 identity.debtorAgent().value(), violations);
-        MsgId answerMsgId = MsgId.generate(ulids);
         MsgId original = identity.msgId() == null ? NOT_PROVIDED : identity.msgId();
-        if (!transfers.insert(IncomingTransfer.rejectedOnReceipt(identity.debtorAgent(), identity.txId(), original,
-                now, now.plus(answerDeadlineOffset), ReasonCode.FF01.code(), DecidedBy.VALIDATION, answerMsgId,
-                spans.currentTraceparent().orElse(null)))) {
+        IncomingTransfer rejected = IncomingTransfer.rejectedOnReceipt(identity.debtorAgent(), identity.txId(),
+                original, now, now.plus(answerDeadlineOffset), ReasonCode.FF01.code(), DecidedBy.VALIDATION,
+                MsgId.generate(ulids), spans.currentTraceparent().orElse(null));
+        if (!transfers.insert(rejected)) {
             knownAfterAll(xml, identity, false, violations, now);
             return;
         }
         journal.append(in(xml, identity, false, violations, INVALID_ANSWERED, now));
-        String answer = envelopes.join(statusReports.build(new StatusReport(answerMsgId, now, original,
-                CsmMessageType.PACS_008, identity.txId(), identity.endToEndId(), identity.uetr(),
-                identity.debtorAgent(), Status.rejected(ReasonCode.FF01), ownBic, csmBic)));
-        journal.append(new Entry(Direction.OUT, CsmMessageType.PACS_002.version(), answerMsgId.value(),
-                identity.txId(), identity.debtorAgent(), answer, true, List.of(), null, now));
-        metrics.message(Direction.OUT, CsmMessageType.PACS_002.version());
-        metrics.answer(IncomingTransfer.AnswerStatus.RJCT.name(), DecidedBy.VALIDATION.name());
-        answers.transmitAfterCommit(answerMsgId);
+        answers.send(rejected, identity, Status.rejected(ReasonCode.FF01), now);
     }
 
     /**
@@ -164,7 +141,7 @@ public class CreditTransferReceiving {
         String note;
         if (known.get().answered()) {
             transfers.resendAnswer(identity.debtorAgent(), identity.txId(), now);
-            answers.transmitAfterCommit(known.get().answerMsgId());
+            answers.resend(known.get().answerMsgId());
             note = DUPLICATE_ANSWERED;
         } else {
             note = DUPLICATE_DROPPED;
