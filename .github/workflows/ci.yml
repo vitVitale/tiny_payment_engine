@@ -102,15 +102,20 @@ jobs:
           distribution: temurin
           java-version: '25'
           cache: maven
-      - name: Build the sample workload
-        run: ./mvnw -B -pl tests/observability-sample -am package -DskipTests
-      - name: Start the observability profile
-        run: docker compose -f deploy/docker-compose.yml --profile observability up -d --wait alloy mimir loki tempo grafana observability-sample
+      # OBS-AC-01 pays through the harness's services (host processes, which the agent's compose module also collects, 26 §13);
+      # OBS-AC-02 … -04 use the sample workload. The modules' own tests ran in the build job.
+      - name: Install the sample workload, the services and the harness's modules
+        run: ./mvnw -B -pl tests/observability-sample,services/ledger-service,services/risk-service,services/vop-service,services/payment-orchestrator,services/payment-api,services/csm-gateway,simulators/csm-simulator,tests/system-tests -am install -DskipTests
+      - name: Start the infrastructure and the observability profile
+        run: docker compose -f deploy/docker-compose.yml --profile observability up -d --wait postgres kafka oauth2 alloy mimir loki tempo grafana observability-sample
       - name: Pipeline check
-        run: ./mvnw -B -pl tests/system-tests -am verify -Dtpe.observability-stack=true -Dit.test=ObservabilityPipelineIT -Dfailsafe.failIfNoSpecifiedTests=false
+        run: ./mvnw -B -pl tests/system-tests verify -Dtpe.local-stack=true -Dtpe.observability-stack=true -Dit.test='PaymentObservabilityIT,ObservabilityPipelineIT' -Dtest=NoSuchTest -Dsurefire.failIfNoSpecifiedTests=false -Dfailsafe.failIfNoSpecifiedTests=false
       - name: Compose logs
         if: failure()
         run: docker compose -f deploy/docker-compose.yml --profile observability logs
+      - name: Service logs
+        if: failure()
+        run: tail -n +1 tests/system-tests/target/*-systemtest.log || true
 
   # CH-02 and CH-03 (specs/20-testing-strategy.md §5) on the compose stack with its chaos profile, on main builds;
   # M5 moves them into the nightly chaos job with the chaos environment of §5

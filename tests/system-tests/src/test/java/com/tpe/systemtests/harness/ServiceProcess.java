@@ -52,6 +52,38 @@ public final class ServiceProcess {
 
     private static final boolean WINDOWS = System.getProperty("os.name").startsWith("Windows");
 
+    /** The processes up now, by name: the local Alloy's scrape targets ({@link AlloyTargets}). */
+    private static final Map<String, Integer> UP = new TreeMap<>();
+
+    /** The local stack's agent, as {@code docker compose --profile observability} publishes its OTLP gRPC port. */
+    private static final String AGENT_OTLP = "http://localhost:4317";
+
+    /**
+     * What every service is started with besides its own properties: with the compose observability profile
+     * ({@code -Dtpe.observability-stack=true}) the agent's OTLP endpoint, as a pod gets {@code HOST_IP} (26 §6.1).
+     */
+    static Map<String, String> observabilityProperties(boolean observabilityStack) {
+        return observabilityStack ? Map.of("OTEL_EXPORTER_OTLP_ENDPOINT", AGENT_OTLP) : Map.of();
+    }
+
+    private static synchronized void up(String name, int port) {
+        if (UP.isEmpty() && !emptiedAtExit) {
+            // the processes go with the JVM: no stale targets for the agent to scrape after it
+            Runtime.getRuntime().addShutdownHook(new Thread(() -> AlloyTargets.write(Map.of())));
+            emptiedAtExit = true;
+        }
+        UP.put(name, port);
+        AlloyTargets.write(UP);
+    }
+
+    private static boolean emptiedAtExit;
+
+    private static synchronized void down(String name) {
+        if (UP.remove(name) != null) {
+            AlloyTargets.write(UP);
+        }
+    }
+
     private final String name;
     private final ServiceJar service;
     private final Map<String, String> properties;
@@ -123,6 +155,7 @@ public final class ServiceProcess {
         if (!isRunning()) {
             return;
         }
+        down(name);
         process.destroy();
         try {
             if (!process.waitFor(SHUTDOWN.toMillis(), TimeUnit.MILLISECONDS)) {
@@ -142,6 +175,7 @@ public final class ServiceProcess {
         if (!isRunning()) {
             return;
         }
+        down(name);
         try {
             process.destroyForcibly().waitFor();
         } catch (InterruptedException e) {
@@ -204,6 +238,8 @@ public final class ServiceProcess {
             Files.createDirectories(log.getParent());
             var command = new ArrayList<>(List.of(java, "-jar", jar.toString(),
                     "--spring.profiles.active=" + String.join(",", PROFILES), "--server.port=" + port));
+            observabilityProperties(Boolean.getBoolean("tpe.observability-stack"))
+                    .forEach((key, value) -> command.add("--" + key + "=" + value));
             properties.forEach((key, value) -> command.add("--" + key + "=" + value));
             boolean restart = process != null;
             if (!restart) {
@@ -221,6 +257,7 @@ public final class ServiceProcess {
         Process started = process;
         Runtime.getRuntime().addShutdownHook(new Thread(started::destroy));
         awaitReady(started);
+        up(name, port);
     }
 
     private void awaitReady(Process started) {

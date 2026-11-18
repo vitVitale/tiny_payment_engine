@@ -111,6 +111,11 @@ services:
     volumes:
       - ./observability/alloy:/etc/alloy:ro
       - /var/run/docker.sock:/var/run/docker.sock:ro
+      # the system-test harness's services run on the host: its targets list and their log files (modules/compose.alloy)
+      - ..:/repo:ro
+    # the harness's services, scraped on the host (on Linux host.docker.internal is not there by itself)
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     depends_on:
       mimir:
         condition: service_started

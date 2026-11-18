@@ -1,17 +1,21 @@
 package com.tpe.systemtests.observability;
 
+import static com.tpe.systemtests.harness.ObservabilityBackends.LOKI;
+import static com.tpe.systemtests.harness.ObservabilityBackends.MIMIR;
+import static com.tpe.systemtests.harness.ObservabilityBackends.TEMPO;
+import static com.tpe.systemtests.harness.ObservabilityBackends.backend;
+import static com.tpe.systemtests.harness.ObservabilityBackends.backendJson;
+import static com.tpe.systemtests.harness.ObservabilityBackends.encode;
+import static com.tpe.systemtests.harness.ObservabilityBackends.ok;
+import static com.tpe.systemtests.harness.ObservabilityBackends.send;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.awaitility.Awaitility.await;
 
 import com.tpe.observability.config.SloBoundaries;
 import com.tpe.observability.test.PrometheusScrape;
-import java.io.IOException;
+import com.tpe.systemtests.harness.ObservabilityBackends;
 import java.net.URI;
-import java.net.URLEncoder;
-import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
-import java.net.http.HttpResponse;
-import java.nio.charset.StandardCharsets;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
@@ -31,10 +35,10 @@ import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.json.JsonMapper;
 
 /**
- * OBS-AC-01 … -04 in their M0 form (specs/26-observability.md §15, issue #19) against
+ * OBS-AC-02 … -04 in their M0 form (specs/26-observability.md §15, issue #19) against
  * {@code docker compose -f deploy/docker-compose.yml --profile observability up -d --wait}: one request to the sample
  * workload, then its metrics, logs and trace in Mimir, Loki and Tempo, and the Grafana Tempo → Loki correlation.
- * OBS-AC-01 runs first: its 60 s count from the request.
+ * OBS-AC-01 checks a real payment ({@link PaymentObservabilityIT}, issue #126).
  */
 @EnabledIfSystemProperty(named = "tpe.observability-stack", matches = "true",
         disabledReason = "needs the compose observability profile; run with -Dtpe.observability-stack=true")
@@ -42,11 +46,7 @@ import tools.jackson.databind.json.JsonMapper;
 class ObservabilityPipelineIT {
 
     private static final String SAMPLE = "http://localhost:8095";
-    private static final String MIMIR = "http://localhost:9009";
-    private static final String LOKI = "http://localhost:3100";
-    private static final String TEMPO = "http://localhost:3200";
     private static final String GRAFANA = "http://localhost:3000";
-    private static final String TENANT = "tpe-local";
     private static final String APPLICATION = "observability-sample";
     private static final String LATENCY_BUCKETS = "http_server_requests_seconds_bucket";
     private static final String OPEN_METRICS = "application/openmetrics-text; version=1.0.0";
@@ -57,14 +57,11 @@ class ObservabilityPipelineIT {
     private static final Map<String, String> PIPELINE_LABELS = Map.of("namespace", "tpe",
             "pod", "tpe-observability-sample-1", "instance", "tpe-observability-sample-1", "env", "local",
             "cluster", "compose");
-    /** OBS-AC-01. */
+    /** OBS-AC-01's bound (§15), which the later checks keep. */
     private static final Duration WITHIN = Duration.ofSeconds(60);
-    /** For Mimir to answer after `up --wait`; it has no compose healthcheck (distroless image). */
-    private static final Duration MIMIR_STARTUP = Duration.ofSeconds(60);
     /** The window Grafana's Tempo → Loki correlation searches around a span (§7). */
     private static final Duration CORRELATION_SHIFT = Duration.ofMinutes(5);
 
-    private static final HttpClient HTTP = HttpClient.newHttpClient();
     private static final JsonMapper JSON = JsonMapper.builder().build();
     private static final Clock CLOCK = Clock.systemUTC();
 
@@ -74,24 +71,12 @@ class ObservabilityPipelineIT {
 
     @BeforeAll
     static void handleASamplePayment() {
-        await().atMost(MIMIR_STARTUP).ignoreExceptions()
-                .until(() -> send(HttpRequest.newBuilder(URI.create(MIMIR + "/ready")).build()).statusCode() == 200);
+        await().atMost(ObservabilityBackends.MIMIR_STARTUP).ignoreExceptions().until(ObservabilityBackends::mimirReady);
         requested = CLOCK.instant();
         JsonNode handled = JSON.readTree(send(HttpRequest.newBuilder(URI.create(SAMPLE + "/sample/payments"))
                 .POST(HttpRequest.BodyPublishers.noBody()).build()).body());
         traceId = handled.get("traceId").asString();
         paymentId = handled.get("paymentId").asString();
-    }
-
-    @Test
-    @Order(1)
-    void OBS_AC_01_mimirLokiAndTempoHoldTheRunsDataWithin60s() {
-        Duration left = Duration.between(CLOCK.instant(), requested.plus(WITHIN));
-
-        await().atMost(left).ignoreExceptions().until(() -> traceFound()
-                && !logStreams(LOKI, traceLogQuery()).isEmpty()
-                && requestCountInMimir() >= 1
-                && exemplarTraceIds().contains(traceId));
     }
 
     @Test
@@ -203,20 +188,8 @@ class ObservabilityPipelineIT {
     }
 
     private static Set<String> exemplarTraceIds() {
-        JsonNode data = backendJson(MIMIR + "/prometheus/api/v1/query_exemplars?query="
-                + encode(LATENCY_BUCKETS + "{application=\"" + APPLICATION + "\",uri=\"/sample/payments\"}")
-                + "&start=" + requested.minusSeconds(60).getEpochSecond()
-                + "&end=" + CLOCK.instant().plusSeconds(60).getEpochSecond()).get("data");
-        Set<String> ids = new HashSet<>();
-        for (JsonNode series : data) {
-            for (JsonNode exemplar : series.get("exemplars")) {
-                JsonNode id = exemplar.get("labels").get("trace_id");
-                if (id != null) {
-                    ids.add(id.asString());
-                }
-            }
-        }
-        return ids;
+        return ObservabilityBackends.exemplarTraceIds(LATENCY_BUCKETS + "{application=\"" + APPLICATION
+                + "\",uri=\"/sample/payments\"}", requested.minusSeconds(60), CLOCK.instant().plusSeconds(60));
     }
 
     /** The streams of a LogQL query around the run, at Loki or through Grafana's Loki data source. */
@@ -244,39 +217,9 @@ class ObservabilityPipelineIT {
         return names;
     }
 
-    /** A backend directly, as tenant {@link #TENANT}. */
-    private static HttpResponse<String> backend(String url) {
-        return send(HttpRequest.newBuilder(URI.create(url)).timeout(Duration.ofSeconds(10))
-                .header("X-Scope-OrgID", TENANT).build());
-    }
-
-    private static JsonNode backendJson(String url) {
-        return ok(url, backend(url));
-    }
-
     /** Grafana's API; its data sources add the tenant header. */
     private static JsonNode viaGrafana(String path) {
         String url = GRAFANA + path;
         return ok(url, send(HttpRequest.newBuilder(URI.create(url)).timeout(Duration.ofSeconds(10)).build()));
-    }
-
-    private static JsonNode ok(String url, HttpResponse<String> response) {
-        assertThat(response.statusCode()).as("GET %s: %s", url, response.body()).isEqualTo(200);
-        return JSON.readTree(response.body());
-    }
-
-    private static HttpResponse<String> send(HttpRequest request) {
-        try {
-            return HTTP.send(request, HttpResponse.BodyHandlers.ofString());
-        } catch (IOException e) {
-            throw new IllegalStateException(request.uri() + ": " + e, e);
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            throw new IllegalStateException(e);
-        }
-    }
-
-    private static String encode(String value) {
-        return URLEncoder.encode(value, StandardCharsets.UTF_8);
     }
 }

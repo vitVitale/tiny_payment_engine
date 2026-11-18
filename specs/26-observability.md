@@ -488,7 +488,7 @@ flag (§6.2) instead of a daily scan.
 
 | Environment | Stack | Purpose |
 |---|---|---|
-| Local (`deploy/docker-compose.yml`, profile `observability`) | Alloy (agent config, compose discovery instead of Kubernetes, no node exporter; no gateway, so the agent writes to the backends and nothing is redacted), Mimir, Loki, Tempo single-binary (no metrics generator, so no service map), Grafana with provisioned data sources (the dashboards of §9 join them with M5); tenant `tpe-local`; ports Grafana 3000, OTLP 4317 / 4318; the sample workload `tests/observability-sample` | develop dashboards and spans; off by default to keep the stack light |
+| Local (`deploy/docker-compose.yml`, profile `observability`) | Alloy (agent config, compose discovery instead of Kubernetes, no node exporter; no gateway, so the agent writes to the backends and nothing is redacted), Mimir, Loki, Tempo single-binary (no metrics generator, so no service map), Grafana with provisioned data sources (the dashboards of §9 join them with M5); tenant `tpe-local`; ports Grafana 3000, OTLP 4317 / 4318; the sample workload `tests/observability-sample`. The system-test harness runs the services as host processes on random ports, not containers: the compose module also scrapes them on the Docker host from the harness's Prometheus file-discovery list `tests/system-tests/target/alloy-targets.json` and tails their log files `target/<name>-systemtest.log` (both read through a read-only mount of the repository, labelled as containers are, §3, with `env` `local`); run with `-Dtpe.observability-stack=true`, the harness gives every service `OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4317` | develop dashboards and spans; off by default to keep the stack light |
 | CI system tests | same compose profile on `main` builds | OBS-AC-01 … -10: pipeline conformance, trace contract, PII canaries |
 | Performance / chaos ([20 §5](20-testing-strategy.md#5-failure-injection-scenarios)) | production charts at small scale, tenant `tpe-perf`, Alertmanager routed to the receiver stub | rules evaluated exactly as in production; budget report; Pyroscope |
 | Staging, production | §6, §7 | |
@@ -508,8 +508,9 @@ M5 performance-run measurements.
 ## 15. Acceptance criteria
 
 - **OBS-AC-01** Pipeline conformance (CI, compose `observability` profile): after one outgoing and one incoming
-  payment, Mimir, Loki and Tempo each hold that run's data within 60 s. Until payments exist (M3 / M4), checked
-  against the sample workload's request.
+  payment, Mimir, Loki and Tempo each hold that run's data within 60 s. From M3 with a real outgoing payment through
+  the system-test harness (its trace, its log lines by `payment_id` / `trace_id`, its metrics), counted from its
+  `202`; the incoming one joins with M4.
 - **OBS-AC-02** Every series named by the telemetry contract test exists in Mimir with the identical name and label
   set, including `le` buckets at every SLO threshold; no series in Mimir has a label outside §3 and the allow-list.
 - **OBS-AC-03** A latency histogram sample in Mimir carries an exemplar whose trace id resolves in Tempo.
