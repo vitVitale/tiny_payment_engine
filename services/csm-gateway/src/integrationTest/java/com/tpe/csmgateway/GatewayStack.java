@@ -98,6 +98,7 @@ public abstract class GatewayStack {
     void cleanSlate() {
         CLOCK.set(START);
         jdbc.sql("DELETE FROM status_requests").update();
+        jdbc.sql("DELETE FROM incoming_transfers").update();
         jdbc.sql("DELETE FROM outgoing_transfers").update();
         jdbc.sql("DELETE FROM message_journal").update();
         jdbc.sql("DELETE FROM outbox").update();

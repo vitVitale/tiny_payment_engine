@@ -13,29 +13,21 @@ import com.tpe.csmgateway.domain.outgoing.StatusOutcome;
 import com.tpe.csmgateway.domain.outgoing.StatusOutcome.Effect;
 import com.tpe.csmgateway.domain.outgoing.StatusSource;
 import com.tpe.iso20022model.CsmEnvelope;
-import com.tpe.iso20022model.CsmMessageType;
-import com.tpe.iso20022model.EnvelopeCodec;
-import com.tpe.iso20022model.EnvelopeCodec.Accepted;
-import com.tpe.iso20022model.EnvelopeCodec.Part;
-import com.tpe.iso20022model.EnvelopeCodec.Rejected;
-import com.tpe.iso20022model.XsdValidator.Violation;
 import com.tpe.iso20022model.pacs002v10.PaymentTransaction110;
 import com.tpe.iso20022model.pacs002v10.StatusReason6Choice;
 import com.tpe.paymentdomain.Bic;
 import com.tpe.paymentdomain.DomainValidationException;
 import com.tpe.paymentdomain.MsgId;
 import com.tpe.paymentdomain.TxId;
-import java.time.Clock;
 import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.transaction.annotation.Transactional;
 
 /**
- * The CSM inbound endpoint's work for a {@code pacs.002} (specs/15-csm-gateway.md §6.4, UC-04 6–8), in one
- * transaction: validate, journal, then match {@code OrgnlTxId} with {@code OrgnlTxRef/DbtrAgt} = our BIC to an
+ * The CSM inbound endpoint's work for a schema-valid {@code pacs.002} (specs/15-csm-gateway.md §6.4, UC-04 6–8), in one
+ * transaction: journal, then match {@code OrgnlTxId} with {@code OrgnlTxRef/DbtrAgt} = our BIC to an
  * outgoing transfer (fallback: the {@code OrgnlMsgId}, of the {@code pacs.008} or of a {@code pacs.028} we sent,
  * ADR-010). The source is {@code INVESTIGATION} when the report answers a {@code pacs.028} we sent (its
  * {@code OrgnlMsgId} is a {@code status_requests.msg_id}), else {@code STATUS_REPORT}. The first final status is
@@ -50,20 +42,10 @@ import org.springframework.transaction.annotation.Transactional;
  */
 public class StatusReportCorrelation {
 
-    /** The outcome of {@link #receive(String)}. */
-    public sealed interface Receipt permits Journalled, Unparsable {}
-
-    /** Journalled (valid or not); the transport answer is {@code 202}. */
-    public record Journalled() implements Receipt {}
-
-    /** The envelope cannot be parsed at all: {@code 400} (§3.1), nothing journalled. */
-    public record Unparsable(List<Violation> violations) implements Receipt {}
-
     static final String UNCORRELATED = "uncorrelated";
     static final String DUPLICATE = "duplicate status";
     static final String CONTRADICTING = "contradicting status, first kept";
     static final String INFORMATIONAL = "informational, no effect";
-    static final String NOT_HANDLED = "not handled yet";
 
     private static final Logger log = LoggerFactory.getLogger(StatusReportCorrelation.class);
     private static final String SPAN = "csm.status-report";
@@ -73,42 +55,20 @@ public class StatusReportCorrelation {
     private final MessageJournal journal;
     private final OutgoingEvents events;
     private final GatewayMetrics metrics;
-    private final Clock clock;
     private final Bic ownBic;
-    private final EnvelopeCodec envelopes = new EnvelopeCodec();
 
     public StatusReportCorrelation(OutgoingTransfers transfers, StatusRequests statusRequests, MessageJournal journal,
-            OutgoingEvents events, GatewayMetrics metrics, Clock clock, Bic ownBic) {
+            OutgoingEvents events, GatewayMetrics metrics, Bic ownBic) {
         this.transfers = transfers;
         this.statusRequests = statusRequests;
         this.journal = journal;
         this.events = events;
         this.metrics = metrics;
-        this.clock = clock;
         this.ownBic = ownBic;
     }
 
-    @Transactional
-    public Receipt receive(String xml) {
-        Instant now = clock.instant();
-        EnvelopeCodec.SplitResult split = envelopes.split(xml);
-        if (split instanceof Rejected rejected) {
-            if (rejected.part() == Part.ENVELOPE) {
-                return new Unparsable(rejected.violations());
-            }
-            List<String> codes = rejected.violations().stream().map(Violation::code).distinct().toList();
-            log.warn("journalled an invalid {} from the CSM: {}", rejected.part(), codes);
-            journal.append(new Entry(MessageJournal.Direction.IN, "UNKNOWN", null, null, null, xml, false, codes,
-                    null, now));
-            return new Journalled();
-        }
-        CsmEnvelope envelope = ((Accepted) split).envelope();
-        metrics.message(MessageJournal.Direction.IN, envelope.messageType().version());
-        if (envelope.messageType() != CsmMessageType.PACS_002) {
-            journal.append(new Entry(MessageJournal.Direction.IN, envelope.messageType().version(), null, null, null,
-                    xml, true, List.of(), NOT_HANDLED, now));
-            return new Journalled();
-        }
+    /** A schema-valid {@code pacs.002}, journalled with what it did; the caller's transaction. */
+    public void correlate(String xml, CsmEnvelope envelope, Instant now) {
         var report = ((com.tpe.iso20022model.pacs002v10.Document) envelope.document()).getFIToFIPmtStsRpt();
         String msgId = report.getGrpHdr().getMsgId();
         Optional<PaymentTransaction110> first = report.getTxInfAndSts().stream().findFirst();
@@ -130,7 +90,6 @@ public class StatusReportCorrelation {
         }
         journal.append(new Entry(MessageJournal.Direction.IN, envelope.messageType().version(), msgId,
                 transfer.map(OutgoingTransfer::txId).orElse(txId), debtorAgent, xml, true, List.of(), note, now));
-        return new Journalled();
     }
 
     /** The status request whose {@code pacs.028} this report answers, if it answers one. */

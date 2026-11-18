@@ -40,6 +40,16 @@ class MicrometerGatewayMetrics implements GatewayMetrics {
     }
 
     @Override
+    public void answer(String status, String decidedBy) {
+        Counter.builder("tpe.csm.answer")
+                .description("Answers decided for incoming transfers, by status and what decided them")
+                .tag("status", status)
+                .tag("decidedBy", decidedBy)
+                .register(registry)
+                .increment();
+    }
+
+    @Override
     public void transmitAttempt(String type) {
         Counter.builder("tpe.csm.transmit.attempts")
                 .description("Transmission attempts to the CSM, by message version")

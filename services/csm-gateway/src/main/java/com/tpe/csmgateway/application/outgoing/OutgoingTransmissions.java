@@ -4,7 +4,7 @@ import com.tpe.csmgateway.application.GatewayMetrics;
 import com.tpe.csmgateway.application.journal.MessageJournal;
 import com.tpe.csmgateway.application.transmit.TransmissionQueue;
 import com.tpe.csmgateway.domain.outgoing.OutgoingTransfer;
-import com.tpe.csmgateway.domain.outgoing.OutgoingTransfer.TransmitStatus;
+import com.tpe.csmgateway.domain.transmit.TransmitStatus;
 import com.tpe.iso20022model.CsmMessageType;
 import com.tpe.paymentdomain.MsgId;
 import com.tpe.paymentdomain.ReasonCode;

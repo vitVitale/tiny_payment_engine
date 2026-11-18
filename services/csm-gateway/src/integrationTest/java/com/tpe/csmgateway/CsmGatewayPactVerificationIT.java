@@ -7,6 +7,7 @@ import static org.awaitility.Awaitility.await;
 
 import au.com.dius.pact.provider.MessageAndMetadata;
 import au.com.dius.pact.provider.PactVerifyProvider;
+import au.com.dius.pact.provider.junit5.HttpTestTarget;
 import au.com.dius.pact.provider.junit5.MessageTestTarget;
 import au.com.dius.pact.provider.junit5.PactVerificationContext;
 import au.com.dius.pact.provider.junitsupport.Provider;
@@ -35,8 +36,10 @@ import tools.jackson.databind.json.JsonMapper;
 /**
  * csm-gateway verifies every collected pact that names it (specs/20-testing-strategy.md §10.3): M-02, the outgoing
  * {@code CreditTransferSettled}, {@code CreditTransferRejected} and {@code CreditTransferNotSent} the orchestrator
- * reads from {@code csm.inbound.events}, from a status report and from an investigation's answer. Runs only with
- * {@code -Ppact-verify}, against this commit's pacts and the last release's ({@link PactVerification}).
+ * reads from {@code csm.inbound.events}, from a status report and from an investigation's answer; and P-07, the CSM
+ * inbound endpoint the simulator posts to, whose interactions need no state: every message is taken or refused on
+ * what it is alone. Runs only with {@code -Ppact-verify}, against this commit's pacts and the last release's
+ * ({@link PactVerification}).
  *
  * <p>An event is produced through the real path: a {@code SendCreditTransfer} on {@code csm.outbound.commands}, sent to
  * the CSM (WireMock) and answered by a {@code pacs.002} on the CSM transport, or, past its {@code sendBy}, never sent;
@@ -56,12 +59,14 @@ class CsmGatewayPactVerificationIT extends GatewayStack {
 
     @BeforeEach
     void target(PactVerificationContext context) {
-        context.setTarget(new MessageTestTarget());
+        context.setTarget(context.getInteraction().isAsynchronousMessage()
+                ? new MessageTestTarget()
+                : new HttpTestTarget("localhost", port));
     }
 
     @TestTemplate
     @ExtendWith(PactVerificationSpringProvider.class)
-    void PACT_M02_verify(PactVerificationContext context) {
+    void PACT_M02_PACT_P07_verify(PactVerificationContext context) {
         context.verifyInteraction();
     }
 

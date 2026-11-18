@@ -48,6 +48,26 @@ class AdminApiIT extends GatewayStack {
     }
 
     @Test
+    void incomingTransactionsAreListedByDebtorAgentWithTheirAnswer() {
+        inbound(IncomingPacs008.pacs008("PEERM-1", "TX-IN", IncomingPacs008.PEER_BIC, START));
+        inbound(IncomingPacs008.schemaInvalid(
+                IncomingPacs008.pacs008("OTHRM-1", "TX-IN", IncomingPacs008.OTHER_BIC, START)));
+        String operator = StaffTokens.token("ops-1", "BACKOFFICE_OPERATOR");
+
+        var all = get("/v1/transactions/TX-IN", operator);
+        var other = get("/v1/transactions/TX-IN?debtorAgentBic=OTHRDEFFXXX", operator);
+
+        assertThat(all.getBody()).contains("\"direction\":\"INCOMING\"", "\"debtorAgentBic\":\"PEERDEFFXXX\"",
+                "\"debtorAgentBic\":\"OTHRDEFFXXX\"", "\"msgId\":\"PEERM-1\"",
+                "\"answerDeadline\":\"2026-11-15T10:00:05.000Z\"", "\"answerStatus\":\"RJCT\"",
+                "\"answerReason\":\"FF01\"", "\"answerDecidedBy\":\"VALIDATION\"");
+        assertThat(other.getBody()).contains("\"debtorAgentBic\":\"OTHRDEFFXXX\"")
+                .doesNotContain("PEERDEFFXXX");
+        assertThat(get("/v1/journal?txId=TX-IN&debtorAgentBic=OTHRDEFFXXX", operator).getBody())
+                .contains("\"direction\":\"IN\"", "\"direction\":\"OUT\"", "\"messageType\":\"pacs.002.001.10\"");
+    }
+
+    @Test
     void anUnknownTransactionIsAnEmptyList() {
         var response = get("/v1/transactions/TX-NONE", StaffTokens.token("ops-1", "BACKOFFICE_OPERATOR"));
 

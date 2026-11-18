@@ -60,9 +60,11 @@ class JdbcMessageJournal implements MessageJournal {
     public List<Journalled> byTransaction(TxId txId, Optional<Bic> debtorAgentBic) {
         return jdbc.sql("""
                 SELECT j.id, j.direction, j.message_type, j.msg_id, j.tx_id, j.debtor_agent_bic, j.xml, j.valid,
-                       j.validation_errors::text AS validation_errors, j.note, j.at, o.transmit_status
+                       j.validation_errors::text AS validation_errors, j.note, j.at,
+                       COALESCE(o.transmit_status, i.transmit_status) AS transmit_status
                   FROM message_journal j
                   LEFT JOIN outgoing_transfers o ON j.direction = 'OUT' AND o.msg_id = j.msg_id
+                  LEFT JOIN incoming_transfers i ON j.direction = 'OUT' AND i.answer_msg_id = j.msg_id
                  WHERE j.tx_id = :txId AND (CAST(:bic AS VARCHAR) IS NULL OR j.debtor_agent_bic = :bic)
                  ORDER BY j.id""")
                 .param("txId", txId.value())

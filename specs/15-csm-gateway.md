@@ -46,7 +46,8 @@ ISO 20022 codec and builders come from `iso20022-model`.
 
 `Content-Type: application/xml`. The HTTP response is a transport acknowledgement only: `202 Accepted` once the
 message is journalled (inbound) / accepted by the CSM (outbound); business answers always come back as separate
-messages. `400` only if the envelope cannot be parsed at all (no `TxId` can be extracted). In `prod` the
+messages. `400` only if the envelope cannot be parsed at all, or no `TxId` (with its `DbtrAgt` BIC) can be extracted
+from a `pacs.008` (§6.2); nothing is journalled then. In `prod` the
 connection uses mTLS; `local` / `test` use plain HTTP.
 
 ### 3.2 Admin API (role `BACKOFFICE_OPERATOR`, read-only)
@@ -54,7 +55,9 @@ connection uses mTLS; `local` / `test` use plain HTTP.
 - `GET /v1/journal?txId=…[&debtorAgentBic=…]` — all journalled messages for a `TxId` (XML, direction, debtor agent BIC,
   timestamps, transport status); `debtorAgentBic` narrows it to one transaction.
 - `GET /v1/transactions/{txId}[?debtorAgentBic=…]` — every outgoing and incoming transaction record with that `TxId`
-  (§5), each with its `debtorAgentBic`. A `TxId` alone is not an identity: two Originator PSPs may send the same one
+  (§5), each with its `debtorAgentBic`, the outgoing one first; an incoming one carries its answer (`answerStatus`,
+  `answerReason`, `answerDecidedBy`, `answeredAt`, `answerMsgId`) and the answer's transmit status. A `TxId` alone is
+  not an identity: two Originator PSPs may send the same one
   ([ADR-010](../architecture/decisions/ADR-010-incoming-transaction-identity.md)).
 
 ## 4. Messaging
@@ -100,7 +103,7 @@ CREATE TABLE incoming_transfers (
   answer_reason    VARCHAR(4),
   answer_decided_by VARCHAR(10) CHECK (answer_decided_by IN ('VERDICT','DEADLINE','VALIDATION')),
   answered_at      TIMESTAMPTZ,
-  answer_msg_id    VARCHAR(35),
+  answer_msg_id    VARCHAR(35) UNIQUE,
   transmit_status  VARCHAR(10) CHECK (transmit_status IN ('PENDING','DELIVERED','GAVE_UP')),
   transmit_attempts INT NOT NULL DEFAULT 0,
   next_transmit_at TIMESTAMPTZ,
@@ -112,6 +115,8 @@ CREATE TABLE incoming_transfers (
   PRIMARY KEY (debtor_agent_bic, tx_id)
 );
 CREATE INDEX incoming_unanswered ON incoming_transfers (answer_deadline) WHERE answer_status IS NULL;
+CREATE INDEX incoming_tx ON incoming_transfers (tx_id);               -- the admin API, across debtor agents
+CREATE INDEX incoming_transmit_due ON incoming_transfers (next_transmit_at) WHERE transmit_status = 'PENDING';
 
 CREATE TABLE status_requests (
   debtor_agent_bic VARCHAR(11) NOT NULL,          -- ADR-010; our own BIC for outgoing transfers
@@ -173,14 +178,22 @@ Transmit rules for `pacs.008`:
 
 Endpoint, one transaction:
 
-1. Validate envelope + document against XSD and check `InstdAgt` / `CdtrAgt` BIC = our BIC, `IntrBkSttlmCcy = EUR`,
-   `NbOfTxs = 1`. Journal `IN` with the result.
-2. Invalid but `TxId` readable → create `incoming_transfers` row with `answer_status = RJCT`, `answer_reason = FF01`,
-   `answer_decided_by = VALIDATION`, transmit `PENDING`. No event — no payment is created (UC-06 1a).
-3. Duplicate (`DbtrAgt` BIC, `TxId`) (row exists): if an answer was decided → reset `transmit_status = PENDING` to re-send the same
-   answer `pacs.002` (same `answer_msg_id`); else drop. Journal note either way; no event (UC-06 1b).
-4. New: insert row with `received_at = now`, `answer_deadline = now + answer-deadline-offset`; outbox
-   `CreditTransferReceived`. Commit → `202`.
+1. Validate envelope + document against XSD and check `CdtrAgt` BIC = our BIC (and `InstdAgt`, where given),
+   `IntrBkSttlmCcy = EUR`, `NbOfTxs = 1`, and that every field the event carries is a valid domain value. Journal `IN`
+   with the result (the violation codes in `validation_errors`).
+2. Invalid but `TxId` and `DbtrAgt` BIC readable → create `incoming_transfers` row with `answer_status = RJCT`,
+   `answer_reason = FF01`, `answer_decided_by = VALIDATION`, `answered_at = received_at = now`, `answer_deadline` as
+   in 4, transmit `PENDING`; build, journal `OUT` and transmit the answer `pacs.002` (from our BIC to `tpe.csm.bic`,
+   `OrgnlTxRef/DbtrAgt`; `OrgnlMsgId` `NOTPROVIDED` if the `MsgId` cannot be read). No event — no payment is created
+   (UC-06 1a). The identity of an invalid message is read without a DTD: a DOCTYPE is skipped, never processed, and an
+   entity is never resolved (GW-AC-14); reading stops at the first error, keeping what came before. With no readable
+   `TxId` and `DbtrAgt` BIC there is nothing to answer: `400`, nothing journalled (§3.1).
+3. Duplicate (`DbtrAgt` BIC, `TxId`) (row exists), valid or not: if an answer was decided → reset
+   `transmit_status = PENDING` to re-send the same answer `pacs.002` (same `answer_msg_id`), within its give-up window
+   (§6.5); else drop. Journal note either way; no event (UC-06 1b).
+4. New: insert row with `received_at = now`, `answer_deadline = now + answer-deadline-offset`, `trace_context` = the
+   request's server span, the root of the incoming payment's trace (ADR-014); outbox `CreditTransferReceived`.
+   Commit → `202`.
 
 ### 6.3 Answer coordinator (exactly one answer per `TxId`)
 
