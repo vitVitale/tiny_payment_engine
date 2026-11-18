@@ -10,6 +10,7 @@ import com.tpe.csmgateway.domain.incoming.IncomingTransfer.DecidedBy;
 import com.tpe.csmgateway.domain.transmit.TransmitStatus;
 import com.tpe.paymentdomain.Bic;
 import com.tpe.paymentdomain.MsgId;
+import com.tpe.paymentdomain.StatusReason;
 import com.tpe.paymentdomain.TxId;
 import java.sql.ResultSet;
 import java.sql.SQLException;
@@ -78,6 +79,39 @@ class JdbcIncomingTransfers implements IncomingTransfers {
     public Optional<IncomingTransfer> findByAnswerMsgId(MsgId answerMsgId) {
         return jdbc.sql("SELECT " + COLUMNS + " FROM incoming_transfers WHERE answer_msg_id = :msgId")
                 .param("msgId", answerMsgId.value()).query(JdbcIncomingTransfers::row).optional();
+    }
+
+    @Override
+    public Optional<IncomingTransfer> decideByVerdict(Bic debtorAgentBic, TxId txId, AnswerStatus status,
+            StatusReason reason, MsgId answerMsgId, Instant now) {
+        return jdbc.sql("""
+                UPDATE incoming_transfers
+                   SET answer_status = :status, answer_reason = :reason, answer_decided_by = 'VERDICT',
+                       answered_at = :now, answer_msg_id = :msgId, transmit_status = 'PENDING', next_transmit_at = :now,
+                       version = version + 1
+                 WHERE debtor_agent_bic = :bic AND tx_id = :txId
+                   AND answer_status IS NULL AND answer_deadline > :now
+                RETURNING""" + " " + COLUMNS)
+                .param("status", status.name()).param("reason", reason == null ? null : reason.code())
+                .param("now", timestamp(now))
+                .param("msgId", answerMsgId.value()).param("bic", debtorAgentBic.value()).param("txId", txId.value())
+                .query(JdbcIncomingTransfers::row).optional();
+    }
+
+    @Override
+    public Optional<IncomingTransfer> decideByDeadline(Bic debtorAgentBic, TxId txId, MsgId answerMsgId,
+            Instant now) {
+        return jdbc.sql("""
+                UPDATE incoming_transfers
+                   SET answer_status = 'RJCT', answer_reason = 'AB05', answer_decided_by = 'DEADLINE',
+                       answered_at = :now, answer_msg_id = :msgId, transmit_status = 'PENDING', next_transmit_at = :now,
+                       version = version + 1
+                 WHERE debtor_agent_bic = :bic AND tx_id = :txId
+                   AND answer_status IS NULL AND answer_deadline <= :now
+                RETURNING""" + " " + COLUMNS)
+                .param("now", timestamp(now)).param("msgId", answerMsgId.value())
+                .param("bic", debtorAgentBic.value()).param("txId", txId.value())
+                .query(JdbcIncomingTransfers::row).optional();
     }
 
     @Override

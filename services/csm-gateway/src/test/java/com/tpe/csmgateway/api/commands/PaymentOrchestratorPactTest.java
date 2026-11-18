@@ -17,6 +17,7 @@ import au.com.dius.pact.core.model.annotations.Pact;
 import com.tpe.contracts.Direction;
 import com.tpe.contracts.RequestPaymentStatus;
 import com.tpe.contracts.SendCreditTransfer;
+import com.tpe.csmgateway.application.answer.AnswerCoordinator;
 import com.tpe.csmgateway.application.investigation.PaymentStatusRequesting;
 import com.tpe.csmgateway.application.outgoing.CreditTransferSending;
 import com.tpe.paymentdomain.Money;
@@ -32,8 +33,9 @@ import org.mockito.ArgumentCaptor;
  * M-01, consumer csm-gateway (specs/20-testing-strategy.md §10.1, §10.2): the {@code SendCreditTransfer} of
  * payment-orchestrator on {@code csm.outbound.commands}, through the real listener and {@code ContractValidator} up
  * to the sending service, which is mocked. The body pins the fields the gateway reads and those the contract requires;
- * the times keep {@code acceptedAt < sendBy < deadlineAt}. The other command types follow with the work that consumes
- * them; the provider verification comes with E2E-O-01.
+ * the times keep {@code acceptedAt < sendBy < deadlineAt}. {@code AcceptCreditTransfer} and
+ * {@code RejectCreditTransfer}, which the gateway consumes already, join once payment-orchestrator produces them
+ * (its incoming flow): a pact interaction its provider verification cannot produce would fail that verification.
  */
 @ExtendWith(PactConsumerTestExt.class)
 @PactTestFor(providerName = PaymentOrchestratorPactTest.PROVIDER, providerType = ProviderType.ASYNCH,
@@ -52,7 +54,8 @@ class PaymentOrchestratorPactTest {
 
     private final CreditTransferSending sending = mock(CreditTransferSending.class);
     private final PaymentStatusRequesting statusRequesting = mock(PaymentStatusRequesting.class);
-    private final CsmCommandListener listener = new CsmCommandListener(sending, statusRequesting);
+    private final CsmCommandListener listener = new CsmCommandListener(sending, statusRequesting,
+            mock(AnswerCoordinator.class));
 
     @Pact(consumer = CONSUMER)
     V4Pact sendCreditTransfer(MessagePactBuilder builder) {

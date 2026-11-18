@@ -57,6 +57,16 @@ class JdbcMessageJournal implements MessageJournal {
     }
 
     @Override
+    public Optional<String> inboundXml(String msgId, TxId txId, Bic debtorAgentBic) {
+        return jdbc.sql("""
+                SELECT xml FROM message_journal
+                 WHERE direction = 'IN' AND msg_id = :msgId AND tx_id = :txId AND debtor_agent_bic = :bic AND valid
+                 ORDER BY id LIMIT 1""")
+                .param("msgId", msgId).param("txId", txId.value()).param("bic", debtorAgentBic.value())
+                .query(String.class).optional();
+    }
+
+    @Override
     public List<Journalled> byTransaction(TxId txId, Optional<Bic> debtorAgentBic) {
         return jdbc.sql("""
                 SELECT j.id, j.direction, j.message_type, j.msg_id, j.tx_id, j.debtor_agent_bic, j.xml, j.valid,
