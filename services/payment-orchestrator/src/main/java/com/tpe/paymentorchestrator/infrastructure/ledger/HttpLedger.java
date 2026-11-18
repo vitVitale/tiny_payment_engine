@@ -24,9 +24,10 @@ import tools.jackson.databind.json.JsonMapper;
 
 /**
  * ledger-service's Posting API (specs/12-ledger-service.md §3.1) over HTTP, connect timeout 200 ms and the read
- * timeout the runner computed (specs/00-engineering-baseline.md §8). The hold id is the {@code paymentId}; the
- * {@code Idempotency-Key} is {@code hold-create:<holdId>}, {@code hold-settle-on-us:<holdId>} or
- * {@code hold-release:<holdId>}, so a retry replays the ledger's stored answer.
+ * timeout the runner computed (specs/00-engineering-baseline.md §8). The hold id and the pending credit id are the
+ * {@code paymentId}; the {@code Idempotency-Key} is {@code hold-create:<holdId>}, {@code hold-settle-on-us:<holdId>},
+ * {@code hold-settle:<holdId>}, {@code hold-release:<holdId>}, {@code pending-credit-create:<id>} or
+ * {@code pending-credit-cancel:<id>}, so a retry replays the ledger's stored answer.
  *
  * <p>A {@code 4xx} Problem Details with a {@code code} (specs/12-ledger-service.md §3.4) is
  * {@link LedgerAnswer.Refused}, except {@code CONCURRENT_MODIFICATION}, which asks to retry;
@@ -37,6 +38,7 @@ import tools.jackson.databind.json.JsonMapper;
 public class HttpLedger implements Ledger {
 
     static final String HOLDS = "/v1/holds";
+    static final String PENDING_CREDITS = "/v1/pending-credits";
     static final String IDEMPOTENCY_KEY = "Idempotency-Key";
 
     private static final Logger LOG = LoggerFactory.getLogger(HttpLedger.class);
@@ -91,6 +93,25 @@ public class HttpLedger implements Ledger {
         return post(payment, "release hold", HOLDS + "/" + holdId + "/release", "hold-release:" + holdId, Map.of(),
                 readTimeout, ReleaseBody.class, released -> "RELEASED".equals(released.status()) ? new Released()
                         : null);
+    }
+
+    @Override
+    public LedgerAnswer<PendingCreditCreated> createPendingCredit(Payment payment, Duration readTimeout) {
+        UUID id = payment.paymentId().value();
+        var request = new CreatePendingCreditRequest(id, payment.creditor().iban().value(), payment.amount().minor(),
+                payment.amount().currency().getCurrencyCode(), new CreatePendingCreditRequest.Reference(id,
+                        payment.txId().value(), payment.debtor().agentBic().value()));
+        return post(payment, "create pending credit", PENDING_CREDITS, "pending-credit-create:" + id, request,
+                readTimeout, PendingCreditBody.class,
+                credit -> credit.accountId() == null ? null : new PendingCreditCreated(credit.accountId()));
+    }
+
+    @Override
+    public LedgerAnswer<Cancelled> cancelPendingCredit(Payment payment, Duration readTimeout) {
+        UUID id = payment.paymentId().value();
+        return post(payment, "cancel pending credit", PENDING_CREDITS + "/" + id + "/cancel",
+                "pending-credit-cancel:" + id, Map.of(), readTimeout, PendingCreditBody.class,
+                credit -> "CANCELLED".equals(credit.status()) ? new Cancelled() : null);
     }
 
     /** @param read the answer's value, {@code null} if the body lacks what the orchestrator needs */
@@ -160,6 +181,17 @@ public class HttpLedger implements Ledger {
 
     /** {@code POST /v1/holds/{holdId}/settle-on-us}. */
     record SettleOnUsRequest(String creditorIban) {}
+
+    /** {@code POST /v1/pending-credits}; the reference names the incoming transaction (ADR-010). */
+    record CreatePendingCreditRequest(UUID pendingCreditId, String creditorIban, long amountMinor, String currency,
+            Reference reference) {
+
+        record Reference(UUID paymentId, String txId, String debtorAgentBic) {}
+    }
+
+    /** What the orchestrator reads of a pending credit: the payee's account, or a cancel's status. */
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    record PendingCreditBody(UUID accountId, String status) {}
 
     /** What the orchestrator reads of a hold. */
     @JsonIgnoreProperties(ignoreUnknown = true)

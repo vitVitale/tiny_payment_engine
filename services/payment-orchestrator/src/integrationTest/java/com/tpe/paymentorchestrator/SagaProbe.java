@@ -126,6 +126,31 @@ final class SagaProbe {
                 .single();
     }
 
+    List<LoggedRequest> pendingCreditCalls(UUID paymentId) {
+        return ledger.findAll(postRequestedFor(urlEqualTo("/v1/pending-credits"))
+                .withRequestBody(matchingJsonPath("$.pendingCreditId", equalTo(paymentId.toString()))));
+    }
+
+    List<LoggedRequest> cancelCreditCalls(UUID paymentId) {
+        return ledger.findAll(postRequestedFor(urlEqualTo("/v1/pending-credits/" + paymentId + "/cancel")));
+    }
+
+    /** The incoming payment of the transaction (ADR-010), once it exists. */
+    java.util.Optional<UUID> incoming(String debtorAgentBic, String txId) {
+        return jdbc.sql("""
+                        SELECT payment_id FROM payments
+                        WHERE direction = 'INCOMING' AND debtor_agent_bic = ? AND tx_id = ?""")
+                .param(debtorAgentBic).param(txId).query(UUID.class).optional();
+    }
+
+    /** {@code verdict|verdict_reason} of an incoming payment, {@code -} for none. */
+    String verdict(UUID paymentId) {
+        return jdbc.sql("""
+                        SELECT coalesce(verdict, '-') || '|' || coalesce(verdict_reason, '-')
+                        FROM payments WHERE payment_id = ?""")
+                .param(paymentId).query(String.class).single();
+    }
+
     List<LoggedRequest> releaseCalls(UUID paymentId) {
         return ledger.findAll(postRequestedFor(urlEqualTo("/v1/holds/" + paymentId + "/release")));
     }

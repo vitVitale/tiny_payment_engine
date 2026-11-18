@@ -12,6 +12,8 @@ import au.com.dius.pact.provider.junit5.MessageTestTarget;
 import au.com.dius.pact.provider.junit5.PactVerificationContext;
 import au.com.dius.pact.provider.junitsupport.Provider;
 import au.com.dius.pact.provider.spring.junit5.PactVerificationSpringProvider;
+import com.tpe.contracts.AcceptCreditTransfer;
+import com.tpe.contracts.RejectCreditTransfer;
 import com.tpe.contracts.SendCreditTransfer;
 import com.tpe.iso20022model.CsmMessageType;
 import com.tpe.iso20022model.EnvelopeCodec;
@@ -20,7 +22,9 @@ import com.tpe.iso20022model.Pacs002Builder.Status;
 import com.tpe.iso20022model.Pacs002Builder.StatusReport;
 import com.tpe.paymentdomain.Bic;
 import com.tpe.paymentdomain.MsgId;
+import com.tpe.paymentdomain.PaymentId;
 import com.tpe.paymentdomain.ReasonCode;
+import com.tpe.paymentdomain.TxId;
 import com.tpe.testsupport.pact.PactVerification;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
@@ -36,14 +40,17 @@ import tools.jackson.databind.json.JsonMapper;
 /**
  * csm-gateway verifies every collected pact that names it (specs/20-testing-strategy.md §10.3): M-02, the outgoing
  * {@code CreditTransferSettled}, {@code CreditTransferRejected} and {@code CreditTransferNotSent} the orchestrator
- * reads from {@code csm.inbound.events}, from a status report and from an investigation's answer; and P-07, the CSM
+ * reads from {@code csm.inbound.events}, from a status report and from an investigation's answer, and the incoming
+ * {@code CreditTransferReceived} and {@code AnswerSent} (by verdict, and at the answer deadline); and P-07, the CSM
  * inbound endpoint the simulator posts to, whose interactions need no state: every message is taken or refused on
  * what it is alone. Runs only with {@code -Ppact-verify}, against this commit's pacts and the last release's
  * ({@link PactVerification}).
  *
  * <p>An event is produced through the real path: a {@code SendCreditTransfer} on {@code csm.outbound.commands}, sent to
  * the CSM (WireMock) and answered by a {@code pacs.002} on the CSM transport, or, past its {@code sendBy}, never sent;
- * for an investigation a {@code RequestPaymentStatus} follows and its {@code pacs.028} is answered;
+ * for an investigation a {@code RequestPaymentStatus} follows and its {@code pacs.028} is answered; an incoming
+ * {@code pacs.008} on the CSM transport, then a verdict on {@code csm.outbound.commands} or the clock past the answer
+ * deadline;
  * the verified bytes are the payload and headers of the outbox row the relay publishes.
  */
 @Provider("csm-gateway")
@@ -52,6 +59,9 @@ class CsmGatewayPactVerificationIT extends GatewayStack {
 
     private static final Duration HANDLED = Duration.ofSeconds(15);
     private static final Bic CSM_BIC = new Bic("TIPSXXXXXXX");
+    private static final Bic PEER_BIC = IncomingPacs008.PEER_BIC;
+    /** {@code tpe.csm.answer-deadline-offset}. */
+    private static final Duration ANSWER_DEADLINE_OFFSET = Duration.ofSeconds(5);
     private static final JsonMapper JSON = JsonMapper.builder().build();
     private static final AtomicInteger TRANSFERS = new AtomicInteger();
 
@@ -104,6 +114,45 @@ class CsmGatewayPactVerificationIT extends GatewayStack {
         String txId = txId();
         publishCommand(txId, sendCreditTransfer(txId, START.minusSeconds(10)), UUID.randomUUID());
         return published(txId, "CreditTransferNotSent");
+    }
+
+    /** A valid incoming {@code pacs.008} from the peer bank (15 §6.2, GW-AC-09). */
+    @PactVerifyProvider("CreditTransferReceived: an incoming transfer for one of our customers")
+    MessageAndMetadata creditTransferReceived() {
+        return published(received(), "CreditTransferReceived");
+    }
+
+    /** The orchestrator's {@code AcceptCreditTransfer} before the answer deadline (15 §6.3, GW-AC-11). */
+    @PactVerifyProvider("AnswerSent: an incoming transfer accepted by our verdict")
+    MessageAndMetadata answerSentAccepted() {
+        String txId = received();
+        publishCommand(txId, new AcceptCreditTransfer(new PaymentId(UUID.randomUUID()), new TxId(txId), PEER_BIC,
+                CLOCK.instant()), UUID.randomUUID());
+        return published(txId, "AnswerSent");
+    }
+
+    /** The orchestrator's {@code RejectCreditTransfer AC06} before the answer deadline (15 §6.3). */
+    @PactVerifyProvider("AnswerSent: an incoming transfer rejected by our verdict")
+    MessageAndMetadata answerSentRejectedByVerdict() {
+        String txId = received();
+        publishCommand(txId, new RejectCreditTransfer(new PaymentId(UUID.randomUUID()), new TxId(txId), PEER_BIC,
+                CLOCK.instant(), ReasonCode.AC06), UUID.randomUUID());
+        return published(txId, "AnswerSent");
+    }
+
+    /** No verdict by the answer deadline: the deadline worker answers {@code RJCT AB05} (15 §6.3, GW-AC-11). */
+    @PactVerifyProvider("AnswerSent: an incoming transfer rejected at the answer deadline")
+    MessageAndMetadata answerSentRejectedByTheDeadline() {
+        String txId = received();
+        CLOCK.set(CLOCK.instant().plus(ANSWER_DEADLINE_OFFSET));
+        return published(txId, "AnswerSent");
+    }
+
+    /** An incoming transfer the CSM delivered now: its {@code TxId}. */
+    private String received() {
+        String txId = txId();
+        inbound(IncomingPacs008.pacs008("M-PACT-" + txId, txId, PEER_BIC, CLOCK.instant()));
+        return txId;
     }
 
     /** A transfer sent to the CSM and answered by a {@code pacs.002} of {@code status}: the event it publishes. */

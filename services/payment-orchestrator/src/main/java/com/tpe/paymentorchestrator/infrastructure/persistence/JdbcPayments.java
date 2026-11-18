@@ -5,6 +5,7 @@ import com.tpe.paymentdomain.CommandId;
 import com.tpe.paymentdomain.EndToEndId;
 import com.tpe.paymentdomain.Iban;
 import com.tpe.paymentdomain.Money;
+import com.tpe.paymentdomain.MsgId;
 import com.tpe.paymentdomain.PartyName;
 import com.tpe.paymentdomain.PaymentId;
 import com.tpe.paymentdomain.ReasonCode;
@@ -18,6 +19,7 @@ import com.tpe.paymentorchestrator.application.payments.ActionClaim;
 import com.tpe.paymentorchestrator.application.payments.LockedPayment;
 import com.tpe.paymentorchestrator.domain.payment.CsmOutcome;
 import com.tpe.paymentorchestrator.domain.payment.ExceptionCaseType;
+import com.tpe.paymentorchestrator.domain.payment.Incoming;
 import com.tpe.paymentorchestrator.domain.payment.PayeeVerification;
 import com.tpe.paymentorchestrator.domain.payment.Payment;
 import com.tpe.paymentorchestrator.domain.payment.PaymentDirection;
@@ -25,6 +27,7 @@ import com.tpe.paymentorchestrator.domain.payment.PaymentParty;
 import com.tpe.paymentorchestrator.domain.payment.PaymentState;
 import com.tpe.paymentorchestrator.domain.payment.PendingAction;
 import com.tpe.paymentorchestrator.domain.payment.TimerType;
+import com.tpe.paymentorchestrator.domain.payment.Verdict;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Timestamp;
@@ -51,7 +54,7 @@ class JdbcPayments implements Payments {
             end_to_end_id, amount_minor, currency, debtor_name, debtor_iban, debtor_agent_bic, creditor_name,
             creditor_iban, creditor_agent_bic, remittance, vop_reference, vop_result, accepted_at, send_by,
             deadline_at, pending_action, finalised_at, debtor_account_id, creditor_account_id, booking_entry_id,
-            trace_context""";
+            trace_context, msg_id, answer_deadline, verdict, verdict_reason""";
 
     /** What {@link LockedPayment} adds to the payment. */
     private static final String LOCK_COLUMNS = "version, csm_outcome, investigation_started_at";
@@ -69,6 +72,17 @@ class JdbcPayments implements Payments {
 
     @Override
     public boolean insertIfNewCommand(Payment payment, Instant now) {
+        return insert(payment, now, "command_id");
+    }
+
+    @Override
+    public boolean insertIfNewTransaction(Payment payment, Instant now) {
+        return insert(payment, now, "direction, debtor_agent_bic, tx_id");
+    }
+
+    /** @param unique the columns of the unique constraint a payment that exists already has in common with it */
+    private boolean insert(Payment payment, Instant now, String unique) {
+        Incoming incoming = payment.incoming();
         return jdbc.sql("INSERT INTO payments (" + COLUMNS + """
                         , next_action_at, action_since, created_at, updated_at)
                         VALUES (:paymentId, :direction, :state, :reasonCode, :onUs, :commandId, :clientId, :requestHash,
@@ -76,8 +90,9 @@ class JdbcPayments implements Payments {
                                 :debtorIban, :debtorAgentBic, :creditorName, :creditorIban, :creditorAgentBic,
                                 :remittance, :vopReference, :vopResult, :acceptedAt, :sendBy, :deadlineAt,
                                 :pendingAction, :finalisedAt, :debtorAccountId, :creditorAccountId, :bookingEntryId,
-                                :traceContext, :acceptedAt, :acceptedAt, :now, :now)
-                        ON CONFLICT (command_id) DO NOTHING""")
+                                :traceContext, :msgId, :answerDeadline, :verdict, :verdictReason, :acceptedAt,
+                                :acceptedAt, :now, :now)
+                        ON CONFLICT (""" + unique + ") DO NOTHING")
                 .param("paymentId", payment.paymentId().value())
                 .param("direction", payment.direction().name())
                 .param("state", payment.state().name())
@@ -109,6 +124,10 @@ class JdbcPayments implements Payments {
                 .param("creditorAccountId", payment.creditorAccountId())
                 .param("bookingEntryId", payment.bookingEntryId())
                 .param("traceContext", payment.traceContext())
+                .param("msgId", incoming == null ? null : incoming.msgId().value())
+                .param("answerDeadline", incoming == null ? null : timestamp(incoming.answerDeadline()))
+                .param("verdict", verdict(incoming))
+                .param("verdictReason", verdictReason(incoming))
                 .param("now", timestamp(now))
                 .update() == 1;
     }
@@ -326,6 +345,7 @@ class JdbcPayments implements Payments {
                             finalised_at = :finalisedAt,
                             debtor_account_id = :debtorAccountId, creditor_account_id = :creditorAccountId,
                             booking_entry_id = :bookingEntryId,
+                            verdict = :verdict, verdict_reason = :verdictReason,
                             final_event_emitted = final_event_emitted OR :finalEventEmitted,
                             version = version + 1, updated_at = :now
                         WHERE\s""" + where)
@@ -337,6 +357,8 @@ class JdbcPayments implements Payments {
                 .param("debtorAccountId", next.debtorAccountId())
                 .param("creditorAccountId", next.creditorAccountId())
                 .param("bookingEntryId", next.bookingEntryId())
+                .param("verdict", verdict(next.incoming()))
+                .param("verdictReason", verdictReason(next.incoming()))
                 .param("finalEventEmitted", finalEventEmitted)
                 .param("now", timestamp(now));
     }
@@ -422,7 +444,28 @@ class JdbcPayments implements Payments {
                 rs.getObject("debtor_account_id", UUID.class),
                 rs.getObject("creditor_account_id", UUID.class),
                 rs.getObject("booking_entry_id", UUID.class),
-                rs.getString("trace_context"));
+                rs.getString("trace_context"),
+                incoming(rs));
+    }
+
+    /** {@code null} for an outgoing payment. */
+    private static Incoming incoming(ResultSet rs) throws SQLException {
+        String msgId = rs.getString("msg_id");
+        if (msgId == null) {
+            return null;
+        }
+        String verdict = rs.getString("verdict");
+        String reason = rs.getString("verdict_reason");
+        return new Incoming(new MsgId(msgId), instant(rs, "answer_deadline"),
+                verdict == null ? null : Verdict.valueOf(verdict), reason == null ? null : ReasonCode.parse(reason));
+    }
+
+    private static String verdict(Incoming incoming) {
+        return incoming == null || incoming.verdict() == null ? null : incoming.verdict().name();
+    }
+
+    private static String verdictReason(Incoming incoming) {
+        return incoming == null || incoming.verdictReason() == null ? null : incoming.verdictReason().code();
     }
 
     private static Instant instant(ResultSet rs, String column) throws SQLException {

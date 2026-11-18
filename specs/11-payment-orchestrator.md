@@ -383,8 +383,7 @@ Listener transaction: validate → inbox → load payment by `(direction, debtor
 - `CreditTransferSettled` while `SETTLE_HOLD` is pending (the outcome is recorded, the hold not yet settled) is a
   no-op; a rejection or `CreditTransferNotSent` then is a contradiction case.
 - A contradiction case changes nothing else: no transition, no ledger call, no final event.
-- `CreditTransferSettled` / `CreditTransferRejected` INCOMING, `CreditTransferReceived` and `AnswerSent` go to the DLT
-  until the incoming flow exists (M4).
+- `CreditTransferSettled` / `CreditTransferRejected` INCOMING go to the DLT until the incoming settlement exists (M4).
 - `SETTLE_HOLD` answered `HOLD_RELEASED` leaves the payment in its state with `pending_action` cleared and opens the
   case, without a final event (§6.2): the CSM moved the money, the payer's funds came free.
 

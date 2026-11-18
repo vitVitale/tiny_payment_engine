@@ -1,6 +1,8 @@
 package com.tpe.paymentorchestrator.api.csm;
 
+import com.tpe.contracts.AnswerSent;
 import com.tpe.contracts.CreditTransferNotSent;
+import com.tpe.contracts.CreditTransferReceived;
 import com.tpe.contracts.CreditTransferRejected;
 import com.tpe.contracts.CreditTransferSettled;
 import com.tpe.messaging.consumer.ConsumedMessages;
@@ -11,8 +13,8 @@ import org.springframework.stereotype.Component;
 
 /**
  * The CSM event listener (specs/11-payment-orchestrator.md §4, §6.5): {@code csm.inbound.events}. An event is read
- * and validated ({@link ConsumedMessages#readOneOf}); an invalid one, or a type this service does not handle yet
- * ({@code CreditTransferReceived}, {@code AnswerSent}), goes to the DLT, where it opens a {@code DLT_MESSAGE} case.
+ * and validated ({@link ConsumedMessages#readOneOf}); an invalid one, or one this service does not handle yet (the
+ * incoming settlement), goes to the DLT, where it opens a {@code DLT_MESSAGE} case.
  */
 @Component
 class CsmEventListener {
@@ -26,6 +28,7 @@ class CsmEventListener {
     @KafkaListener(topics = CsmEventHandling.EVENTS)
     void on(ConsumerRecord<String, String> record) {
         handling.handle(ConsumedMessages.eventId(record), ConsumedMessages.readOneOf(record,
-                CreditTransferSettled.class, CreditTransferRejected.class, CreditTransferNotSent.class));
+                CreditTransferReceived.class, AnswerSent.class, CreditTransferSettled.class,
+                CreditTransferRejected.class, CreditTransferNotSent.class));
     }
 }

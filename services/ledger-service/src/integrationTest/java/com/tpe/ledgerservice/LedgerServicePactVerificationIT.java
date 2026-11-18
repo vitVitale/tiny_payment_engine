@@ -14,13 +14,16 @@ import com.tpe.ledgerservice.application.account.Caller;
 import com.tpe.ledgerservice.application.account.OpenAccount;
 import com.tpe.ledgerservice.application.posting.FundingService;
 import com.tpe.ledgerservice.application.reservation.CreateHold;
+import com.tpe.ledgerservice.application.reservation.CreatePendingCredit;
 import com.tpe.ledgerservice.application.reservation.HoldService;
+import com.tpe.ledgerservice.application.reservation.PendingCreditService;
 import com.tpe.ledgerservice.application.reservation.SettlementService;
 import com.tpe.ledgerservice.domain.account.Account;
 import com.tpe.ledgerservice.domain.account.BlockReason;
 import com.tpe.ledgerservice.domain.account.CustomerId;
 import com.tpe.ledgerservice.domain.account.Holder;
 import com.tpe.ledgerservice.domain.account.HolderType;
+import com.tpe.ledgerservice.domain.reservation.IncomingReference;
 import com.tpe.paymentdomain.Iban;
 import com.tpe.testsupport.pact.PactVerification;
 import java.nio.charset.StandardCharsets;
@@ -39,12 +42,12 @@ import tools.jackson.databind.json.JsonMapper;
 
 /**
  * ledger-service verifies every collected pact that names it (specs/20-testing-strategy.md §10.3): P-04, the
- * orchestrator's holds, P-10, the account calls of the system-test harness, and M-04, the {@code accounts.events}
+ * orchestrator's holds and pending credits, P-10, the account calls of the system-test harness, and M-04, the {@code accounts.events}
  * snapshots its projections read. Runs only
  * with {@code -Ppact-verify}, against this commit's pacts and the last release's ({@link PactVerification}).
  *
- * <p>States seed accounts and holds through the application services and hand the new account's id or IBAN and a
- * fresh hold id to the request. The
+ * <p>States seed accounts, holds and pending credits through the application services and hand the new account's id
+ * or IBAN and a fresh hold or pending credit id to the request. The
  * pact's {@code Authorization} is the consumer's example: each request carries a token of this JVM's key instead, of a
  * back-office operator unless a {@code caller is …} state names another caller. Each request also gets a fresh
  * {@code Idempotency-Key}, so the example key of one interaction never replays another's response.
@@ -73,6 +76,9 @@ class LedgerServicePactVerificationIT extends LedgerStack {
 
     @Autowired
     SettlementService settlements;
+
+    @Autowired
+    PendingCreditService pendingCredits;
 
     @Autowired
     JdbcClient jdbc;
@@ -240,6 +246,48 @@ class LedgerServicePactVerificationIT extends LedgerStack {
         return withPayee(hold, openAccount().iban().value());
     }
 
+    @State("payee account is OPEN")
+    Map<String, Object> payeeAccountIsOpen() {
+        return pendingCreditFor(openAccount().iban().value(), UUID.randomUUID());
+    }
+
+    @State("payee account is BLOCKED")
+    Map<String, Object> payeeAccountIsBlocked() {
+        Account payee = openAccount();
+        accounts.block(payee.accountId(), BlockReason.OPERATOR, null, stateCaller());
+        return pendingCreditFor(payee.iban().value(), UUID.randomUUID());
+    }
+
+    @State("no account has the payee IBAN")
+    Map<String, Object> noAccountHasThePayeeIban() {
+        return pendingCreditFor(unusedIban(), UUID.randomUUID());
+    }
+
+    @State("pending credit is ACTIVE")
+    Map<String, Object> pendingCreditIsActive(Map<String, Object> parameters) {
+        return activePendingCredit(amount(parameters, "amountMinor"));
+    }
+
+    @State("pending credit is CONFIRMED")
+    Map<String, Object> pendingCreditIsConfirmed(Map<String, Object> parameters) {
+        Map<String, Object> credit = activePendingCredit(amount(parameters, "amountMinor"));
+        pendingCredits.confirm(UUID.fromString((String) credit.get("pendingCreditId")));
+        return credit;
+    }
+
+    /** The cancel came first and left a tombstone (ADR-009). */
+    @State("pending credit was cancelled")
+    Map<String, Object> pendingCreditWasCancelled() {
+        UUID pendingCreditId = UUID.randomUUID();
+        pendingCredits.cancel(pendingCreditId);
+        return pendingCreditFor(openAccount().iban().value(), pendingCreditId);
+    }
+
+    @State("no pending credit has the id")
+    Map<String, Object> noPendingCreditHasTheId() {
+        return Map.of("pendingCreditId", UUID.randomUUID().toString());
+    }
+
     @State("caller is a compliance officer")
     void callerIsAComplianceOfficer() {
         caller = bearer(StaffTokens.token("pact-compliance", "COMPLIANCE_OFFICER"));
@@ -302,6 +350,19 @@ class LedgerServicePactVerificationIT extends LedgerStack {
         UUID holdId = UUID.randomUUID();
         holds.create(new CreateHold(holdId, payer.iban(), amountMinor, "EUR", holdId, "TPEPACTSTATE"));
         return Map.of("debtorIban", payer.iban().value(), "holdId", holdId.toString());
+    }
+
+    /** An {@code ACTIVE} pending credit of {@code amountMinor} on an open payee: its id and the payee's IBAN. */
+    private Map<String, Object> activePendingCredit(long amountMinor) {
+        Account payee = openAccount();
+        UUID pendingCreditId = UUID.randomUUID();
+        pendingCredits.create(new CreatePendingCredit(pendingCreditId, payee.iban(), amountMinor, "EUR",
+                new IncomingReference(pendingCreditId, "PEERPACTSTATE", "PEERDEFFXXX")));
+        return pendingCreditFor(payee.iban().value(), pendingCreditId);
+    }
+
+    private static Map<String, Object> pendingCreditFor(String creditorIban, UUID pendingCreditId) {
+        return Map.of("creditorIban", creditorIban, "pendingCreditId", pendingCreditId.toString());
     }
 
     private static Map<String, Object> withPayee(Map<String, Object> hold, String creditorIban) {

@@ -6,10 +6,15 @@ import com.tpe.messaging.worker.PollingWorker;
 import com.tpe.observability.context.Spans;
 import com.tpe.observability.payment.PaymentTelemetry;
 import com.tpe.paymentdomain.PaymentId;
+import com.tpe.paymentdomain.UuidV7Generator;
 import com.tpe.paymentorchestrator.application.cases.CaseResolutions;
 import com.tpe.paymentorchestrator.application.cases.ExceptionCases;
 import com.tpe.paymentorchestrator.application.csm.CsmEventHandling;
 import com.tpe.paymentorchestrator.application.ledger.Ledger;
+import com.tpe.paymentorchestrator.application.incoming.AssessIncomingRiskAction;
+import com.tpe.paymentorchestrator.application.incoming.CancelCreditAction;
+import com.tpe.paymentorchestrator.application.incoming.CreatePendingCreditAction;
+import com.tpe.paymentorchestrator.application.incoming.IncomingCsmEvents;
 import com.tpe.paymentorchestrator.application.outgoing.AssessPayeeRiskAction;
 import com.tpe.paymentorchestrator.application.outgoing.AssessRiskAction;
 import com.tpe.paymentorchestrator.application.outgoing.CreateHoldAction;
@@ -21,6 +26,7 @@ import com.tpe.paymentorchestrator.application.payments.DueTimer;
 import com.tpe.paymentorchestrator.application.payments.FinalEvents;
 import com.tpe.paymentorchestrator.application.payments.Payments;
 import com.tpe.paymentorchestrator.application.risk.RiskAssessments;
+import com.tpe.paymentorchestrator.application.runner.ByDirection;
 import com.tpe.paymentorchestrator.application.runner.RunnerSettings;
 import com.tpe.paymentorchestrator.application.runner.SagaAction;
 import com.tpe.paymentorchestrator.application.runner.SagaRunner;
@@ -56,7 +62,8 @@ import org.springframework.web.client.RestClient;
  */
 @Configuration(proxyBeanMethods = false)
 @EnableConfigurationProperties({SagaConfiguration.RunnerProperties.class, SagaConfiguration.RiskProperties.class,
-        SagaConfiguration.LedgerProperties.class, SagaConfiguration.InvestigationProperties.class})
+        SagaConfiguration.LedgerProperties.class, SagaConfiguration.InvestigationProperties.class,
+        SagaConfiguration.IncomingProperties.class})
 class SagaConfiguration {
 
     /** The sweeper's poll: actions whose lease expired or whose retry is due (§6.3). */
@@ -79,10 +86,25 @@ class SagaConfiguration {
         return new HttpRiskAssessments(builder.clone().baseUrl(risk.baseUrl().toString()).build(), CONNECT_TIMEOUT);
     }
 
+    /** {@code ASSESS_RISK} of either direction (§6.2). */
     @Bean
-    AssessRiskAction assessRiskAction(RiskAssessments risk, RunnerSettings settings, RiskProperties properties,
+    SagaAction assessRiskAction(RiskAssessments risk, RunnerSettings settings, RiskProperties properties,
             Clock clock) {
-        return new AssessRiskAction(risk, settings, properties.timeout().outgoing(), clock);
+        return new ByDirection(new AssessRiskAction(risk, settings, properties.timeout().outgoing(), clock),
+                new AssessIncomingRiskAction(risk, settings, properties.timeout().incoming(), clock));
+    }
+
+    @Bean
+    CreatePendingCreditAction createPendingCreditAction(Ledger ledger, RunnerSettings settings,
+            LedgerProperties properties, IncomingProperties incoming, Clock clock) {
+        return new CreatePendingCreditAction(ledger, settings, properties.timeout(), incoming.verdictGiveUpMargin(),
+                clock);
+    }
+
+    @Bean
+    CancelCreditAction cancelCreditAction(Ledger ledger, RunnerSettings settings, LedgerProperties properties,
+            Clock clock) {
+        return new CancelCreditAction(ledger, settings, properties.timeout(), clock);
     }
 
     @Bean
@@ -159,9 +181,15 @@ class SagaConfiguration {
     }
 
     @Bean
-    CsmEventHandling csmEventHandling(Payments payments, InboxGuard inbox, FinalEvents finalEvents, SagaRunner runner,
-            SagaTelemetry telemetry, Clock clock) {
-        return new CsmEventHandling(payments, inbox, finalEvents, runner, telemetry, clock);
+    IncomingCsmEvents incomingCsmEvents(Payments payments, SagaRunner runner, SagaTelemetry telemetry,
+            UuidV7Generator paymentIds, ObjectProvider<Spans> spans) {
+        return new IncomingCsmEvents(payments, runner, telemetry, paymentIds, spans.getIfAvailable(Spans::noop));
+    }
+
+    @Bean
+    CsmEventHandling csmEventHandling(Payments payments, InboxGuard inbox, FinalEvents finalEvents,
+            IncomingCsmEvents incoming, SagaRunner runner, SagaTelemetry telemetry, Clock clock) {
+        return new CsmEventHandling(payments, inbox, finalEvents, incoming, runner, telemetry, clock);
     }
 
     /** The application does not start with an empty or non-positive back-off or budget. */
@@ -228,6 +256,7 @@ class SagaConfiguration {
         /**
          * @param outgoing {@code ASSESS_RISK} of an outgoing payment and {@code ASSESS_PAYEE_RISK} of an on-us one,
          *     500 ms (UC-04 2c)
+         * @param incoming {@code ASSESS_RISK} of an incoming payment, 300 ms (UC-06 3)
          */
         record Timeout(Duration outgoing, Duration incoming) {}
     }
@@ -235,6 +264,17 @@ class SagaConfiguration {
     /** {@code tpe.investigation.*} (§7): the delays between status requests, the last repeating, and the budget. */
     @ConfigurationProperties("tpe.investigation")
     record InvestigationProperties(List<Duration> backoff, Duration budget) {}
+
+    /**
+     * {@code tpe.incoming.*} (§7).
+     *
+     * @param verdictGiveUpMargin before the answer deadline, {@code CREATE_PENDING_CREDIT} gives up: verdict
+     *     {@code REJECT MS03}
+     * @param settlementOverdue after {@code AnswerSent(ACCP)}, a payment with no settlement goes into investigation
+     *     (read by the settlement-overdue timer, which follows)
+     */
+    @ConfigurationProperties("tpe.incoming")
+    record IncomingProperties(Duration verdictGiveUpMargin, Duration settlementOverdue) {}
 
     /** {@code tpe.clients.ledger.*} (§7). */
     @ConfigurationProperties("tpe.clients.ledger")
