@@ -2,6 +2,7 @@ package com.tpe.csmsimulator.application;
 
 import com.tpe.csmsimulator.application.JournalEntry.Kind;
 import com.tpe.csmsimulator.domain.scenarios.CounterpartyAccount;
+import com.tpe.csmsimulator.domain.scenarios.IncomingScenario;
 import com.tpe.csmsimulator.domain.scenarios.Scenario;
 import com.tpe.csmsimulator.domain.scenarios.Scenarios;
 import com.tpe.csmsimulator.domain.scheme.IncomingScheme;
@@ -20,6 +21,8 @@ import com.tpe.iso20022model.Pacs002Builder.StatusReport;
 import com.tpe.iso20022model.Pacs008Builder;
 import com.tpe.iso20022model.Pacs008Builder.AccountHolder;
 import com.tpe.iso20022model.XsdValidator.Violation;
+import com.tpe.iso20022model.pacs002v10.StatusReason6Choice;
+import com.tpe.iso20022model.pacs002v10.StatusReasonInformation12;
 import com.tpe.iso20022model.pacs008v08.CreditTransferTransaction39;
 import com.tpe.paymentdomain.BankDirectory;
 import com.tpe.paymentdomain.BankEntry;
@@ -29,6 +32,8 @@ import com.tpe.paymentdomain.Iban;
 import com.tpe.paymentdomain.Money;
 import com.tpe.paymentdomain.MsgId;
 import com.tpe.paymentdomain.PartyName;
+import com.tpe.paymentdomain.ReasonCode;
+import com.tpe.paymentdomain.StatusReason;
 import com.tpe.paymentdomain.TxId;
 import com.tpe.paymentdomain.Uetr;
 import com.tpe.paymentdomain.UlidGenerator;
@@ -102,14 +107,18 @@ public final class CsmSimulation {
     /** A transaction the CSM received; {@code finalStatus} is {@code null} until it has one. */
     private record Transaction(CreditTransfer transfer, Status finalStatus) {}
 
-    /** Where an incoming payment stands: the CSM waits for our answer until its deadline. */
-    private enum AnswerState { AWAITING, SETTLED, REJECTED, TIMED_OUT }
+    /**
+     * An incoming payment the CSM delivered to the gateway at {@code transfer.createdAt()}; {@code finalStatus} is
+     * {@code null} while the CSM waits for our answer.
+     */
+    private record Incoming(Pacs008Builder.CreditTransfer transfer, IncomingScenario scenario, Status finalStatus) {
 
-    /** An incoming payment the CSM delivered to the gateway at {@code transfer.createdAt()}. */
-    private record Incoming(Pacs008Builder.CreditTransfer transfer, AnswerState state) {
+        boolean awaitingAnswer() {
+            return finalStatus == null;
+        }
 
-        Incoming with(AnswerState next) {
-            return new Incoming(transfer, next);
+        Incoming concluded(Status status) {
+            return new Incoming(transfer, scenario, status);
         }
 
         /** Whether {@code entry} journals this payment's {@code pacs.008}. */
@@ -289,7 +298,7 @@ public final class CsmSimulation {
             String xml = envelopes.join(creditTransfers.build(transfer));
             entry = new JournalEntry(txId, Kind.SENT, CsmMessageType.PACS_008.version(), transfer.msgId().value(),
                     now, false, xml);
-            incoming.put(key, new Incoming(transfer, AnswerState.AWAITING));
+            incoming.put(key, new Incoming(transfer, payment.scenario(), null));
             journal.add(entry);
             MsgId msgId = transfer.msgId();
             schedule(incomingScheme.answerDeadline(now), at -> answerTimedOut(key, msgId));
@@ -422,8 +431,9 @@ public final class CsmSimulation {
 
     /**
      * Runs under the lock, as of {@code now}: our answer to an incoming payment. An {@code ACCP} in time is settled
-     * and confirmed with a {@code pacs.002 ACSC}; a {@code RJCT} in time is recorded; anything else (late, a second
-     * answer, one naming no payment the CSM sent) is only journalled.
+     * and confirmed with a {@code pacs.002 ACSC}, rejected {@code AB05} or settled unconfirmed, as the payment's
+     * scenario says; a {@code RJCT} in time is recorded; anything else (late, a second answer, one naming no payment
+     * the CSM sent) is only journalled.
      */
     private Optional<Outbound> answer(Answer answer, Instant now) {
         Optional<Map.Entry<TransactionKey, Incoming>> found = incoming.entrySet().stream()
@@ -436,32 +446,37 @@ public final class CsmSimulation {
         TransactionKey key = found.get().getKey();
         Incoming payment = found.get().getValue();
         Pacs008Builder.CreditTransfer transfer = payment.transfer();
-        IncomingScheme.Effect effect = payment.state() == AnswerState.AWAITING
-                ? incomingScheme.answer(transfer.createdAt(), answer.status(), now)
-                : IncomingScheme.Effect.NONE;
-        switch (effect) {
-            case SETTLE -> {
-                incoming.put(key, payment.with(AnswerState.SETTLED));
-                settlements.add(new Settlement(transfer.txId(), transfer.debtorAgent(), Direction.INCOMING,
-                        transfer.amount().minor(), now));
-                return Optional.of(statusReport(transfer.txId(), now, id -> new StatusReport(id, now,
-                        transfer.msgId(), CsmMessageType.PACS_008, transfer.txId(), transfer.endToEndId(),
-                        transfer.uetr(), transfer.debtorAgent(), Status.SETTLED, ownBic, transfer.creditorAgent())));
-            }
-            case REJECT -> incoming.put(key, payment.with(AnswerState.REJECTED));
-            case NONE -> log.info("answer {} ({}) of {} changes nothing: {}", answer.msgId().value(),
-                    answer.status(), transfer.txId().value(),
-                    payment.state() == AnswerState.AWAITING ? "late, or not ACCP / RJCT" : payment.state());
+        if (!payment.awaitingAnswer()) {
+            log.info("answer {} ({}) of {} changes nothing: final already, {}", answer.msgId().value(),
+                    answer.status(), transfer.txId().value(), payment.finalStatus());
+            return Optional.empty();
         }
-        return Optional.empty();
+        Optional<IncomingScheme.Outcome> decided = incomingScheme.answer(transfer.createdAt(), payment.scenario(),
+                answer.status(), answer.reason(), now);
+        if (decided.isEmpty()) {
+            log.info("answer {} ({}) of {} changes nothing: late, or not ACCP / RJCT", answer.msgId().value(),
+                    answer.status(), transfer.txId().value());
+            return Optional.empty();
+        }
+        IncomingScheme.Outcome outcome = decided.get();
+        incoming.put(key, payment.concluded(outcome.finalStatus()));
+        if (outcome.settles()) {
+            settlements.add(new Settlement(transfer.txId(), transfer.debtorAgent(), Direction.INCOMING,
+                    transfer.amount().minor(), now));
+        }
+        if (!outcome.reported()) {
+            return Optional.empty();
+        }
+        return Optional.of(statusReport(transfer.txId(), now, id -> new StatusReport(id, now, transfer.msgId(),
+                CsmMessageType.PACS_008, transfer.txId(), transfer.endToEndId(), transfer.uetr(),
+                transfer.debtorAgent(), outcome.finalStatus(), ownBic, transfer.creditorAgent())));
     }
 
-    /** Runs under the lock: the CSM stops waiting for our answer and sends us nothing. */
+    /** Runs under the lock: the CSM stops waiting for our answer, rejects the payment and sends us nothing. */
     private Optional<Outbound> answerTimedOut(TransactionKey key, MsgId msgId) {
         Incoming payment = incoming.get(key);
-        if (payment != null && payment.state() == AnswerState.AWAITING
-                && payment.transfer().msgId().equals(msgId)) {
-            incoming.put(key, payment.with(AnswerState.TIMED_OUT));
+        if (payment != null && payment.awaitingAnswer() && payment.transfer().msgId().equals(msgId)) {
+            incoming.put(key, payment.concluded(incomingScheme.timedOut()));
             log.info("no answer to incoming {} of {} in time", msgId.value(), key.txId().value());
         }
         return Optional.empty();
@@ -475,29 +490,32 @@ public final class CsmSimulation {
     }
 
     /**
-     * Runs under the lock, as of {@code now}: answers with the final status of the transaction, {@code RJCT
-     * UNKNOWN_TX} if the CSM never received it, nothing while it has no final status yet or its creditor's scenario
-     * ignores investigations.
+     * Runs under the lock, as of {@code now}: answers with the final status of the transaction, outgoing or incoming,
+     * {@code RJCT UNKNOWN_TX} if the CSM never received or sent it, nothing while it has no final status yet or the
+     * creditor's scenario of an outgoing one ignores investigations.
      */
     private Optional<Outbound> investigate(StatusRequest request, Instant now) {
-        Transaction transaction = transactions.get(request.key());
+        Transaction outgoing = transactions.get(request.key());
+        Incoming delivered = incoming.get(request.key());
         Status status;
-        if (transaction == null) {
-            status = Status.UNKNOWN_TRANSACTION;
-        } else {
-            CreditTransfer transfer = transaction.transfer();
+        if (outgoing != null) {
+            CreditTransfer transfer = outgoing.transfer();
             Scenario scenario = scenarios.scenarioFor(transfer.creditor(), transfer.amount());
             if (scenario.ignoresInvestigations()) {
                 log.info("ignored investigation {} of {}: scenario {}", request.msgId().value(),
                         request.txId().value(), scenario.text());
                 return Optional.empty();
             }
-            if (transaction.finalStatus() == null) {
-                log.info("investigation {} of {} unanswered: no final status yet", request.msgId().value(),
-                        request.txId().value());
-                return Optional.empty();
-            }
-            status = transaction.finalStatus();
+            status = outgoing.finalStatus();
+        } else if (delivered != null) {
+            status = delivered.finalStatus();
+        } else {
+            status = Status.UNKNOWN_TRANSACTION;
+        }
+        if (status == null) {
+            log.info("investigation {} of {} unanswered: no final status yet", request.msgId().value(),
+                    request.txId().value());
+            return Optional.empty();
         }
         return Optional.of(statusReport(request.txId(), now, id -> new StatusReport(id, now, request.msgId(),
                 CsmMessageType.PACS_028, request.txId(), request.endToEndId(), request.uetr(), request.debtorAgent(),
@@ -608,10 +626,15 @@ public final class CsmSimulation {
      *
      * @param originalMsgId {@code null} when the answer carries none
      * @param debtorAgent {@code null} when the answer carries none
+     * @param reason the {@code StsRsnInf/Rsn/Cd} of a {@code RJCT}, {@code null} for any other status
      */
-    private record Answer(MsgId msgId, MsgId originalMsgId, TxId txId, Bic debtorAgent, String status) {
+    private record Answer(MsgId msgId, MsgId originalMsgId, TxId txId, Bic debtorAgent, String status,
+            StatusReason reason) {
 
-        /** @throws RuntimeException if a field the CSM needs is missing or not a valid domain value */
+        /**
+         * @throws RuntimeException if a field the CSM needs is missing or not a valid domain value; a {@code RJCT}
+         *     needs a reason code, as the CSM answers investigations with it
+         */
         static Answer of(CsmEnvelope envelope) {
             var message = ((com.tpe.iso20022model.pacs002v10.Document) envelope.document()).getFIToFIPmtStsRpt();
             var transaction = message.getTxInfAndSts().getFirst();
@@ -620,9 +643,16 @@ public final class CsmSimulation {
                     : new Bic(reference.getDbtrAgt().getFinInstnId().getBICFI());
             MsgId originalMsgId = message.getOrgnlGrpInfAndSts().stream().findFirst()
                     .map(group -> new MsgId(group.getOrgnlMsgId())).orElse(null);
+            String status = Objects.requireNonNull(transaction.getTxSts(), "TxSts");
+            StatusReason reason = null;
+            if (IncomingScheme.REJECTED.equals(status)) {
+                String code = transaction.getStsRsnInf().stream().findFirst()
+                        .map(StatusReasonInformation12::getRsn).map(StatusReason6Choice::getCd)
+                        .orElseThrow(() -> new IllegalArgumentException("RJCT without Rsn/Cd"));
+                reason = ReasonCode.parse(code);
+            }
             return new Answer(new MsgId(message.getGrpHdr().getMsgId()), originalMsgId,
-                    new TxId(transaction.getOrgnlTxId()), debtorAgent,
-                    Objects.requireNonNull(transaction.getTxSts(), "TxSts"));
+                    new TxId(transaction.getOrgnlTxId()), debtorAgent, status, reason);
         }
 
         boolean answers(TransactionKey key, MsgId incomingMsgId) {

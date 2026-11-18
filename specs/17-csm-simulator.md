@@ -69,9 +69,11 @@ seeded BIC is the bank of the debtor IBAN in the bank directory ([01 §1.4](01-s
 from sending the `pacs.008`; an answer at or after that, or a second answer, is journalled and changes nothing:
 
 - `ACCP` in time → settle → `pacs.002 ACSC` to the gateway (settlement confirmation), unless the scenario says
-  `REJECT_AFTER_ACCP` (→ `RJCT AB05`, UC-06 8a) or `NO_CONFIRMATION` (UC-06 8b).
-- `RJCT` → record; nothing else sent.
-- No answer → record timeout; send nothing to us.
+  `REJECT_AFTER_ACCP` (→ `pacs.002 RJCT AB05`, no settlement, UC-06 8a) or `NO_CONFIRMATION` (settle, send no
+  `pacs.002`; an investigation finds it `ACSC`, UC-06 8b).
+- `RJCT` → record; nothing else sent. Our `RJCT` must carry `StsRsnInf/Rsn/Cd` (the CSM answers investigations with
+  it); one without is refused as unreadable (§3.1).
+- No answer → record timeout (the CSM's `RJCT AB05`); send nothing to us.
 
 **Investigation:** `pacs.028` → `pacs.002` with the final status if known; for a `TxId` it never received →
 `pacs.002 TxSts = RJCT`, `StsRsnInf/Rsn/Prtry = UNKNOWN_TX` (the convention csm-gateway relies on,
@@ -83,6 +85,12 @@ again). A `pacs.028` retried with the same `MsgId` is answered once. Scenario `I
 `ACCEPT`. It is read when the `pacs.028` arrives, so setting the creditor's scenario again without it (clearing it)
 makes the next `pacs.028` answered. The creditor is known only from a `pacs.008` the CSM received, so a `LOST`
 transaction is answered `UNKNOWN_TX` whatever the scenario.
+
+An incoming transaction (one the CSM sent us) is investigated the same way, by `OrgnlTxRef/DbtrAgt` and `OrgnlTxId`.
+Its final status is `ACSC` once settled (with or without a confirmation), `RJCT` with our reason after our `RJCT`,
+and `RJCT AB05` after `REJECT_AFTER_ACCP` or when our answer did not come in time. While the CSM still waits for
+our answer it has none, and the `pacs.028` is not answered. `INVESTIGATION_SILENT` applies to outgoing transactions
+only.
 
 ### 3.3 VoP
 
@@ -128,8 +136,8 @@ Bodies (JSON; a request the simulator cannot act on is `400` with a problem deta
   code is not a separate field: it is the one the IBAN carries.
 - `PUT /sim/v1/scenarios/{creditorIban}`: `{ "scenario": "REJECT:AC04" }`; a reason code is four characters.
 - `POST /sim/v1/incoming-payments`: `{ "creditorIban", "amount": "12.34", "debtorName", "debtorIban", "scenario",
-  "txId"?, "debtorAgentBic"? }` (`scenario` defaults to `ACCEPT`); answers `200` `{ "txId", "gatewayStatus": 202 }`,
-  or `502 GATEWAY_UNREACHABLE` if csm-gateway gave no answer. The `pacs.008` is journalled as `SENT` before it goes;
+  "txId"?, "debtorAgentBic"? }` (`scenario`: `ACCEPT`, the default, `REJECT_AFTER_ACCP` or `NO_CONFIRMATION`);
+  answers `200` `{ "txId", "gatewayStatus": 202 }`, or `502 GATEWAY_UNREACHABLE` if csm-gateway gave no answer. The `pacs.008` is journalled as `SENT` before it goes;
   one the gateway refuses (non-`2xx`) is forgotten; one it gave no answer for is kept (it may have taken it). `400` for a debtor IBAN of no bank in the directory without
   `debtorAgentBic`, and for a (`debtorAgentBic`, `txId`) already sent.
 - `POST /sim/v1/incoming-payments/raw`: the XML as the body, sent as it is, without validation; answers `200`
@@ -141,9 +149,8 @@ Bodies (JSON; a request the simulator cannot act on is `400` with a problem deta
   "amountMinor", "settledAt" } ]`, oldest first; `since` is inclusive and optional.
 
 The simulator plays `ACCEPT`, `REJECT:<code>`, `TIMEOUT`, `DELAY:<ms>`, `SILENT`, `LOST`, `LATE_STATUS:<ms>` and
-`INVESTIGATION_SILENT`, answers investigations of outgoing transfers, and plays incoming payments with `ACCEPT`.
-`VOP_SLOW` and the incoming scenarios `REJECT_AFTER_ACCP` / `NO_CONFIRMATION` are refused with `400`, and
-investigations of incoming transfers are not answered yet; they follow in later work.
+`INVESTIGATION_SILENT`, answers investigations of outgoing and incoming transfers, and plays incoming payments with
+`ACCEPT`, `REJECT_AFTER_ACCP` and `NO_CONFIRMATION`. `VOP_SLOW` is refused with `400`; it follows in later work.
 
 ## 4. Configuration
 

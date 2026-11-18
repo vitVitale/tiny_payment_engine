@@ -82,6 +82,21 @@ public final class CreditTransfers {
                 new Uetr(identification.getUETR()), debtorAgent, status, OUR_BIC, CSM_BIC)));
     }
 
+    /**
+     * Our status request about the incoming {@code pacs.008} envelope {@code incoming}, as csm-gateway sends it: from
+     * our bank to the CSM, naming the transaction by its {@code DbtrAgt} and {@code TxId}.
+     */
+    public static String investigation(String msgId, String incoming, Instant createdAt) {
+        var transaction = ((com.tpe.iso20022model.pacs008v08.Document) ((Accepted) new EnvelopeCodec()
+                .split(incoming)).envelope().document()).getFIToFICstmrCdtTrf();
+        var identification = transaction.getCdtTrfTxInf().getFirst().getPmtId();
+        Bic debtorAgent = new Bic(transaction.getCdtTrfTxInf().getFirst().getDbtrAgt().getFinInstnId().getBICFI());
+        return new EnvelopeCodec().join(new Pacs028Builder().build(new StatusRequest(new MsgId(msgId), createdAt,
+                new MsgId(transaction.getGrpHdr().getMsgId()), new TxId(identification.getTxId()),
+                new EndToEndId(identification.getEndToEndId()), new Uetr(identification.getUETR()), debtorAgent,
+                OUR_BIC, CSM_BIC)));
+    }
+
     /** A UUID v4 derived from {@code txId}, so a retry carries the same one. */
     private static Uetr uetr(String txId) {
         UUID name = UUID.nameUUIDFromBytes(txId.getBytes(StandardCharsets.UTF_8));
