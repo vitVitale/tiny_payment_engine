@@ -1,6 +1,11 @@
 package com.tpe.csmsimulator;
 
+import com.tpe.iso20022model.CsmMessageType;
 import com.tpe.iso20022model.EnvelopeCodec;
+import com.tpe.iso20022model.EnvelopeCodec.Accepted;
+import com.tpe.iso20022model.Pacs002Builder;
+import com.tpe.iso20022model.Pacs002Builder.Status;
+import com.tpe.iso20022model.Pacs002Builder.StatusReport;
 import com.tpe.iso20022model.Pacs008Builder;
 import com.tpe.iso20022model.Pacs008Builder.AccountHolder;
 import com.tpe.iso20022model.Pacs008Builder.CreditTransfer;
@@ -60,6 +65,21 @@ public final class CreditTransfers {
         return new EnvelopeCodec().join(new Pacs028Builder().build(new StatusRequest(new MsgId(msgId), createdAt,
                 new MsgId(originalMsgId), new TxId(txId), new EndToEndId("E2E-" + txId), uetr(txId), OUR_BIC,
                 OUR_BIC, CSM_BIC)));
+    }
+
+    /**
+     * Our answer to the incoming {@code pacs.008} envelope {@code incoming}, as csm-gateway sends it: from our bank to
+     * the CSM, with {@code OrgnlTxRef/DbtrAgt}.
+     */
+    public static String answer(String msgId, String incoming, Status status, Instant createdAt) {
+        var transaction = ((com.tpe.iso20022model.pacs008v08.Document) ((Accepted) new EnvelopeCodec()
+                .split(incoming)).envelope().document()).getFIToFICstmrCdtTrf();
+        var identification = transaction.getCdtTrfTxInf().getFirst().getPmtId();
+        Bic debtorAgent = new Bic(transaction.getCdtTrfTxInf().getFirst().getDbtrAgt().getFinInstnId().getBICFI());
+        return new EnvelopeCodec().join(new Pacs002Builder().build(new StatusReport(new MsgId(msgId), createdAt,
+                new MsgId(transaction.getGrpHdr().getMsgId()), CsmMessageType.PACS_008,
+                new TxId(identification.getTxId()), new EndToEndId(identification.getEndToEndId()),
+                new Uetr(identification.getUETR()), debtorAgent, status, OUR_BIC, CSM_BIC)));
     }
 
     /** A UUID v4 derived from {@code txId}, so a retry carries the same one. */

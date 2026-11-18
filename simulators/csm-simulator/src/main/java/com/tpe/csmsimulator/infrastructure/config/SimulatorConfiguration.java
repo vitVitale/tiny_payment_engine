@@ -2,12 +2,14 @@ package com.tpe.csmsimulator.infrastructure.config;
 
 import com.tpe.csmsimulator.application.CsmSimulation;
 import com.tpe.csmsimulator.application.GatewayClient;
+import com.tpe.csmsimulator.domain.scheme.IncomingScheme;
 import com.tpe.csmsimulator.domain.scheme.OutgoingScheme;
 import com.tpe.csmsimulator.infrastructure.gateway.HttpGatewayClient;
 import com.tpe.csmsimulator.infrastructure.scheduling.TimelineWorker;
 import com.tpe.csmsimulator.infrastructure.web.OutageValve;
 import com.tpe.iso20022model.EnvelopeCodec;
 import com.tpe.iso20022model.Pacs002Builder;
+import com.tpe.paymentdomain.BankDirectory;
 import com.tpe.paymentdomain.Bic;
 import com.tpe.paymentdomain.UlidGenerator;
 import java.time.Clock;
@@ -36,12 +38,13 @@ class SimulatorConfiguration {
     }
 
     @Bean
-    CsmSimulation csmSimulation(GatewayClient gateway, Clock clock, SimulatorProperties properties) {
+    CsmSimulation csmSimulation(GatewayClient gateway, Clock clock, SimulatorProperties properties,
+            BankDirectory banks) {
         // a test tool: the message ids need not be unpredictable
         return new CsmSimulation(new EnvelopeCodec(),
                 new OutgoingScheme(properties.beneficiaryDelay(), properties.timeoutDeadline()),
-                new Pacs002Builder(), gateway, clock, new UlidGenerator(clock, new Random()),
-                new Bic(properties.ownBic()));
+                new IncomingScheme(properties.answerTimeout()), new Pacs002Builder(), gateway, clock,
+                new UlidGenerator(clock, new Random()), new Bic(properties.ownBic()), banks);
     }
 
     @Bean

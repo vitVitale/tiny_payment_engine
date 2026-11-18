@@ -9,7 +9,7 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
  * {@code tpe.sim.*} (specs/17-csm-simulator.md §4); the defaults are in {@code application.yml}.
  *
  * @param ownBic the CSM's BIC
- * @param answerTimeout how long the CSM waits for our answer to an incoming payment (not used before M4)
+ * @param answerTimeout how long the CSM waits for our answer to an incoming payment
  * @param timeoutDeadline the scheme time-out deadline, counted from {@code AccptncDtTm}
  * @param tick how often the timeline runs what is due
  */

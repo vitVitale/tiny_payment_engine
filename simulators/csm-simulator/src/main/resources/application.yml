@@ -1,6 +1,9 @@
 spring:
   application:
     name: csm-simulator
+  config:
+    # the bank directory (specs/01-shared-libraries.md §1.4): our BIC and the counterparty banks' BICs
+    import: ${tpe.bank-directory.location:classpath:bank-directory.yml}
 
 management:
   endpoint:
