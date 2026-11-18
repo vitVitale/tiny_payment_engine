@@ -150,6 +150,29 @@ class ServiceProcessTest {
         assertThat(get(process, "/args")).contains("--server.port=");
     }
 
+    /** OBS-AC-01 with a real payment (#126): the local Alloy scrapes what runs now, and nothing that has stopped. */
+    @Test
+    void theAlloyTargetsListFollowsTheRunningProcesses() throws Exception {
+        var service = new ServiceJar("fake-service-i", fakeJar(jars.resolve("i"), "fake-service-i-1.0.jar").getParent());
+        ServiceProcess process = ServiceProcess.of(service);
+        String target = "host.docker.internal:" + process.baseUrl().getPort();
+
+        assertThat(Files.readString(AlloyTargets.FILE)).contains(target, "\"fake-service-i\"");
+
+        process.stop();
+        assertThat(Files.readString(AlloyTargets.FILE)).doesNotContain(target);
+        process.start();
+        assertThat(Files.readString(AlloyTargets.FILE)).contains(target);
+    }
+
+    /** With the observability stack, a service exports its spans to the agent's published OTLP port. */
+    @Test
+    void withTheObservabilityStackEveryServiceExportsItsSpansToTheAgent() {
+        assertThat(ServiceProcess.observabilityProperties(true))
+                .containsExactly(Map.entry("OTEL_EXPORTER_OTLP_ENDPOINT", "http://localhost:4317"));
+        assertThat(ServiceProcess.observabilityProperties(false)).isEmpty();
+    }
+
     /** The chaos run (20 §5) uses the default timings: no {@code systemtest} profile. */
     @Test
     void theChaosRunStartsServicesInTheLocalProfileOnly() {

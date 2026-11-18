@@ -1,6 +1,7 @@
 // Workload discovery of the agent (specs/26-observability.md §6.1) for docker compose, in place of the Kubernetes
 // discovery: containers labelled `tpe.io/scrape=true` are scraped on the port of `tpe.io/port` and their stdout is
-// tailed. Target labels of §3: `namespace` (the compose project), `pod` and `instance` (the container name). No node
+// tailed; so are the system-test harness's services, which are host processes (§13).
+// Target labels of §3: `namespace` (the compose project), `pod` and `instance` (the container name). No node
 // exporter here: on a laptop it would describe the Docker VM.
 
 declare "workloads" {
@@ -75,6 +76,69 @@ declare "workloads" {
   loki.source.docker "services" {
     host       = "unix:///var/run/docker.sock"
     targets    = discovery.relabel.logs.output
+    forward_to = argument.logs_to.value
+  }
+
+  // ---- The system-test harness's services: processes on the host, not containers (issue #126) ----
+  // tests/system-tests starts each service from its jar on a random port. Through the read-only mount of the
+  // repository at /repo, the harness's list of what runs now (target/alloy-targets.json, Prometheus file discovery,
+  // labelled as above) gives the scrape targets on the Docker host, and each process's log file is its stdout.
+
+  discovery.file "harness" {
+    files = ["/repo/tests/system-tests/target/alloy-targets.json"]
+    // re-read, not only watched: file events do not cross every bind mount (Docker Desktop), nor a recreated target/
+    refresh_interval = "5s"
+  }
+
+  prometheus.scrape "harness" {
+    targets          = discovery.file.harness.targets
+    metrics_path     = "/actuator/prometheus"
+    scrape_interval  = "15s"
+    scrape_protocols = ["OpenMetricsText1.0.0", "PrometheusText0.0.4"]
+    forward_to       = argument.metrics_to.value
+  }
+
+  local.file_match "harness" {
+    path_targets = [{
+      "__path__"          = "/repo/tests/system-tests/target/*-systemtest.log",
+      "service_namespace" = "tpe",
+    }]
+  }
+
+  // the pod is the process's name, as in the targets list: target/<name>-systemtest.log
+  discovery.relabel "harness_logs" {
+    targets = local.file_match.harness.targets
+
+    rule {
+      source_labels = ["__path__"]
+      regex         = ".*/(.+)-systemtest[.]log"
+      target_label  = "pod"
+    }
+  }
+
+  loki.source.file "harness" {
+    targets    = discovery.relabel.harness_logs.output
+    forward_to = [loki.process.harness.receiver]
+  }
+
+  // a container's lines carry Docker's timestamp; a file's take the ECS one, so a file read again is not new lines.
+  // loki.source.file adds `filename`, which is no label of §3 (§7)
+  loki.process "harness" {
+    stage.json {
+      expressions = {
+        ts = "\"@timestamp\"",
+      }
+    }
+
+    stage.timestamp {
+      source = "ts"
+      format = "RFC3339Nano"
+    }
+
+    stage.label_drop {
+      values = ["filename"]
+    }
+
     forward_to = argument.logs_to.value
   }
 }
