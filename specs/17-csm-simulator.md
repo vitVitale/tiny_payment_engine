@@ -63,7 +63,10 @@ Every settlement, in either direction, is appended to the **settlement log** (`t
 (INV-10 in [20 §3](20-testing-strategy.md#3-global-invariants)).
 
 **Incoming (our bank = beneficiary):** `POST /sim/v1/incoming-payments` builds a `pacs.008` (BAH; new `TxId` and a
-seeded counterparty BIC as `DbtrAgt` unless the request gives `txId` / `debtorAgentBic`) and sends it to the gateway. Waits for our `pacs.002` until `answerTimeout` (default 6 s):
+seeded counterparty BIC as `DbtrAgt` unless the request gives `txId` / `debtorAgentBic`) and sends it to the gateway. The
+seeded BIC is the bank of the debtor IBAN in the bank directory ([01 §1.4](01-shared-libraries.md#14-bank-directory));
+`CdtrAgt` is our BIC from it. Waits for our `pacs.002` until `answerTimeout` (default 6 s) on its own clock, counted
+from sending the `pacs.008`; an answer at or after that, or a second answer, is journalled and changes nothing:
 
 - `ACCP` in time → settle → `pacs.002 ACSC` to the gateway (settlement confirmation), unless the scenario says
   `REJECT_AFTER_ACCP` (→ `RJCT AB05`, UC-06 8a) or `NO_CONFIRMATION` (UC-06 8b).
@@ -124,6 +127,11 @@ Bodies (JSON; a request the simulator cannot act on is `400` with a problem deta
 - `PUT /sim/v1/counterparty-accounts`: `[ { "iban": "…", "holderName": "…" } ]`, replacing all accounts. The bank
   code is not a separate field: it is the one the IBAN carries.
 - `PUT /sim/v1/scenarios/{creditorIban}`: `{ "scenario": "REJECT:AC04" }`; a reason code is four characters.
+- `POST /sim/v1/incoming-payments`: `{ "creditorIban", "amount": "12.34", "debtorName", "debtorIban", "scenario",
+  "txId"?, "debtorAgentBic"? }` (`scenario` defaults to `ACCEPT`); answers `200` `{ "txId", "gatewayStatus": 202 }`,
+  or `502 GATEWAY_UNREACHABLE` if csm-gateway gave no answer. The `pacs.008` is journalled as `SENT` before it goes;
+  one the gateway refuses (non-`2xx`) is forgotten; one it gave no answer for is kept (it may have taken it). `400` for a debtor IBAN of no bank in the directory without
+  `debtorAgentBic`, and for a (`debtorAgentBic`, `txId`) already sent.
 - `POST /sim/v1/incoming-payments/raw`: the XML as the body, sent as it is, without validation; answers `200`
   `{ "gatewayStatus": 202 }` with the status csm-gateway answered, or `502 GATEWAY_UNREACHABLE` if it gave none. A message the gateway took
   that is a CSM envelope naming a transaction is journalled as `SENT`.
@@ -133,8 +141,9 @@ Bodies (JSON; a request the simulator cannot act on is `400` with a problem deta
   "amountMinor", "settledAt" } ]`, oldest first; `since` is inclusive and optional.
 
 The simulator plays `ACCEPT`, `REJECT:<code>`, `TIMEOUT`, `DELAY:<ms>`, `SILENT`, `LOST`, `LATE_STATUS:<ms>` and
-`INVESTIGATION_SILENT`, and answers investigations. `VOP_SLOW` is refused with `400`, and `POST /sim/v1/incoming-payments` does
-not exist yet; both follow in later work.
+`INVESTIGATION_SILENT`, answers investigations of outgoing transfers, and plays incoming payments with `ACCEPT`.
+`VOP_SLOW` and the incoming scenarios `REJECT_AFTER_ACCP` / `NO_CONFIRMATION` are refused with `400`, and
+investigations of incoming transfers are not answered yet; they follow in later work.
 
 ## 4. Configuration
 
@@ -146,6 +155,7 @@ not exist yet; both follow in later work.
 | `tpe.sim.answer-timeout` | `6s` |
 | `tpe.sim.timeout-deadline` | `20s` (the scheme time-out deadline used wherever this spec says "+ 20s") |
 | `tpe.sim.tick` | `5ms` (how often due work runs; at most this much is added to a scheduled answer) |
+| `tpe.bank-directory.location` | see [01 §1.4](01-shared-libraries.md#14-bank-directory) (our BIC, counterparty BICs) |
 
 ## 5. Acceptance criteria
 

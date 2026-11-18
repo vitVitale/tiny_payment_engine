@@ -2,12 +2,17 @@ package com.tpe.csmsimulator.api.control;
 
 import com.tpe.csmsimulator.api.InvalidControlRequestException;
 import com.tpe.csmsimulator.application.CsmSimulation;
+import com.tpe.csmsimulator.application.IncomingPayment;
+import com.tpe.csmsimulator.application.IncomingPaymentSent;
+import com.tpe.csmsimulator.application.InvalidIncomingPaymentException;
 import com.tpe.csmsimulator.application.JournalEntry;
 import com.tpe.csmsimulator.application.Outage;
 import com.tpe.csmsimulator.domain.scenarios.CounterpartyAccount;
 import com.tpe.csmsimulator.domain.scenarios.Scenario;
 import com.tpe.csmsimulator.domain.scheme.Settlement;
+import com.tpe.paymentdomain.Bic;
 import com.tpe.paymentdomain.Iban;
+import com.tpe.paymentdomain.Money;
 import com.tpe.paymentdomain.PartyName;
 import com.tpe.paymentdomain.TxId;
 import java.time.Duration;
@@ -47,6 +52,20 @@ class ControlController {
     /** @param gatewayStatus the HTTP status csm-gateway answered */
     record RawSent(int gatewayStatus) {}
 
+    /**
+     * @param amount in euros, e.g. {@code "12.34"}
+     * @param scenario {@code ACCEPT} (the default)
+     * @param txId optional: a new one if absent
+     * @param debtorAgentBic optional: the bank of {@code debtorIban} in the bank directory if absent
+     */
+    record IncomingPaymentBody(String creditorIban, String amount, String debtorName, String debtorIban,
+            String scenario, String txId, String debtorAgentBic) {}
+
+    /** @param gatewayStatus the HTTP status csm-gateway answered; a payment it did not take is forgotten */
+    record IncomingPaymentCreated(String txId, int gatewayStatus) {}
+
+    private static final String ACCEPT = "ACCEPT";
+
     record SettlementView(String txId, String debtorAgentBic, String direction, long amountMinor, Instant settledAt) {
 
         static SettlementView of(Settlement settlement) {
@@ -85,6 +104,31 @@ class ControlController {
         return ResponseEntity.noContent().build();
     }
 
+    /**
+     * Builds a {@code pacs.008} and sends it to csm-gateway; {@code 502} if the gateway gave no answer. Only the
+     * default scenario, {@code ACCEPT}, is played so far.
+     */
+    @PostMapping("/incoming-payments")
+    IncomingPaymentCreated incomingPayment(@RequestBody IncomingPaymentBody body) {
+        if (body.scenario() != null && !body.scenario().equals(ACCEPT)) {
+            throw new InvalidControlRequestException("scenario", "incoming payments play ACCEPT only so far");
+        }
+        IncomingPayment payment = new IncomingPayment(
+                new Iban(required("creditorIban", body.creditorIban())),
+                Money.parse(required("amount", body.amount())),
+                new PartyName(required("debtorName", body.debtorName())),
+                new Iban(required("debtorIban", body.debtorIban())),
+                body.txId() == null ? null : new TxId(body.txId()),
+                body.debtorAgentBic() == null ? null : new Bic(body.debtorAgentBic()));
+        IncomingPaymentSent sent;
+        try {
+            sent = simulation.sendIncomingPayment(payment);
+        } catch (InvalidIncomingPaymentException e) {
+            throw new InvalidControlRequestException(e.field(), e.getMessage());
+        }
+        return new IncomingPaymentCreated(sent.txId().value(), sent.gatewayStatus());
+    }
+
     /** Sends the body to csm-gateway as it is, possibly invalid; {@code 502} if the gateway gave no answer. */
     @PostMapping("/incoming-payments/raw")
     RawSent sendRaw(@RequestBody String message) {
@@ -119,5 +163,12 @@ class ControlController {
     ResponseEntity<Void> reset() {
         simulation.reset();
         return ResponseEntity.noContent().build();
+    }
+
+    private static String required(String field, String value) {
+        if (value == null) {
+            throw new InvalidControlRequestException(field, field + " is required");
+        }
+        return value;
     }
 }

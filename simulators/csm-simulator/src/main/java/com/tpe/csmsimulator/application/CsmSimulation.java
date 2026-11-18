@@ -4,6 +4,7 @@ import com.tpe.csmsimulator.application.JournalEntry.Kind;
 import com.tpe.csmsimulator.domain.scenarios.CounterpartyAccount;
 import com.tpe.csmsimulator.domain.scenarios.Scenario;
 import com.tpe.csmsimulator.domain.scenarios.Scenarios;
+import com.tpe.csmsimulator.domain.scheme.IncomingScheme;
 import com.tpe.csmsimulator.domain.scheme.OutgoingScheme;
 import com.tpe.csmsimulator.domain.scheme.OutgoingScheme.Outcome;
 import com.tpe.csmsimulator.domain.scheme.Settlement;
@@ -16,18 +17,25 @@ import com.tpe.iso20022model.EnvelopeCodec.Rejected;
 import com.tpe.iso20022model.Pacs002Builder;
 import com.tpe.iso20022model.Pacs002Builder.Status;
 import com.tpe.iso20022model.Pacs002Builder.StatusReport;
+import com.tpe.iso20022model.Pacs008Builder;
+import com.tpe.iso20022model.Pacs008Builder.AccountHolder;
 import com.tpe.iso20022model.XsdValidator.Violation;
 import com.tpe.iso20022model.pacs008v08.CreditTransferTransaction39;
+import com.tpe.paymentdomain.BankDirectory;
+import com.tpe.paymentdomain.BankEntry;
 import com.tpe.paymentdomain.Bic;
 import com.tpe.paymentdomain.EndToEndId;
 import com.tpe.paymentdomain.Iban;
 import com.tpe.paymentdomain.Money;
 import com.tpe.paymentdomain.MsgId;
+import com.tpe.paymentdomain.PartyName;
 import com.tpe.paymentdomain.TxId;
 import com.tpe.paymentdomain.Uetr;
 import com.tpe.paymentdomain.UlidGenerator;
 import java.time.Clock;
 import java.time.Instant;
+import java.time.LocalDate;
+import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.Currency;
@@ -39,14 +47,16 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.PriorityQueue;
 import java.util.Set;
+import java.util.UUID;
 import java.util.function.Function;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 /**
  * The simulated CSM (specs/17-csm-simulator.md §3.1, §3.2, §3.5): receives envelopes from csm-gateway, plays the scheme
- * for our outgoing {@code pacs.008}, answers status investigations ({@code pacs.028}) with the final status it knows,
- * keeps the settlement log and the journal, and holds the control state. All state is in memory; {@link #reset()} is
+ * for our outgoing {@code pacs.008}, delivers incoming {@code pacs.008} to us and settles the ones we accept in time,
+ * answers status investigations ({@code pacs.028}) with the final status it knows, keeps the settlement log and the
+ * journal, and holds the control state. All state is in memory; {@link #reset()} is
  * a clean slate.
  *
  * <p>Work happens on a timeline read from the injected clock: a received message is processed at {@code now} (or
@@ -66,6 +76,10 @@ public final class CsmSimulation {
     private static final Logger log = LoggerFactory.getLogger(CsmSimulation.class);
     private static final Currency EUR = Currency.getInstance("EUR");
     private static final String MSG_ID_PREFIX = "SIMM";
+    private static final String TX_ID_PREFIX = "SIMT";
+    private static final String END_TO_END_ID_PREFIX = "SIME";
+    /** Incoming payments are to accounts of ours; the CSM does not know their holders' names. */
+    private static final PartyName CREDITOR_NAME = new PartyName("Account Holder");
 
     /** The outcome of {@link #receive(String)}. */
     public sealed interface Receipt permits Received, Refused {}
@@ -88,19 +102,39 @@ public final class CsmSimulation {
     /** A transaction the CSM received; {@code finalStatus} is {@code null} until it has one. */
     private record Transaction(CreditTransfer transfer, Status finalStatus) {}
 
+    /** Where an incoming payment stands: the CSM waits for our answer until its deadline. */
+    private enum AnswerState { AWAITING, SETTLED, REJECTED, TIMED_OUT }
+
+    /** An incoming payment the CSM delivered to the gateway at {@code transfer.createdAt()}. */
+    private record Incoming(Pacs008Builder.CreditTransfer transfer, AnswerState state) {
+
+        Incoming with(AnswerState next) {
+            return new Incoming(transfer, next);
+        }
+
+        /** Whether {@code entry} journals this payment's {@code pacs.008}. */
+        boolean sentAs(JournalEntry entry) {
+            return transfer.msgId().value().equals(entry.msgId());
+        }
+    }
+
     private final EnvelopeCodec envelopes;
     private final OutgoingScheme scheme;
+    private final IncomingScheme incomingScheme;
     private final Pacs002Builder statusReports;
+    private final Pacs008Builder creditTransfers = new Pacs008Builder();
     private final GatewayClient gateway;
     private final Clock clock;
     private final UlidGenerator ulids;
     private final Bic ownBic;
+    private final BankDirectory banks;
 
     private final Object lock = new Object();
     private final Scenarios scenarios = new Scenarios();
     private final Map<Iban, CounterpartyAccount> counterpartyAccounts = new HashMap<>();
     private final Set<String> processedMsgIds = new HashSet<>();
     private final Map<TransactionKey, Transaction> transactions = new HashMap<>();
+    private final Map<TransactionKey, Incoming> incoming = new HashMap<>();
     private final List<JournalEntry> journal = new ArrayList<>();
     private final List<Settlement> settlements = new ArrayList<>();
     private final PriorityQueue<Due> timeline =
@@ -110,16 +144,22 @@ public final class CsmSimulation {
     private long generation;
     private Outage outage = Outage.NONE;
 
-    /** @param ownBic the CSM's BIC, {@code tpe.sim.own-bic}: the instructing agent of the status reports it sends */
-    public CsmSimulation(EnvelopeCodec envelopes, OutgoingScheme scheme, Pacs002Builder statusReports,
-            GatewayClient gateway, Clock clock, UlidGenerator ulids, Bic ownBic) {
+    /**
+     * @param ownBic the CSM's BIC, {@code tpe.sim.own-bic}: the instructing agent of the status reports it sends
+     * @param banks our BIC (the creditor agent of incoming payments) and the counterparty banks (their debtor agent)
+     */
+    public CsmSimulation(EnvelopeCodec envelopes, OutgoingScheme scheme, IncomingScheme incomingScheme,
+            Pacs002Builder statusReports, GatewayClient gateway, Clock clock, UlidGenerator ulids, Bic ownBic,
+            BankDirectory banks) {
         this.envelopes = Objects.requireNonNull(envelopes, "envelopes");
         this.scheme = Objects.requireNonNull(scheme, "scheme");
+        this.incomingScheme = Objects.requireNonNull(incomingScheme, "incomingScheme");
         this.statusReports = Objects.requireNonNull(statusReports, "statusReports");
         this.gateway = Objects.requireNonNull(gateway, "gateway");
         this.clock = Objects.requireNonNull(clock, "clock");
         this.ulids = Objects.requireNonNull(ulids, "ulids");
         this.ownBic = Objects.requireNonNull(ownBic, "ownBic");
+        this.banks = Objects.requireNonNull(banks, "banks");
     }
 
     /**
@@ -144,7 +184,10 @@ public final class CsmSimulation {
                     StatusRequest request = StatusRequest.of(envelope);
                     yield at -> investigate(request, at);
                 }
-                case PACS_002 -> null;
+                case PACS_002 -> {
+                    Answer answer = Answer.of(envelope);
+                    yield at -> answer(answer, at);
+                }
             };
         } catch (RuntimeException e) {
             return refuse(EnvelopeCodec.Part.DOCUMENT, List.of(new Violation(0, 0, UNREADABLE_MESSAGE, e.toString())));
@@ -154,7 +197,7 @@ public final class CsmSimulation {
             boolean duplicate = !processedMsgIds.add(message.msgId());
             journal.add(new JournalEntry(message.txId(), Kind.RECEIVED, envelope.messageType().version(),
                     message.msgId(), now, duplicate, xml));
-            if (!duplicate && work != null) {
+            if (!duplicate) {
                 schedule(now.plus(outage.delay()), work);
             }
         }
@@ -212,6 +255,60 @@ public final class CsmSimulation {
         return status;
     }
 
+    /**
+     * Sends a new incoming {@code pacs.008} to the gateway ({@code POST /sim/v1/incoming-payments}) and waits for our
+     * answer until the answer deadline. It is journalled as sent before it goes, so our answer, which may come before
+     * the gateway's response, follows it in the journal; a payment the gateway refuses ({@code non-2xx}) is forgotten.
+     *
+     * @throws InvalidIncomingPaymentException if it has no debtor agent, or its transaction exists already
+     * @throws GatewayUnreachableException if the gateway gave no answer; the payment is kept, as the gateway may have
+     *     taken it
+     */
+    public IncomingPaymentSent sendIncomingPayment(IncomingPayment payment) {
+        Pacs008Builder.CreditTransfer transfer;
+        TransactionKey key;
+        JournalEntry entry;
+        synchronized (lock) {
+            Instant now = clock.instant();
+            Bic debtorAgent = payment.debtorAgent() != null ? payment.debtorAgent()
+                    : banks.lookup(payment.debtorIban()).map(BankEntry::bic).orElseThrow(
+                            () -> new InvalidIncomingPaymentException("debtorAgentBic",
+                                    "no bank in the directory for the debtor IBAN; give debtorAgentBic"));
+            TxId txId = payment.txId() != null ? payment.txId() : new TxId(TX_ID_PREFIX + ulids.next());
+            key = new TransactionKey(debtorAgent, txId);
+            if (incoming.containsKey(key)) {
+                throw new InvalidIncomingPaymentException("txId",
+                        "an incoming payment " + txId.value() + " from " + debtorAgent.value() + " exists already");
+            }
+            transfer = new Pacs008Builder.CreditTransfer(new MsgId(MSG_ID_PREFIX + ulids.next()), now, txId,
+                    new EndToEndId(END_TO_END_ID_PREFIX + ulids.next()), new Uetr(UUID.randomUUID().toString()),
+                    payment.amount(), LocalDate.ofInstant(now, ZoneOffset.UTC), now,
+                    new AccountHolder(payment.debtorName(), payment.debtorIban()), debtorAgent, banks.ownBic(),
+                    new AccountHolder(CREDITOR_NAME, payment.creditor()), null);
+            // join validates both parts: everything the simulator sends is schema-valid (SIM-AC-02)
+            String xml = envelopes.join(creditTransfers.build(transfer));
+            entry = new JournalEntry(txId, Kind.SENT, CsmMessageType.PACS_008.version(), transfer.msgId().value(),
+                    now, false, xml);
+            incoming.put(key, new Incoming(transfer, AnswerState.AWAITING));
+            journal.add(entry);
+            MsgId msgId = transfer.msgId();
+            schedule(incomingScheme.answerDeadline(now), at -> answerTimedOut(key, msgId));
+        }
+        int status;
+        try {
+            status = gateway.post(entry.envelope());
+        } catch (RuntimeException e) {
+            // kept: the gateway may have taken it before the connection failed, and then answers it
+            throw new GatewayUnreachableException(e);
+        }
+        if (!GatewayClient.isSuccess(status)) {
+            log.warn("csm-gateway did not take incoming {} of {}: {}", transfer.msgId().value(),
+                    transfer.txId().value(), status);
+            forget(key, entry);
+        }
+        return new IncomingPaymentSent(transfer.txId(), status);
+    }
+
     public void setScenario(Iban creditor, Scenario scenario) {
         synchronized (lock) {
             scenarios.set(creditor, scenario);
@@ -262,6 +359,7 @@ public final class CsmSimulation {
             counterpartyAccounts.clear();
             processedMsgIds.clear();
             transactions.clear();
+            incoming.clear();
             journal.clear();
             settlements.clear();
             timeline.clear();
@@ -309,6 +407,64 @@ public final class CsmSimulation {
         }
         transactions.put(transfer.key(), new Transaction(transfer, outcome.status()));
         return report;
+    }
+
+    /** Drops an incoming payment the gateway did not take; its answer deadline then finds nothing to time out. */
+    private void forget(TransactionKey key, JournalEntry sent) {
+        synchronized (lock) {
+            Incoming forgotten = incoming.get(key);
+            if (forgotten != null && forgotten.sentAs(sent)) {
+                incoming.remove(key);
+                journal.remove(sent);
+            }
+        }
+    }
+
+    /**
+     * Runs under the lock, as of {@code now}: our answer to an incoming payment. An {@code ACCP} in time is settled
+     * and confirmed with a {@code pacs.002 ACSC}; a {@code RJCT} in time is recorded; anything else (late, a second
+     * answer, one naming no payment the CSM sent) is only journalled.
+     */
+    private Optional<Outbound> answer(Answer answer, Instant now) {
+        Optional<Map.Entry<TransactionKey, Incoming>> found = incoming.entrySet().stream()
+                .filter(e -> answer.answers(e.getKey(), e.getValue().transfer().msgId()))
+                .findFirst();
+        if (found.isEmpty()) {
+            log.info("answer {} of {} names no incoming payment", answer.msgId().value(), answer.txId().value());
+            return Optional.empty();
+        }
+        TransactionKey key = found.get().getKey();
+        Incoming payment = found.get().getValue();
+        Pacs008Builder.CreditTransfer transfer = payment.transfer();
+        IncomingScheme.Effect effect = payment.state() == AnswerState.AWAITING
+                ? incomingScheme.answer(transfer.createdAt(), answer.status(), now)
+                : IncomingScheme.Effect.NONE;
+        switch (effect) {
+            case SETTLE -> {
+                incoming.put(key, payment.with(AnswerState.SETTLED));
+                settlements.add(new Settlement(transfer.txId(), transfer.debtorAgent(), Direction.INCOMING,
+                        transfer.amount().minor(), now));
+                return Optional.of(statusReport(transfer.txId(), now, id -> new StatusReport(id, now,
+                        transfer.msgId(), CsmMessageType.PACS_008, transfer.txId(), transfer.endToEndId(),
+                        transfer.uetr(), transfer.debtorAgent(), Status.SETTLED, ownBic, transfer.creditorAgent())));
+            }
+            case REJECT -> incoming.put(key, payment.with(AnswerState.REJECTED));
+            case NONE -> log.info("answer {} ({}) of {} changes nothing: {}", answer.msgId().value(),
+                    answer.status(), transfer.txId().value(),
+                    payment.state() == AnswerState.AWAITING ? "late, or not ACCP / RJCT" : payment.state());
+        }
+        return Optional.empty();
+    }
+
+    /** Runs under the lock: the CSM stops waiting for our answer and sends us nothing. */
+    private Optional<Outbound> answerTimedOut(TransactionKey key, MsgId msgId) {
+        Incoming payment = incoming.get(key);
+        if (payment != null && payment.state() == AnswerState.AWAITING
+                && payment.transfer().msgId().equals(msgId)) {
+            incoming.put(key, payment.with(AnswerState.TIMED_OUT));
+            log.info("no answer to incoming {} of {} in time", msgId.value(), key.txId().value());
+        }
+        return Optional.empty();
     }
 
     /** The {@code pacs.002} answering the {@code pacs.008}. */
@@ -442,6 +598,36 @@ public final class CsmSimulation {
                     transaction.getAccptncDtTm().toGregorianCalendar().toInstant(),
                     new Bic(transaction.getDbtrAgt().getFinInstnId().getBICFI()),
                     new Iban(transaction.getCdtrAcct().getId().getIBAN()));
+        }
+    }
+
+    /**
+     * Our answer to an incoming payment, a {@code pacs.002} read into domain types. It names the transaction by
+     * {@code OrgnlTxRef/DbtrAgt} and {@code OrgnlTxId} (ADR-010), or, without a debtor agent, by {@code OrgnlTxId}
+     * and {@code OrgnlMsgId}.
+     *
+     * @param originalMsgId {@code null} when the answer carries none
+     * @param debtorAgent {@code null} when the answer carries none
+     */
+    private record Answer(MsgId msgId, MsgId originalMsgId, TxId txId, Bic debtorAgent, String status) {
+
+        /** @throws RuntimeException if a field the CSM needs is missing or not a valid domain value */
+        static Answer of(CsmEnvelope envelope) {
+            var message = ((com.tpe.iso20022model.pacs002v10.Document) envelope.document()).getFIToFIPmtStsRpt();
+            var transaction = message.getTxInfAndSts().getFirst();
+            var reference = transaction.getOrgnlTxRef();
+            Bic debtorAgent = reference == null || reference.getDbtrAgt() == null ? null
+                    : new Bic(reference.getDbtrAgt().getFinInstnId().getBICFI());
+            MsgId originalMsgId = message.getOrgnlGrpInfAndSts().stream().findFirst()
+                    .map(group -> new MsgId(group.getOrgnlMsgId())).orElse(null);
+            return new Answer(new MsgId(message.getGrpHdr().getMsgId()), originalMsgId,
+                    new TxId(transaction.getOrgnlTxId()), debtorAgent,
+                    Objects.requireNonNull(transaction.getTxSts(), "TxSts"));
+        }
+
+        boolean answers(TransactionKey key, MsgId incomingMsgId) {
+            return debtorAgent != null ? key.equals(new TransactionKey(debtorAgent, txId))
+                    : key.txId().equals(txId) && incomingMsgId.equals(originalMsgId);
         }
     }
 

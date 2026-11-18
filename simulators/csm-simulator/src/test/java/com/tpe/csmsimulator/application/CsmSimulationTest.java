@@ -11,6 +11,7 @@ import com.tpe.csmsimulator.application.CsmSimulation.Received;
 import com.tpe.csmsimulator.application.CsmSimulation.Refused;
 import com.tpe.csmsimulator.application.JournalEntry.Kind;
 import com.tpe.csmsimulator.domain.scenarios.Scenario;
+import com.tpe.csmsimulator.domain.scheme.IncomingScheme;
 import com.tpe.csmsimulator.domain.scheme.OutgoingScheme;
 import com.tpe.csmsimulator.domain.scheme.Settlement;
 import com.tpe.csmsimulator.domain.scheme.Settlement.Direction;
@@ -20,8 +21,10 @@ import com.tpe.iso20022model.EnvelopeCodec;
 import com.tpe.iso20022model.EnvelopeCodec.Accepted;
 import com.tpe.iso20022model.Pacs002Builder;
 import com.tpe.iso20022model.pacs002v10.PaymentTransaction110;
+import com.tpe.paymentdomain.BankEntry;
 import com.tpe.paymentdomain.Bic;
 import com.tpe.paymentdomain.Iban;
+import com.tpe.paymentdomain.InMemoryBankDirectory;
 import com.tpe.paymentdomain.MutableClock;
 import com.tpe.paymentdomain.TxId;
 import com.tpe.paymentdomain.UlidGenerator;
@@ -29,6 +32,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
 import java.util.Random;
 import org.junit.jupiter.api.Test;
 
@@ -44,9 +48,7 @@ class CsmSimulationTest {
     private boolean gatewayDown;
     private int gatewayStatus = 202;
     private final EnvelopeCodec envelopes = new EnvelopeCodec();
-    private final CsmSimulation simulation = new CsmSimulation(envelopes,
-            new OutgoingScheme(BENEFICIARY_DELAY, TIMEOUT_DEADLINE), new Pacs002Builder(), this::gateway, clock,
-            new UlidGenerator(clock, new Random(7)), CSM_BIC);
+    private final CsmSimulation simulation = simulation(this::gateway);
 
     @Test
     void anAcceptedTransferIsSettledAndAnsweredSettledAfterTheBeneficiaryDelay() {
@@ -432,10 +434,9 @@ class CsmSimulationTest {
 
     @Test
     void aRawMessageTheGatewayGivesNoAnswerToIsGatewayUnreachable() {
-        CsmSimulation unreachable = new CsmSimulation(envelopes, new OutgoingScheme(BENEFICIARY_DELAY,
-                TIMEOUT_DEADLINE), new Pacs002Builder(), message -> {
-                    throw new IllegalStateException("connection refused");
-                }, clock, new UlidGenerator(clock, new Random(7)), CSM_BIC);
+        CsmSimulation unreachable = simulation(message -> {
+            throw new IllegalStateException("connection refused");
+        });
 
         assertThatThrownBy(() -> unreachable.sendRaw("<x/>")).isInstanceOf(GatewayUnreachableException.class);
     }
@@ -447,6 +448,13 @@ class CsmSimulationTest {
         assertThat(simulation.sendRaw(pacs008("MSG-1", "TX-1", "10.00", START))).isEqualTo(400);
 
         assertThat(simulation.journal(new TxId("TX-1"))).isEmpty();
+    }
+
+    private CsmSimulation simulation(GatewayClient gateway) {
+        return new CsmSimulation(envelopes, new OutgoingScheme(BENEFICIARY_DELAY, TIMEOUT_DEADLINE),
+                new IncomingScheme(Duration.ofSeconds(6)), new Pacs002Builder(), gateway, clock,
+                new UlidGenerator(clock, new Random(7)), CSM_BIC, new InMemoryBankDirectory("10010010", OUR_BIC,
+                        List.of(new BankEntry("10010010", OUR_BIC, true, Optional.empty()))));
     }
 
     private int gateway(String envelope) {

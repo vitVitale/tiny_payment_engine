@@ -73,6 +73,18 @@
     </dependencies>
 
     <build>
+        <resources>
+            <resource>
+                <directory>src/main/resources</directory>
+            </resource>
+            <!-- the default tpe.bank-directory.location, classpath:bank-directory.yml (specs/01-shared-libraries.md §1.4) -->
+            <resource>
+                <directory>${project.basedir}/../../deploy/config</directory>
+                <includes>
+                    <include>bank-directory.yml</include>
+                </includes>
+            </resource>
+        </resources>
         <plugins>
             <plugin>
                 <groupId>org.springframework.boot</groupId>
