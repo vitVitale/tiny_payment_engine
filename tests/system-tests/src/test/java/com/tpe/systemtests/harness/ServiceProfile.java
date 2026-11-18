@@ -33,7 +33,10 @@ public final class ServiceProfile {
         return systemtest(ServiceJar.LEDGER);
     }
 
-    /** A service of this repository in the profiles {@link ServiceProcess} starts it in ({@code local,systemtest}). */
+    /**
+     * A service of this repository in the profiles {@link ServiceProcess} starts it in: {@code local,systemtest}, or
+     * {@code local} only in the chaos run ({@link Chaos}), whose bounds then follow the default timings.
+     */
     public static ServiceProfile systemtest(ServiceJar service) {
         return of(service.resources(), ServiceProcess.PROFILES.toArray(String[]::new));
     }

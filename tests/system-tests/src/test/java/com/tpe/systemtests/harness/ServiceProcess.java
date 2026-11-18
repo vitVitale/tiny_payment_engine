@@ -32,7 +32,15 @@ import org.awaitility.core.ConditionTimeoutException;
 public final class ServiceProcess {
 
     /** The profiles every service runs in under the system tests (20 §2.1); {@link ServiceProfile} reads the same. */
-    static final List<String> PROFILES = List.of("local", "systemtest");
+    static final List<String> PROFILES = profiles(Chaos.enabled());
+
+    /**
+     * {@code local,systemtest}; for the chaos run {@code local} only, so the services keep their default timings (20
+     * §5: the real margins absorb the failure).
+     */
+    static List<String> profiles(boolean chaos) {
+        return chaos ? List.of("local") : List.of("local", "systemtest");
+    }
 
     /** Spring Boot startup with Flyway on a cold JVM; not a business time, so not in the profile. */
     private static final Duration STARTUP = Duration.ofSeconds(90);
@@ -120,6 +128,22 @@ public final class ServiceProcess {
             if (!process.waitFor(SHUTDOWN.toMillis(), TimeUnit.MILLISECONDS)) {
                 process.destroyForcibly().waitFor();
             }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new IllegalStateException(e);
+        }
+    }
+
+    /**
+     * Kills the process at once ({@code SIGKILL}; on Windows it is terminated) and waits until it has gone: no shutdown
+     * of its own, so what it claimed stays claimed until its leases run out (CH-02).
+     */
+    public synchronized void kill() {
+        if (!isRunning()) {
+            return;
+        }
+        try {
+            process.destroyForcibly().waitFor();
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             throw new IllegalStateException(e);

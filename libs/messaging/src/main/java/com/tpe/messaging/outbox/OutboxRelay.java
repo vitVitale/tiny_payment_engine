@@ -261,6 +261,9 @@ public final class OutboxRelay implements SmartLifecycle {
             } catch (PublishFailedException e) {
                 log.warn("Outbox send failed, retrying from the oldest unpublished row in {}: {}", backoff,
                         e.getCause().toString());
+                // the failed iteration is progress, before the back-off as after it: a send blocked for max.block.ms
+                // and the longest back-off together would outlast stallAfter
+                lease.progress();
                 sleep(backoff);
                 backoff = min(backoff.multipliedBy(2), settings.maxBackoff());
                 lease.progress();
@@ -283,11 +286,18 @@ public final class OutboxRelay implements SmartLifecycle {
         RuntimeException sendFailure = null;
         for (OutboxRow row : rows) {
             Span span = sendSpan(row);
+            Future<RecordMetadata> send;
             try {
-                sends.add(producer.send(record(row, span), (metadata, e) -> end(span, e)));
+                send = producer.send(record(row, span), (metadata, e) -> end(span, e));
             } catch (RuntimeException e) {
                 end(span, e);
                 sendFailure = e; // later rows are not sent: they would be marked out of order
+                break;
+            }
+            sends.add(send);
+            // a send that timed out on metadata does not throw: its future has failed already, after max.block.ms;
+            // sending the rest would block that long for each, with no progress, until the lease is revoked
+            if (send.isDone() && failed(send)) {
                 break;
             }
         }
@@ -310,6 +320,11 @@ public final class OutboxRelay implements SmartLifecycle {
             throw new PublishFailedException(failure);
         }
         return rows.size() == settings.batchSize();
+    }
+
+    /** Whether a completed send failed; its failure is reported when its ack is awaited. */
+    private static boolean failed(Future<RecordMetadata> send) {
+        return send.state() == Future.State.FAILED;
     }
 
     /** Waits up to {@code ackTimeout}, in slices of a heartbeat interval: the loop is waiting, not stuck. */

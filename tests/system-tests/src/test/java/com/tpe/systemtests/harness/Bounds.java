@@ -110,6 +110,19 @@ public final class Bounds {
         return eventDelivery(ServiceProfile.systemtest(ServiceJar.CSM_GATEWAY));
     }
 
+    /**
+     * From a row in payment-orchestrator's outbox to its record in Kafka, the relay working as usual: CH-03's backlog
+     * after Kafka is reachable again.
+     */
+    public static Duration orchestratorEventDelivery() {
+        return eventDelivery(ServiceProfile.systemtest(ServiceJar.ORCHESTRATOR));
+    }
+
+    /** csm-gateway's {@code tpe.csm.transmit.lease}: a claimed transmission is not taken again before it (CH-02). */
+    public static Duration transmissionLease() {
+        return ServiceProfile.systemtest(ServiceJar.CSM_GATEWAY).duration("tpe.csm.transmit.lease").orElseThrow();
+    }
+
     /** {@link #eventDelivery(ServiceProfile)} of ledger-service as the harness runs it. */
     public static Duration eventDelivery() {
         return eventDelivery(ServiceProfile.ledger());
