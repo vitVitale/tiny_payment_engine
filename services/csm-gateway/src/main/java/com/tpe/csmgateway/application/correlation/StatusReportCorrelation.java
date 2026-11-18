@@ -1,12 +1,16 @@
 package com.tpe.csmgateway.application.correlation;
 
+import com.tpe.contracts.Direction;
 import com.tpe.csmgateway.application.GatewayMetrics;
+import com.tpe.csmgateway.application.incoming.IncomingEvents;
+import com.tpe.csmgateway.application.incoming.IncomingTransfers;
 import com.tpe.csmgateway.application.investigation.StatusRequests;
 import com.tpe.csmgateway.application.investigation.StatusRequests.StatusRequest;
 import com.tpe.csmgateway.application.journal.MessageJournal;
 import com.tpe.csmgateway.application.journal.MessageJournal.Entry;
 import com.tpe.csmgateway.application.outgoing.OutgoingEvents;
 import com.tpe.csmgateway.application.outgoing.OutgoingTransfers;
+import com.tpe.csmgateway.domain.incoming.IncomingTransfer;
 import com.tpe.csmgateway.domain.outgoing.OutgoingTransfer;
 import com.tpe.csmgateway.domain.outgoing.ReportedStatus;
 import com.tpe.csmgateway.domain.outgoing.StatusOutcome;
@@ -35,8 +39,9 @@ import org.slf4j.LoggerFactory;
  * journalled only; a contradicting one keeps the first in the row and is published anyway, for the orchestrator's
  * exception case (UC-04 8a). {@code UNKNOWN_TX} answering our {@code pacs.028} for a {@code SENT} transfer with no
  * final status past its {@code deadline_at} is a rejection {@code AB05} (UC-05 4c); otherwise, like {@code ACCP}, it
- * is journalled only.
- * Incoming transfers follow in later work. Unmatched → journalled {@code uncorrelated}, counted for the alert.
+ * is journalled only. Another debtor agent names an incoming transfer: its first final status is recorded and
+ * published the same way, {@code direction = INCOMING} (UC-06 8, 8a). Unmatched → journalled {@code uncorrelated},
+ * counted for the alert.
  *
  * <p>Events are written inside the payment's stored trace (ADR-014).
  */
@@ -51,18 +56,23 @@ public class StatusReportCorrelation {
     private static final String SPAN = "csm.status-report";
 
     private final OutgoingTransfers transfers;
+    private final IncomingTransfers incoming;
     private final StatusRequests statusRequests;
     private final MessageJournal journal;
     private final OutgoingEvents events;
+    private final IncomingEvents incomingEvents;
     private final GatewayMetrics metrics;
     private final Bic ownBic;
 
-    public StatusReportCorrelation(OutgoingTransfers transfers, StatusRequests statusRequests, MessageJournal journal,
-            OutgoingEvents events, GatewayMetrics metrics, Bic ownBic) {
+    public StatusReportCorrelation(OutgoingTransfers transfers, IncomingTransfers incoming,
+            StatusRequests statusRequests, MessageJournal journal, OutgoingEvents events,
+            IncomingEvents incomingEvents, GatewayMetrics metrics, Bic ownBic) {
         this.transfers = transfers;
+        this.incoming = incoming;
         this.statusRequests = statusRequests;
         this.journal = journal;
         this.events = events;
+        this.incomingEvents = incomingEvents;
         this.metrics = metrics;
         this.ownBic = ownBic;
     }
@@ -78,48 +88,119 @@ public class StatusReportCorrelation {
                 .map(g -> g.getOrgnlMsgId()).orElse(null);
 
         Optional<StatusRequest> answered = answered(originalMsgId);
-        Optional<OutgoingTransfer> transfer = match(txId, debtorAgent, originalMsgId, answered);
-        String note;
-        if (transfer.isEmpty()) {
-            note = UNCORRELATED;
-            metrics.uncorrelated();
-            log.warn("uncorrelated pacs.002 {} for {}", msgId, txId == null ? null : txId.value());
-        } else {
-            note = apply(transfer.get(), first.map(StatusReportCorrelation::status).orElse(ReportedStatus.unreadable()),
-                    answered.isPresent() ? StatusSource.INVESTIGATION : StatusSource.STATUS_REPORT, now);
-        }
-        journal.append(new Entry(MessageJournal.Direction.IN, envelope.messageType().version(), msgId,
-                transfer.map(OutgoingTransfer::txId).orElse(txId), debtorAgent, xml, true, List.of(), note, now));
+        ReportedStatus reported = first.map(StatusReportCorrelation::status).orElse(ReportedStatus.unreadable());
+        StatusSource source = answered.isPresent() ? StatusSource.INVESTIGATION : StatusSource.STATUS_REPORT;
+        Match match = match(txId, debtorAgent, originalMsgId, answered);
+        String note = switch (match) {
+            case Outgoing outgoing -> apply(outgoing.transfer(), reported, source, now);
+            case Incoming incoming -> apply(incoming.transfer(), reported, source, now);
+            case None none -> {
+                metrics.uncorrelated();
+                log.warn("uncorrelated pacs.002 {} for {}", msgId, txId == null ? null : txId.value());
+                yield UNCORRELATED;
+            }
+        };
+        TxId journalTxId = switch (match) {
+            case Outgoing outgoing -> outgoing.transfer().txId();
+            case Incoming incoming -> incoming.transfer().txId();
+            case None none -> txId;
+        };
+        Bic journalBic = match instanceof Incoming incoming ? incoming.transfer().debtorAgentBic()
+                : match instanceof Outgoing ? ownBic : debtorAgent;
+        journal.append(new Entry(MessageJournal.Direction.IN, envelope.messageType().version(), msgId, journalTxId,
+                journalBic, xml, true, List.of(), note, now));
     }
+
+    /** The transaction a report names, locked: an outgoing or an incoming transfer, or none. */
+    private sealed interface Match permits Outgoing, Incoming, None {}
+
+    private record Outgoing(OutgoingTransfer transfer) implements Match {}
+
+    private record Incoming(IncomingTransfer transfer) implements Match {}
+
+    private record None() implements Match {}
 
     /** The status request whose {@code pacs.028} this report answers, if it answers one. */
     private Optional<StatusRequest> answered(String originalMsgId) {
-        MsgId msgId;
-        try {
-            msgId = originalMsgId == null ? null : new MsgId(originalMsgId);
-        } catch (DomainValidationException e) {
-            // not a MsgId this gateway could have sent
-            return Optional.empty();
-        }
+        MsgId msgId = msgId(originalMsgId);
         return msgId == null ? Optional.empty() : statusRequests.findByMsgId(msgId);
     }
 
-    /** A {@code DbtrAgt} other than ours names an incoming transfer, which this gateway does not handle yet. */
-    private Optional<OutgoingTransfer> match(TxId txId, Bic debtorAgent, String originalMsgId,
-            Optional<StatusRequest> answered) {
-        if (debtorAgent != null && !ownBic.equals(debtorAgent)) {
-            return Optional.empty();
+    /** {@code null} for no value, or one that is not a {@code MsgId} this gateway or the CSM could have sent. */
+    private static MsgId msgId(String value) {
+        try {
+            return value == null ? null : new MsgId(value);
+        } catch (DomainValidationException e) {
+            return null;
         }
-        if (txId != null) {
-            Optional<OutgoingTransfer> byTxId = transfers.lock(txId);
-            if (byTxId.isPresent()) {
-                return byTxId;
+    }
+
+    /**
+     * The transaction is its debtor agent and {@code TxId} (ADR-010): our BIC names an outgoing transfer, another an
+     * incoming one. The answer to our {@code pacs.028} names it by the status request; a report without a debtor agent
+     * only by its {@code OrgnlMsgId} (§6.4), an outgoing transfer's {@code pacs.008} first, then an incoming one's.
+     */
+    private Match match(TxId txId, Bic debtorAgent, String originalMsgId, Optional<StatusRequest> answered) {
+        if (answered.isPresent()) {
+            StatusRequest request = answered.get();
+            Optional<? extends Match> requested = request.direction() == Direction.OUTGOING
+                    ? transfers.lock(request.txId()).map(Outgoing::new)
+                    : incoming.lock(request.debtorAgentBic(), request.txId()).map(Incoming::new);
+            if (requested.isPresent()) {
+                return requested.get();
             }
         }
-        if (answered.isPresent()) {
-            return transfers.lock(answered.get().txId());
+        if (debtorAgent != null && !ownBic.equals(debtorAgent)) {
+            return txId == null ? new None()
+                    : incoming.lock(debtorAgent, txId).<Match>map(Incoming::new).orElse(new None());
         }
-        return originalMsgId == null ? Optional.empty() : transfers.lockByMsgId(originalMsgId);
+        // a TxId alone names no transaction (ADR-010): without a debtor agent only the OrgnlMsgId does
+        if (txId != null && ownBic.equals(debtorAgent)) {
+            Optional<OutgoingTransfer> byTxId = transfers.lock(txId);
+            if (byTxId.isPresent()) {
+                return new Outgoing(byTxId.get());
+            }
+        }
+        if (originalMsgId == null) {
+            return new None();
+        }
+        Optional<OutgoingTransfer> byMsgId = transfers.lockByMsgId(originalMsgId);
+        if (byMsgId.isPresent()) {
+            return new Outgoing(byMsgId.get());
+        }
+        MsgId msgId = msgId(originalMsgId);
+        return debtorAgent != null || msgId == null ? new None()
+                : incoming.lockByMsgId(msgId).<Match>map(Incoming::new).orElse(new None());
+    }
+
+    /**
+     * What a report does to an incoming transfer (UC-06 8, 8a): the first final status is recorded and published, the
+     * same again is a duplicate, another contradicts it and is published while the first stays. {@code ACCP} and
+     * {@code UNKNOWN_TX} change nothing.
+     *
+     * @return the journal note
+     */
+    private String apply(IncomingTransfer transfer, ReportedStatus status, StatusSource source, Instant now) {
+        Effect effect = StatusOutcome.of(transfer.finalStatus(), status);
+        switch (effect) {
+            case INFORMATIONAL -> {
+                return INFORMATIONAL;
+            }
+            case DUPLICATE -> {
+                return DUPLICATE;
+            }
+            case RECORD -> incoming.recordFinal(transfer.debtorAgentBic(), transfer.txId(), status.finalStatus(),
+                    status.reason() == null ? null : status.reason().code(), now, source);
+            case CONTRADICTION -> log.warn("contradicting pacs.002 for incoming {} from {}: {} after {}",
+                    transfer.txId().value(), transfer.debtorAgentBic().value(), status.kind(),
+                    transfer.finalStatus());
+        }
+        switch (status.kind()) {
+            case SETTLED -> incomingEvents.settled(transfer, now, source, SPAN);
+            case REJECTED -> incomingEvents.rejected(transfer, status.reason(), now, source, SPAN);
+            default -> throw new IllegalArgumentException("no event for " + status.kind());
+        }
+        return effect == Effect.CONTRADICTION ? CONTRADICTING : null;
     }
 
     /** @return the journal note */

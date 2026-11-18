@@ -7,6 +7,7 @@ import com.tpe.csmgateway.application.correlation.StatusReportCorrelation;
 import com.tpe.csmgateway.application.inbound.InboundMessages;
 import com.tpe.csmgateway.application.incoming.AnswerTransmissions;
 import com.tpe.csmgateway.application.incoming.Answers;
+import com.tpe.csmgateway.application.incoming.IncomingEvents;
 import com.tpe.csmgateway.application.incoming.CreditTransferReceiving;
 import com.tpe.csmgateway.application.incoming.IncomingTransfers;
 import com.tpe.csmgateway.application.investigation.PaymentStatusRequesting;
@@ -121,8 +122,13 @@ class GatewayConfiguration {
 
     @Bean
     StatusRequestTransmissions statusRequestTransmissions(StatusRequests requests, OutgoingTransfers transfers,
-            MessageJournal journal) {
-        return new StatusRequestTransmissions(requests, transfers, journal);
+            IncomingTransfers incoming, MessageJournal journal) {
+        return new StatusRequestTransmissions(requests, transfers, incoming, journal);
+    }
+
+    @Bean
+    IncomingEvents incomingEvents(OutboxWriter outbox, Spans spans) {
+        return new IncomingEvents(outbox, spans);
     }
 
     /** Transmits the {@code pacs.028}s. */
@@ -149,19 +155,21 @@ class GatewayConfiguration {
     }
 
     @Bean
-    PaymentStatusRequesting paymentStatusRequesting(OutgoingTransfers transfers, StatusRequests requests,
-            MessageJournal journal, InboxGuard inbox, OutgoingEvents events,
-            @Qualifier("statusRequests") Transmitter statusRequestTransmitter,
+    PaymentStatusRequesting paymentStatusRequesting(OutgoingTransfers transfers, IncomingTransfers incoming,
+            StatusRequests requests, MessageJournal journal, InboxGuard inbox, OutgoingEvents events,
+            IncomingEvents incomingEvents, @Qualifier("statusRequests") Transmitter statusRequestTransmitter,
             GatewayMetrics metrics, Clock clock, UlidGenerator ulids, BankDirectory directory,
             CsmProperties properties) {
-        return new PaymentStatusRequesting(transfers, requests, journal, inbox, events, statusRequestTransmitter,
-                metrics, clock, ulids, directory.ownBic(), new Bic(properties.bic()));
+        return new PaymentStatusRequesting(transfers, incoming, requests, journal, inbox, events, incomingEvents,
+                statusRequestTransmitter, metrics, clock, ulids, directory.ownBic(), new Bic(properties.bic()));
     }
 
     @Bean
-    StatusReportCorrelation statusReportCorrelation(OutgoingTransfers transfers, StatusRequests requests,
-            MessageJournal journal, OutgoingEvents events, GatewayMetrics metrics, BankDirectory directory) {
-        return new StatusReportCorrelation(transfers, requests, journal, events, metrics, directory.ownBic());
+    StatusReportCorrelation statusReportCorrelation(OutgoingTransfers transfers, IncomingTransfers incoming,
+            StatusRequests requests, MessageJournal journal, OutgoingEvents events, IncomingEvents incomingEvents,
+            GatewayMetrics metrics, BankDirectory directory) {
+        return new StatusReportCorrelation(transfers, incoming, requests, journal, events, incomingEvents, metrics,
+                directory.ownBic());
     }
 
     @Bean

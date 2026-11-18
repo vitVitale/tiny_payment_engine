@@ -110,12 +110,14 @@ CREATE TABLE incoming_transfers (
   final_status     VARCHAR(10) CHECK (final_status IN ('SETTLED','REJECTED')),
   final_reason     VARCHAR(35),
   final_at         TIMESTAMPTZ,
+  final_source     VARCHAR(13) CHECK (final_source IN ('STATUS_REPORT','INVESTIGATION')), -- re-published as it was (§6.6)
   trace_context    VARCHAR(55),                  -- root of the incoming payment trace (ADR-014)
   version          BIGINT NOT NULL DEFAULT 0,
   PRIMARY KEY (debtor_agent_bic, tx_id)
 );
 CREATE INDEX incoming_unanswered ON incoming_transfers (answer_deadline) WHERE answer_status IS NULL;
 CREATE INDEX incoming_tx ON incoming_transfers (tx_id);               -- the admin API, across debtor agents
+CREATE INDEX incoming_msg_id ON incoming_transfers (msg_id);          -- a pacs.002 without OrgnlTxRef/DbtrAgt (§6.4)
 CREATE INDEX incoming_transmit_due ON incoming_transfers (next_transmit_at) WHERE transmit_status = 'PENDING';
 
 CREATE TABLE status_requests (
@@ -241,6 +243,7 @@ Endpoint transaction: validate, journal, then match `OrgnlTxId` + `OrgnlTxRef/Db
 | | `RJCT` + `UNKNOWN_TX` (answer to `pacs.028`) | if `send_status = SENT`, no final status yet and `now ≥ deadline_at` → `REJECTED AB05`, outbox `CreditTransferRejected(OUTGOING, AB05, INVESTIGATION)` (UC-05 4c); otherwise journal only (a late answer after a final status is a no-op, UC-05) |
 | `incoming_transfers` | `ACSC` | set `SETTLED`, outbox `CreditTransferSettled(INCOMING)` (UC-06 8) |
 | | `RJCT` | set `REJECTED`, outbox `CreditTransferRejected(INCOMING, reason)` (UC-06 8a) |
+| | `ACCP`, `RJCT` + `UNKNOWN_TX` | journal only |
 | none | any | journal with note `uncorrelated`, alert |
 
 - Same final status again → journal only (duplicate).
@@ -287,11 +290,11 @@ Listener transaction; per direction:
 - The `pacs.028` carries the `pacs.008`'s `MsgId` (`OrgnlMsgId`), `TxId`, `EndToEndId` (read from the journalled
   `pacs.008`) and `UETR`, from our BIC to `tpe.csm.bic`. It is journalled `OUT` and transmitted like a `pacs.008`
   (§6.5), on the payment's trace.
-- A `RequestPaymentStatus` for an incoming transfer goes to the DLT until the incoming flow exists (GW-AC-17).
-
-Incoming: look up `incoming_transfers` by the command's (`debtorAgentBic`, `txId`); final status known → re-publish;
-else insert a `status_requests` row with that `debtor_agent_bic` and send a `pacs.028` (with `OrgnlTxRef/DbtrAgt`) as
-above; no record → journal + alert.
+Incoming: look up `incoming_transfers` by the command's (`debtorAgentBic`, `txId`); final status known → re-publish
+(`direction = INCOMING`, no `paymentId`, the recorded `final_at`, reason and `final_source`); else insert a
+`status_requests` row with that `debtor_agent_bic` and send a `pacs.028` (with `OrgnlTxRef/DbtrAgt`) as above, its
+`EndToEndId` and `UETR` read from the journalled `pacs.008`, on the incoming payment's trace; no record (or no
+journalled `pacs.008` to name it by) → journal note and alert (`tpe.csm.uncorrelated`, an `ERROR` log), nothing sent.
 
 ## 7. Configuration
 

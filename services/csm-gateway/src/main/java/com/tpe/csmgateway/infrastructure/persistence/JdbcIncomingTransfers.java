@@ -7,6 +7,8 @@ import com.tpe.csmgateway.application.incoming.IncomingTransfers;
 import com.tpe.csmgateway.domain.incoming.IncomingTransfer;
 import com.tpe.csmgateway.domain.incoming.IncomingTransfer.AnswerStatus;
 import com.tpe.csmgateway.domain.incoming.IncomingTransfer.DecidedBy;
+import com.tpe.csmgateway.domain.outgoing.FinalStatus;
+import com.tpe.csmgateway.domain.outgoing.StatusSource;
 import com.tpe.csmgateway.domain.transmit.TransmitStatus;
 import com.tpe.paymentdomain.Bic;
 import com.tpe.paymentdomain.MsgId;
@@ -29,7 +31,7 @@ class JdbcIncomingTransfers implements IncomingTransfers {
     private static final String COLUMNS = """
             debtor_agent_bic, tx_id, msg_id, received_at, answer_deadline, answer_status, answer_reason,
             answer_decided_by, answered_at, answer_msg_id, transmit_status, transmit_attempts, next_transmit_at,
-            trace_context""";
+            final_status, final_reason, final_at, final_source, trace_context""";
 
     private final JdbcClient jdbc;
 
@@ -39,8 +41,12 @@ class JdbcIncomingTransfers implements IncomingTransfers {
 
     @Override
     public boolean insert(IncomingTransfer t) {
-        return jdbc.sql("INSERT INTO incoming_transfers (" + COLUMNS + """
-                ) VALUES (:bic, :txId, :msgId, :receivedAt, :answerDeadline, :answerStatus, :answerReason,
+        // a new row has no final status
+        return jdbc.sql("""
+                INSERT INTO incoming_transfers (debtor_agent_bic, tx_id, msg_id, received_at, answer_deadline,
+                  answer_status, answer_reason, answer_decided_by, answered_at, answer_msg_id, transmit_status,
+                  transmit_attempts, next_transmit_at, trace_context)
+                VALUES (:bic, :txId, :msgId, :receivedAt, :answerDeadline, :answerStatus, :answerReason,
                   :answerDecidedBy, :answeredAt, :answerMsgId, :transmitStatus, :transmitAttempts, :nextTransmitAt,
                   :traceContext)
                 ON CONFLICT (debtor_agent_bic, tx_id) DO NOTHING""")
@@ -67,6 +73,26 @@ class JdbcIncomingTransfers implements IncomingTransfers {
                 + " FROM incoming_transfers WHERE debtor_agent_bic = :bic AND tx_id = :txId FOR UPDATE")
                 .param("bic", debtorAgentBic.value()).param("txId", txId.value())
                 .query(JdbcIncomingTransfers::row).optional();
+    }
+
+    @Override
+    public Optional<IncomingTransfer> lockByMsgId(MsgId msgId) {
+        return jdbc.sql("SELECT " + COLUMNS
+                + " FROM incoming_transfers WHERE msg_id = :msgId ORDER BY received_at LIMIT 1 FOR UPDATE")
+                .param("msgId", msgId.value()).query(JdbcIncomingTransfers::row).optional();
+    }
+
+    @Override
+    public void recordFinal(Bic debtorAgentBic, TxId txId, FinalStatus status, String reason, Instant at,
+            StatusSource source) {
+        jdbc.sql("""
+                UPDATE incoming_transfers
+                   SET final_status = :status, final_reason = :reason, final_at = :at, final_source = :source,
+                       version = version + 1
+                 WHERE debtor_agent_bic = :bic AND tx_id = :txId AND final_status IS NULL""")
+                .param("status", status.name()).param("reason", reason).param("at", timestamp(at))
+                .param("source", source.name()).param("bic", debtorAgentBic.value()).param("txId", txId.value())
+                .update();
     }
 
     @Override
@@ -184,6 +210,8 @@ class JdbcIncomingTransfers implements IncomingTransfers {
         String decidedBy = rs.getString("answer_decided_by");
         String answerMsgId = rs.getString("answer_msg_id");
         String transmitStatus = rs.getString("transmit_status");
+        String finalStatus = rs.getString("final_status");
+        String finalSource = rs.getString("final_source");
         return new IncomingTransfer(
                 new Bic(rs.getString("debtor_agent_bic")),
                 new TxId(rs.getString("tx_id")),
@@ -198,6 +226,10 @@ class JdbcIncomingTransfers implements IncomingTransfers {
                 transmitStatus == null ? null : TransmitStatus.valueOf(transmitStatus),
                 rs.getInt("transmit_attempts"),
                 instant(rs, "next_transmit_at"),
+                finalStatus == null ? null : FinalStatus.valueOf(finalStatus),
+                rs.getString("final_reason"),
+                instant(rs, "final_at"),
+                finalSource == null ? null : StatusSource.valueOf(finalSource),
                 rs.getString("trace_context"));
     }
 }
