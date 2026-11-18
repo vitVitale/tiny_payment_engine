@@ -18,6 +18,12 @@ public record LedgerRefusal(String code) {
     /** A released hold cannot be settled: the CSM settled a payment whose hold is gone (ADR-009). */
     public static final String HOLD_RELEASED = "HOLD_RELEASED";
 
+    /** A cancelled pending credit, a tombstone included, cannot be created (ADR-009). */
+    public static final String PENDING_CREDIT_CANCELLED = "PENDING_CREDIT_CANCELLED";
+
+    /** A confirmed pending credit cannot be cancelled: the money was booked to the payee (ADR-009). */
+    public static final String PENDING_CREDIT_CONFIRMED = "PENDING_CREDIT_CONFIRMED";
+
     /** A caller bug: the key was reused for another request, or the hold settled to another payee. */
     public static final String IDEMPOTENCY_CONFLICT = "IDEMPOTENCY_CONFLICT";
 

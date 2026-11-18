@@ -1,6 +1,8 @@
 package com.tpe.paymentorchestrator.application.csm;
 
+import com.tpe.contracts.AnswerSent;
 import com.tpe.contracts.CreditTransferNotSent;
+import com.tpe.contracts.CreditTransferReceived;
 import com.tpe.contracts.CreditTransferRejected;
 import com.tpe.contracts.CreditTransferSettled;
 import com.tpe.contracts.Direction;
@@ -9,6 +11,7 @@ import com.tpe.messaging.consumer.UnknownMessageTypeException;
 import com.tpe.messaging.inbox.InboxGuard;
 import com.tpe.paymentdomain.Bic;
 import com.tpe.paymentdomain.TxId;
+import com.tpe.paymentorchestrator.application.incoming.IncomingCsmEvents;
 import com.tpe.paymentorchestrator.application.payments.FinalEvents;
 import com.tpe.paymentorchestrator.application.payments.LockedPayment;
 import com.tpe.paymentorchestrator.application.payments.Payments;
@@ -36,12 +39,12 @@ import org.springframework.transaction.support.TransactionSynchronization;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 /**
- * The outgoing events of {@code csm.inbound.events} (specs/11-payment-orchestrator.md §6.5), in the listener
- * transaction: inbox (key {@code <debtorAgentBic>:<txId>:<type>:<outcome>}, 02 §4) → lock the payment by its
- * transaction → apply {@link CsmEventDecision}. Recording an outcome cancels the payment's timers and sets the next
- * action, run after the commit; a contradiction opens a {@code CONTRADICTING_CSM_OUTCOME} case and changes nothing
- * else. An event for no known payment opens a case without a payment and is acknowledged. Incoming events follow
- * with the incoming flow.
+ * The events of {@code csm.inbound.events} (specs/11-payment-orchestrator.md §6.5), in the listener transaction:
+ * inbox (key {@code <debtorAgentBic>:<txId>:<type>:<outcome>}, 02 §4) → lock the payment by its transaction → apply.
+ * An outgoing outcome is applied by {@link CsmEventDecision}: recording it cancels the payment's timers and sets the
+ * next action, run after the commit; a contradiction opens a {@code CONTRADICTING_CSM_OUTCOME} case and changes
+ * nothing else. {@code CreditTransferReceived} and {@code AnswerSent} go to {@link IncomingCsmEvents}. An event for no
+ * known payment opens a case without a payment and is acknowledged. The incoming settlement follows with its flow.
  */
 public class CsmEventHandling {
 
@@ -53,30 +56,33 @@ public class CsmEventHandling {
     private final Payments payments;
     private final InboxGuard inbox;
     private final FinalEvents finalEvents;
+    private final IncomingCsmEvents incoming;
     private final SagaRunner runner;
     private final SagaTelemetry telemetry;
     private final Clock clock;
 
-    public CsmEventHandling(Payments payments, InboxGuard inbox, FinalEvents finalEvents, SagaRunner runner,
-            SagaTelemetry telemetry, Clock clock) {
+    public CsmEventHandling(Payments payments, InboxGuard inbox, FinalEvents finalEvents, IncomingCsmEvents incoming,
+            SagaRunner runner, SagaTelemetry telemetry, Clock clock) {
         this.payments = payments;
         this.inbox = inbox;
         this.finalEvents = finalEvents;
+        this.incoming = incoming;
         this.runner = runner;
         this.telemetry = telemetry;
         this.clock = clock;
     }
 
     /**
-     * @param event {@code CreditTransferSettled}, {@code CreditTransferRejected} or {@code CreditTransferNotSent}
-     * @throws UnknownMessageTypeException for an incoming event, which this service does not handle yet: not
-     *     retried, it goes to the DLT
+     * @param event {@code CreditTransferReceived}, {@code AnswerSent}, {@code CreditTransferSettled},
+     *     {@code CreditTransferRejected} or {@code CreditTransferNotSent}
+     * @throws UnknownMessageTypeException for an incoming settlement or rejection, which this service does not handle
+     *     yet: not retried, it goes to the DLT
      */
     @Transactional
     public void handle(UUID eventId, Message event) {
         Received received = Received.of(event);
-        if (received.direction() != Direction.OUTGOING) {
-            // incoming CSM events follow with M4
+        if (received.incomingOutcome()) {
+            // the incoming settlement follows with its flow
             throw new UnknownMessageTypeException(EVENTS, received.type() + " " + received.direction());
         }
         String dedupKey = received.debtorAgentBic().value() + ":" + received.txId().value() + ":" + received.type()
@@ -85,14 +91,22 @@ public class CsmEventHandling {
             return;
         }
         Instant now = clock.instant();
-        LockedPayment locked = payments.lockByTransaction(PaymentDirection.OUTGOING, received.debtorAgentBic(),
-                received.txId()).orElse(null);
+        if (event instanceof CreditTransferReceived transfer) {
+            incoming.received(transfer, now);
+            return;
+        }
+        LockedPayment locked = payments.lockByTransaction(PaymentDirection.valueOf(received.direction().name()),
+                received.debtorAgentBic(), received.txId()).orElse(null);
         if (locked == null) {
             LOG.warn("{} for txId {}, which is no payment of ours: case opened", received.type(),
                     received.txId().value());
             payments.openCase(null, ExceptionCaseType.DLT_MESSAGE, Map.of("cause", "UNKNOWN_TX", "topic", EVENTS,
                     "type", received.type(), "txId", received.txId().value(),
                     "debtorAgentBic", received.debtorAgentBic().value()), now);
+            return;
+        }
+        if (event instanceof AnswerSent answer) {
+            incoming.answered(locked, answer, now);
             return;
         }
         Payment payment = locked.payment();
@@ -172,10 +186,18 @@ public class CsmEventHandling {
      * An event as the handler needs it.
      *
      * @param type the contract type, as in the dedup key
-     * @param outcome the dedup key's outcome (02 §4): {@code SETTLED}, {@code REJECTED-<reason>}, {@code NOT_SENT}
+     * @param outcome the dedup key's outcome (02 §4): {@code RECEIVED}, the answer's status, {@code SETTLED},
+     *     {@code REJECTED-<reason>}, {@code NOT_SENT}
+     * @param event what an outgoing payment's outcome is; {@code null} for {@code CreditTransferReceived} and
+     *     {@code AnswerSent}
      */
     private record Received(TxId txId, Bic debtorAgentBic, Direction direction, String type, String outcome,
             OutgoingCsmEvent event) {
+
+        /** The CSM's settlement or rejection of an incoming payment. */
+        boolean incomingOutcome() {
+            return direction == Direction.INCOMING && event != null;
+        }
 
         static Received of(Message message) {
             String type = Message.contractOf(message.getClass()).type();
@@ -187,7 +209,11 @@ public class CsmEventHandling {
                         new OutgoingCsmEvent.Rejected(rejected.reasonCode()));
                 case CreditTransferNotSent notSent -> new Received(notSent.txId(), notSent.debtorAgentBic(),
                         notSent.direction(), type, "NOT_SENT", new OutgoingCsmEvent.NotSent(notSent.reasonCode()));
-                default -> throw new IllegalArgumentException("not a CSM outcome: " + type);
+                case CreditTransferReceived transfer -> new Received(transfer.txId(), transfer.debtorAgentBic(),
+                        Direction.INCOMING, type, "RECEIVED", null);
+                case AnswerSent answer -> new Received(answer.txId(), answer.debtorAgentBic(), Direction.INCOMING,
+                        type, answer.status().name(), null);
+                default -> throw new IllegalArgumentException("not a CSM event: " + type);
             };
         }
     }

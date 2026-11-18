@@ -3,6 +3,7 @@ package com.tpe.paymentorchestrator.domain.payment;
 import com.tpe.paymentdomain.CommandId;
 import com.tpe.paymentdomain.EndToEndId;
 import com.tpe.paymentdomain.Money;
+import com.tpe.paymentdomain.MsgId;
 import com.tpe.paymentdomain.PaymentId;
 import com.tpe.paymentdomain.ReasonCode;
 import com.tpe.paymentdomain.RemittanceInformation;
@@ -26,6 +27,8 @@ import java.util.UUID;
  * @param bookingEntryId the ledger journal entry that settled the payment
  * @param traceContext the W3C {@code traceparent} the payment's later work continues (ADR-014); {@code null}: a new
  *     root
+ * @param incoming what an incoming payment adds: its {@code pacs.008}, answer deadline and verdict; {@code null} for an
+ *     outgoing one
  */
 public record Payment(
         PaymentId paymentId,
@@ -53,7 +56,8 @@ public record Payment(
         UUID debtorAccountId,
         UUID creditorAccountId,
         UUID bookingEntryId,
-        String traceContext) {
+        String traceContext,
+        Incoming incoming) {
 
     public Payment {
         Objects.requireNonNull(paymentId, "paymentId");
@@ -66,6 +70,9 @@ public record Payment(
         Objects.requireNonNull(debtor, "debtor");
         Objects.requireNonNull(creditor, "creditor");
         Objects.requireNonNull(acceptedAt, "acceptedAt");
+        if ((direction == PaymentDirection.INCOMING) != (incoming != null)) {
+            throw new IllegalArgumentException("an incoming payment, and only one, has its incoming terms");
+        }
     }
 
     /**
@@ -79,7 +86,8 @@ public record Payment(
                 command.commandId(), command.clientId(), Objects.requireNonNull(requestHash, "requestHash"), txId,
                 uetr, command.endToEndId(), command.amount(), debtor, creditor, command.remittance(),
                 command.vopReference(), command.vopResult(), acceptedAt, timings.sendBy(acceptedAt),
-                timings.deadline(acceptedAt), PendingAction.ASSESS_RISK, null, null, null, null, traceContext);
+                timings.deadline(acceptedAt), PendingAction.ASSESS_RISK, null, null, null, null, traceContext,
+                null);
     }
 
     /** Risk allowed the outgoing payment (§6.2 {@code ASSESS_RISK}): {@code RISK_CHECKED}, next {@code CREATE_HOLD}. */
@@ -109,7 +117,7 @@ public record Payment(
         return new Payment(paymentId, direction, state, reasonCode, onUs, commandId, clientId, requestHash, txId,
                 uetr, endToEndId, amount, debtor, creditor, remittance, vopReference, vopResult, acceptedAt, sendBy,
                 deadlineAt, PendingAction.SETTLE_ON_US, finalisedAt, debtorAccountId, creditorAccountId,
-                bookingEntryId, traceContext);
+                bookingEntryId, traceContext, incoming);
     }
 
     /**
@@ -177,6 +185,67 @@ public record Payment(
     }
 
     /**
+     * A received incoming credit transfer (§6.5, UC-06 2): {@code RECEIVED} at the gateway's receipt, answered by
+     * {@code answerDeadline}, risk assessment as the first action.
+     */
+    public static Payment received(PaymentId paymentId, TxId txId, MsgId msgId, Uetr uetr, EndToEndId endToEndId,
+            Money amount, PaymentParty debtor, PaymentParty creditor, RemittanceInformation remittance,
+            Instant receivedAt, Instant answerDeadline, String traceContext) {
+        return new Payment(paymentId, PaymentDirection.INCOMING, PaymentState.RECEIVED, null, false, null, null, null,
+                txId, uetr, endToEndId, amount, debtor, creditor, remittance, null, null, receivedAt, null, null,
+                PendingAction.ASSESS_RISK, null, null, null, null, traceContext,
+                new Incoming(msgId, answerDeadline, null, null));
+    }
+
+    /**
+     * Risk allowed the incoming payment (§6.2 {@code ASSESS_RISK}, incoming): the state stays {@code RECEIVED}, next
+     * {@code CREATE_PENDING_CREDIT}.
+     *
+     * @throws IllegalStateException unless this is a received incoming payment without a verdict
+     */
+    public Payment incomingRiskChecked() {
+        requireAwaitingVerdict();
+        return withAction(PendingAction.CREATE_PENDING_CREDIT);
+    }
+
+    /**
+     * The pending credit on the payee's account exists and {@code AcceptCreditTransfer} goes out (§6.2
+     * {@code CREATE_PENDING_CREDIT}): {@code ACCEPT_REQUESTED} with the verdict {@code ACCEPT}, nothing to do until the
+     * gateway's answer.
+     *
+     * @throws IllegalStateException unless this is a received incoming payment without a verdict
+     */
+    public Payment acceptRequested(UUID creditorAccountId) {
+        requireAwaitingVerdict();
+        return withIncoming(incoming.withVerdict(Verdict.ACCEPT, null))
+                .moveTo(PaymentState.ACCEPT_REQUESTED, null, null, null)
+                .withAccounts(debtorAccountId, Objects.requireNonNull(creditorAccountId, "creditorAccountId"), null);
+    }
+
+    /**
+     * The verdict {@code REJECT} with {@code reason}, and {@code RejectCreditTransfer} goes out (§6.2): the state stays
+     * {@code RECEIVED} until the gateway's answer (ADR-003), nothing to do meanwhile.
+     *
+     * @throws IllegalStateException unless this is a received incoming payment without a verdict
+     */
+    public Payment verdictRejected(StatusReason reason) {
+        requireAwaitingVerdict();
+        return withIncoming(incoming.withVerdict(Verdict.REJECT, Objects.requireNonNull(reason, "reason")))
+                .withAction(null);
+    }
+
+    /** The gateway sent the accepting answer (§6.5 {@code AnswerSent(ACCP)}): {@code ACCEPTED}. */
+    Payment answerAccepted() {
+        return moveTo(PaymentState.ACCEPTED, null, null, null);
+    }
+
+    private void requireAwaitingVerdict() {
+        if (direction != PaymentDirection.INCOMING || state != PaymentState.RECEIVED || incoming.verdict() != null) {
+            throw new IllegalStateException("only a received incoming payment without verdict gets one, not " + this);
+        }
+    }
+
+    /**
      * {@code REJECTED} with {@code reason}, finalised at {@code at}.
      *
      * @param compensation the action that undoes what the payment already holds ({@code RELEASE_HOLD},
@@ -219,26 +288,33 @@ public record Payment(
         }
         return new Payment(paymentId, direction, state, reasonCode, onUs, commandId, clientId, requestHash, txId,
                 uetr, endToEndId, amount, debtor, creditor, remittance, vopReference, vopResult, acceptedAt, sendBy,
-                deadlineAt, null, finalisedAt, debtorAccountId, creditorAccountId, bookingEntryId, traceContext);
+                deadlineAt, null, finalisedAt, debtorAccountId, creditorAccountId, bookingEntryId, traceContext, incoming);
     }
 
     private Payment moveTo(PaymentState to, StatusReason reason, PendingAction next, Instant finalised) {
         PaymentStateMachine.require(direction, state, to);
         return new Payment(paymentId, direction, to, reason, onUs, commandId, clientId, requestHash, txId, uetr,
                 endToEndId, amount, debtor, creditor, remittance, vopReference, vopResult, acceptedAt, sendBy,
-                deadlineAt, next, finalised, debtorAccountId, creditorAccountId, bookingEntryId, traceContext);
+                deadlineAt, next, finalised, debtorAccountId, creditorAccountId, bookingEntryId, traceContext, incoming);
     }
 
     private Payment withAction(PendingAction next) {
         return new Payment(paymentId, direction, state, reasonCode, onUs, commandId, clientId, requestHash, txId,
                 uetr, endToEndId, amount, debtor, creditor, remittance, vopReference, vopResult, acceptedAt, sendBy,
-                deadlineAt, next, finalisedAt, debtorAccountId, creditorAccountId, bookingEntryId, traceContext);
+                deadlineAt, next, finalisedAt, debtorAccountId, creditorAccountId, bookingEntryId, traceContext, incoming);
+    }
+
+    private Payment withIncoming(Incoming terms) {
+        return new Payment(paymentId, direction, state, reasonCode, onUs, commandId, clientId, requestHash, txId,
+                uetr, endToEndId, amount, debtor, creditor, remittance, vopReference, vopResult, acceptedAt, sendBy,
+                deadlineAt, pendingAction, finalisedAt, debtorAccountId, creditorAccountId, bookingEntryId,
+                traceContext, terms);
     }
 
     private Payment withAccounts(UUID debtorAccount, UUID creditorAccount, UUID entry) {
         return new Payment(paymentId, direction, state, reasonCode, onUs, commandId, clientId, requestHash, txId,
                 uetr, endToEndId, amount, debtor, creditor, remittance, vopReference, vopResult, acceptedAt, sendBy,
-                deadlineAt, pendingAction, finalisedAt, debtorAccount, creditorAccount, entry, traceContext);
+                deadlineAt, pendingAction, finalisedAt, debtorAccount, creditorAccount, entry, traceContext, incoming);
     }
 
     /** Leaves out the parties and the remittance text, which are personal data (specs/26-observability.md §4.4). */

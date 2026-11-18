@@ -60,6 +60,9 @@ public abstract class OrchestratorStack {
     /** The example hold of P-04, whose path a ledger mapping names; {@link #ledgerAnswers} widens it to any hold. */
     private static final String EXAMPLE_HOLD = "/v1/holds/0192f0e4-7b1c-7cc3-a1b2-0000000000a1/";
 
+    /** The example pending credit of P-04, widened to any pending credit as {@link #EXAMPLE_HOLD} is. */
+    private static final String EXAMPLE_PENDING_CREDIT = "/v1/pending-credits/0192f0e4-7b1c-7cc3-a1b2-0000000000a2/";
+
     static {
         POSTGRES.start();
         KAFKA.start();
@@ -95,16 +98,19 @@ public abstract class OrchestratorStack {
 
     /**
      * ledger-service answers as the mappings {@code wiremock/ledger-service/<name>.json} say, the later first; the
-     * mappings are checked against P-04 by {@code LedgerStubConformanceIT}. A mapping names the pact's example hold;
-     * here it answers for any hold.
+     * mappings are checked against P-04 by {@code LedgerStubConformanceIT}. A mapping names the pact's example hold or
+     * pending credit; here it answers for any.
      */
     protected static void ledgerAnswers(String... names) {
         LEDGER.resetAll();
         for (String name : names) {
             String mapping = mapping("ledger-service", name)
-                    .replace("\"url\": \"" + EXAMPLE_HOLD, "\"urlPathPattern\": \"/v1/holds/[0-9a-f-]{36}/");
-            if (mapping.contains(EXAMPLE_HOLD)) {
-                throw new IllegalStateException(name + " names the example hold other than as \"url\": \"...\"");
+                    .replace("\"url\": \"" + EXAMPLE_HOLD, "\"urlPathPattern\": \"/v1/holds/[0-9a-f-]{36}/")
+                    .replace("\"url\": \"" + EXAMPLE_PENDING_CREDIT,
+                            "\"urlPathPattern\": \"/v1/pending-credits/[0-9a-f-]{36}/");
+            if (mapping.contains(EXAMPLE_HOLD) || mapping.contains(EXAMPLE_PENDING_CREDIT)) {
+                throw new IllegalStateException(name + " names the example hold or pending credit other than as "
+                        + "\"url\": \"...\"");
             }
             LEDGER.addStubMapping(StubMapping.buildFrom(mapping));
         }

@@ -8,13 +8,15 @@ import java.util.ArrayList;
 import java.util.List;
 
 /** The ledger of the action tests: answers what the test set and records the read timeouts it was given. */
-final class FakeLedger implements Ledger {
+public final class FakeLedger implements Ledger {
 
-    final List<Duration> timeouts = new ArrayList<>();
-    LedgerAnswer<HoldCreated> hold;
-    LedgerAnswer<SettledOnUs> settlement;
-    LedgerAnswer<Released> release;
-    LedgerAnswer<HoldSettled> holdSettlement;
+    public final List<Duration> timeouts = new ArrayList<>();
+    public LedgerAnswer<HoldCreated> hold;
+    public LedgerAnswer<SettledOnUs> settlement;
+    public LedgerAnswer<Released> release;
+    public LedgerAnswer<HoldSettled> holdSettlement;
+    public LedgerAnswer<PendingCreditCreated> pendingCredit;
+    public LedgerAnswer<Cancelled> cancel;
 
     @Override
     public LedgerAnswer<HoldCreated> createHold(Payment payment, Duration readTimeout) {
@@ -38,5 +40,17 @@ final class FakeLedger implements Ledger {
     public LedgerAnswer<Released> releaseHold(Payment payment, Duration readTimeout) {
         timeouts.add(readTimeout);
         return release;
+    }
+
+    @Override
+    public LedgerAnswer<PendingCreditCreated> createPendingCredit(Payment payment, Duration readTimeout) {
+        timeouts.add(readTimeout);
+        return pendingCredit;
+    }
+
+    @Override
+    public LedgerAnswer<Cancelled> cancelPendingCredit(Payment payment, Duration readTimeout) {
+        timeouts.add(readTimeout);
+        return cancel;
     }
 }

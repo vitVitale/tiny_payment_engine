@@ -6,10 +6,11 @@ import java.util.Objects;
 import java.util.UUID;
 
 /**
- * ledger-service's Posting API for an outgoing payment (specs/12-ledger-service.md §3.1). The hold id is the
- * payment's {@code paymentId} and every call carries the {@code Idempotency-Key} the ledger expects
- * ({@code hold-create:<holdId>}, {@code hold-settle-on-us:<holdId>}, {@code hold-release:<holdId>}), so asking again
- * after a lost answer makes no second posting.
+ * ledger-service's Posting API (specs/12-ledger-service.md §3.1): holds for an outgoing payment, pending credits for
+ * an incoming one. The hold id and the pending credit id are the payment's {@code paymentId} (ADR-010), and every
+ * call carries the {@code Idempotency-Key} the ledger expects ({@code hold-create:<holdId>},
+ * {@code hold-settle-on-us:<holdId>}, {@code hold-release:<holdId>}, {@code pending-credit-create:<id>},
+ * {@code pending-credit-cancel:<id>}), so asking again after a lost answer makes no second posting.
  */
 public interface Ledger {
 
@@ -30,6 +31,18 @@ public interface Ledger {
      * refuses a late create (ADR-009). Never throws.
      */
     LedgerAnswer<Released> releaseHold(Payment payment, Duration readTimeout);
+
+    /**
+     * {@code POST /v1/pending-credits}: records the incoming amount on the payee's account, changing no balance.
+     * Never throws.
+     */
+    LedgerAnswer<PendingCreditCreated> createPendingCredit(Payment payment, Duration readTimeout);
+
+    /**
+     * {@code POST /v1/pending-credits/{id}/cancel}: removes the pending credit; for one that never came, a tombstone
+     * that refuses a late create (ADR-009). Never throws.
+     */
+    LedgerAnswer<Cancelled> cancelPendingCredit(Payment payment, Duration readTimeout);
 
     /** @param accountId the payer's account */
     record HoldCreated(UUID accountId) {
@@ -61,4 +74,15 @@ public interface Ledger {
 
     /** The hold is {@code RELEASED}, a tombstone included. */
     record Released() {}
+
+    /** @param accountId the payee's account */
+    record PendingCreditCreated(UUID accountId) {
+
+        public PendingCreditCreated {
+            Objects.requireNonNull(accountId, "accountId");
+        }
+    }
+
+    /** The pending credit is {@code CANCELLED}, a tombstone included. */
+    record Cancelled() {}
 }

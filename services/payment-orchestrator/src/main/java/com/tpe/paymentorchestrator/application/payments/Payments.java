@@ -28,6 +28,14 @@ public interface Payments {
      */
     boolean insertIfNewCommand(Payment payment, Instant now);
 
+    /**
+     * Stores a new incoming payment unless a payment of its transaction exists (direction, debtor agent, {@code TxId},
+     * ADR-010); waits for a concurrent insert of the same transaction to finish.
+     *
+     * @return {@code false} if the transaction already had a payment
+     */
+    boolean insertIfNewTransaction(Payment payment, Instant now);
+
     Optional<Payment> find(PaymentId paymentId);
 
     Optional<Payment> findByCommand(CommandId commandId);
@@ -78,6 +86,14 @@ public interface Payments {
      * @param finalEventEmitted the transaction writes the payment's final event
      */
     void applyTimer(LockedPayment locked, Payment next, boolean finalEventEmitted, Instant now);
+
+    /**
+     * Stores what a CSM event that records no CSM outcome made of the locked payment ({@code AnswerSent}, §6.5) as
+     * {@link #applyTimer} does, with no final event: a new action is due, and pending since, {@code now}.
+     */
+    default void applyEvent(LockedPayment locked, Payment next, Instant now) {
+        applyTimer(locked, next, false, now);
+    }
 
     /**
      * Stores the locked payment gone into investigation ({@code INVESTIGATING}) as {@link #applyTimer} does, with

@@ -18,6 +18,7 @@ import com.tpe.paymentdomain.CommandId;
 import com.tpe.paymentdomain.EndToEndId;
 import com.tpe.paymentdomain.Iban;
 import com.tpe.paymentdomain.Money;
+import com.tpe.paymentdomain.MsgId;
 import com.tpe.paymentdomain.PartyName;
 import com.tpe.paymentdomain.PaymentId;
 import com.tpe.paymentdomain.ReasonCode;
@@ -25,6 +26,7 @@ import com.tpe.paymentdomain.RemittanceInformation;
 import com.tpe.paymentdomain.TxId;
 import com.tpe.paymentdomain.Uetr;
 import com.tpe.paymentorchestrator.application.risk.RiskAnswer;
+import com.tpe.paymentorchestrator.domain.payment.Incoming;
 import com.tpe.paymentorchestrator.domain.payment.PayeeVerification;
 import com.tpe.paymentorchestrator.domain.payment.Payment;
 import com.tpe.paymentorchestrator.domain.payment.PaymentDirection;
@@ -309,7 +311,9 @@ class RiskServicePactTest {
                             new Bic("PEERDEFFXXX")),
                     new RemittanceInformation("Invoice 42"), "VOP-1", vopResult, accepted,
                     accepted.plusSeconds(10), accepted.plusSeconds(20), PendingAction.ASSESS_RISK, null, null, null,
-                    null, null);
+                    null, null, direction == PaymentDirection.INCOMING
+                            ? new Incoming(new MsgId("M-PACT-1"), accepted.plusSeconds(5), null, null)
+                            : null);
         }
 
         /** {@code DE} + mod 97-10 check digits + bank code + a 10-digit account number. */
