@@ -136,6 +136,27 @@ class ServiceProcessTest {
         assertThat(get(process, "/args", Duration.ofSeconds(5))).contains("--server.port=");
     }
 
+    /** CH-02: a gateway killed mid-send leaves its claims to the other instance, then starts again. */
+    @Test
+    void aKilledServiceIsGoneAtOnceAndStartsAgain() throws Exception {
+        var service = new ServiceJar("fake-service-h", fakeJar(jars.resolve("h"), "fake-service-h-1.0.jar").getParent());
+        ServiceProcess process = ServiceProcess.of(service);
+
+        process.kill();
+
+        assertThat(process.isRunning()).isFalse();
+        assertThatThrownBy(() -> get(process, "/args")).isInstanceOf(IOException.class);
+        process.start();
+        assertThat(get(process, "/args")).contains("--server.port=");
+    }
+
+    /** The chaos run (20 §5) uses the default timings: no {@code systemtest} profile. */
+    @Test
+    void theChaosRunStartsServicesInTheLocalProfileOnly() {
+        assertThat(ServiceProcess.profiles(false)).containsExactly("local", "systemtest");
+        assertThat(ServiceProcess.profiles(true)).containsExactly("local");
+    }
+
     @Test
     void aServiceWithoutAJarNamesTheBuildCommandAndTheProperty() {
         var service = ServiceJar.inRepository("no-such-service");

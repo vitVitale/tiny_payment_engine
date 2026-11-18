@@ -63,8 +63,9 @@
         <pact.released.dir>${maven.multiModuleProjectDirectory}/pacts/released</pact.released.dir>
         <!-- true in the forward check, which verifies only this commit's pacts -->
         <pact.released.skip>false</pact.released.skip>
-        <!-- provider verification runs only with -Ppact-verify (00 §14 step 2) -->
-        <excludedGroups>pact-verify</excludedGroups>
+        <!-- provider verification runs only with -Ppact-verify (00 §14 step 2), the failure-injection scenarios only
+             with -Pchaos of tests/system-tests (20 §5) -->
+        <excludedGroups>pact-verify,chaos</excludedGroups>
     </properties>
 
     <dependencyManagement>

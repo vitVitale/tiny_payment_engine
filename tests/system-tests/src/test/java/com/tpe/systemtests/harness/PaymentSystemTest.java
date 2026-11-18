@@ -57,6 +57,12 @@ public abstract class PaymentSystemTest extends LedgerSystemTest {
     private static final JsonHttp GATEWAY_ADMIN;
     private static final JsonHttp CASE_API;
     private static final SimulatorControl SIMULATOR;
+    /** The second payment-orchestrator of the chaos run ({@link Chaos}); {@code null} otherwise. */
+    private static final ServiceProcess ORCHESTRATOR_B;
+    /** The second csm-gateway of the chaos run, the one CH-02 kills; {@code null} otherwise. */
+    private static final ServiceProcess CSM_GATEWAY_B;
+    /** What the second csm-gateway of the chaos run calls the CSM through; {@code null} otherwise. */
+    private static final HostProxy CSM_LINK_B;
     /** Every settlement the CSM made under this JVM's tests is at or after this. */
     private static final Instant STARTED = Instant.now();
 
@@ -76,21 +82,48 @@ public abstract class PaymentSystemTest extends LedgerSystemTest {
         // a test stops it (E2E-O-21): on Windows by terminating it, so its consumer never leaves the group and the
         // restarted one is assigned nothing until the old one's session times out; the broker's shortest session
         // bounds that, a 1 s heartbeat keeps a frozen one (E2E-O-12, about 4 s) in its group
-        CSM_GATEWAY = ServiceProcess.of(ServiceJar.CSM_GATEWAY, Map.of(
-                "tpe.csm.base-url", simulator.toString(),
+        var gateway = Map.of(
                 "spring.kafka.consumer.properties.session.timeout.ms", "6000",
-                "spring.kafka.consumer.heartbeat-interval", "1s"), gatewayPort);
+                "spring.kafka.consumer.heartbeat-interval", "1s");
+        CSM_GATEWAY = ServiceProcess.of(ServiceJar.CSM_GATEWAY, with(gateway,
+                "tpe.csm.base-url", simulator.toString()), gatewayPort);
         GATEWAY_ADMIN = new JsonHttp(CSM_GATEWAY.baseUrl());
         VOP = ServiceProcess.of(ServiceJar.VOP, Map.of(
                 "tpe.bank-directory.location", BankDirectoryFile.withSimulator(simulator))).baseUrl();
         LEDGER = new JsonHttp(ledger);
-        ORCHESTRATOR = ServiceProcess.of(ServiceJar.ORCHESTRATOR, Map.of(
+        var orchestrator = new HashMap<>(Map.of(
                 "tpe.clients.risk.base-url", risk.toString(),
-                "tpe.clients.ledger.base-url", ledger.toString())).baseUrl();
+                "tpe.clients.ledger.base-url", ledger.toString()));
+        if (Chaos.enabled()) {
+            // CH-03: every instance produces through the proxy, and consumes directly
+            KafkaProduceProxy.get();
+            orchestrator.put("spring.kafka.bootstrap-servers", KafkaProduceProxy.BOOTSTRAP);
+            orchestrator.put("spring.kafka.consumer.bootstrap-servers", "localhost:9092");
+        }
+        ORCHESTRATOR = ServiceProcess.of(ServiceJar.ORCHESTRATOR, orchestrator).baseUrl();
+        if (Chaos.enabled()) {
+            // the second instance of each (20 §5); the simulator and payment-api call the first. CH-02 kills the
+            // second gateway, which reaches the CSM through a proxy that can slow its sends down
+            ORCHESTRATOR_B = ServiceProcess.of(ServiceJar.ORCHESTRATOR.name() + "-b", ServiceJar.ORCHESTRATOR,
+                    orchestrator);
+            CSM_LINK_B = HostProxy.of("csm-gateway-b-to-csm", simulator);
+            CSM_GATEWAY_B = ServiceProcess.of(ServiceJar.CSM_GATEWAY.name() + "-b", ServiceJar.CSM_GATEWAY,
+                    with(gateway, "tpe.csm.base-url", CSM_LINK_B.uri().toString()));
+        } else {
+            ORCHESTRATOR_B = null;
+            CSM_LINK_B = null;
+            CSM_GATEWAY_B = null;
+        }
         CASE_API = new JsonHttp(ORCHESTRATOR);
         PAYMENT_API = new JsonHttp(ServiceProcess.of(ServiceJar.PAYMENT_API, Map.of(
                 "tpe.clients.orchestrator.base-url", ORCHESTRATOR.toString(),
                 "tpe.clients.vop.base-url", VOP.toString())).baseUrl());
+    }
+
+    private static Map<String, String> with(Map<String, String> properties, String key, String value) {
+        var all = new HashMap<>(properties);
+        all.put(key, value);
+        return all;
     }
 
     /** The case types this test opens on purpose; JUnit makes a new instance per test. */
@@ -202,6 +235,30 @@ public abstract class PaymentSystemTest extends LedgerSystemTest {
     /** csm-gateway, which a test may stop and start again (its port and properties stay). */
     protected static ServiceProcess csmGateway() {
         return CSM_GATEWAY;
+    }
+
+    /** The chaos run's payment-orchestrators, first the one payment-api calls. */
+    protected static List<URI> orchestratorServices() {
+        requireChaos();
+        return List.of(ORCHESTRATOR, ORCHESTRATOR_B.baseUrl());
+    }
+
+    /** The chaos run's second csm-gateway: killed and started again by CH-02, never the one the CSM calls. */
+    protected static ServiceProcess secondCsmGateway() {
+        requireChaos();
+        return CSM_GATEWAY_B;
+    }
+
+    /** The link of the chaos run's second csm-gateway to the CSM. */
+    protected static HostProxy secondCsmGatewayLink() {
+        requireChaos();
+        return CSM_LINK_B;
+    }
+
+    private static void requireChaos() {
+        if (!Chaos.enabled()) {
+            throw new IllegalStateException("only in the chaos run (-Pchaos, -Dtpe.chaos=true)");
+        }
     }
 
     /**

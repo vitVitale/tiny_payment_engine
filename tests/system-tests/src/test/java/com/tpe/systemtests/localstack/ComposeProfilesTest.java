@@ -10,7 +10,8 @@ import org.yaml.snakeyaml.Yaml;
 
 /**
  * The compose file's profiles (specs/26-observability.md §13, issue #19): without a profile the stack is the
- * infrastructure of 00 §13 only; everything of the observability stack is behind {@code observability}.
+ * infrastructure of 00 §13 only; everything of the observability stack is behind {@code observability}, the Toxiproxy
+ * of the chaos run (specs/20-testing-strategy.md §5, CH-03) behind {@code chaos}.
  */
 class ComposeProfilesTest {
 
@@ -19,10 +20,28 @@ class ComposeProfilesTest {
         Map<String, Map<String, Object>> services = services();
 
         assertThat(namesWhere(services, false)).containsExactlyInAnyOrder("postgres", "kafka", "oauth2");
-        assertThat(namesWhere(services, true))
-                .containsExactlyInAnyOrder("alloy", "mimir", "loki", "tempo", "grafana", "observability-sample");
-        assertThat(services.values()).filteredOn(service -> service.containsKey("profiles"))
-                .allSatisfy(service -> assertThat(service.get("profiles")).isEqualTo(List.of("observability")));
+        assertThat(namesWhere(services, true)).containsExactlyInAnyOrder(
+                "alloy", "mimir", "loki", "tempo", "grafana", "observability-sample", "toxiproxy");
+        assertThat(services.entrySet()).filteredOn(entry -> entry.getValue().containsKey("profiles"))
+                .allSatisfy(entry -> assertThat(entry.getValue().get("profiles")).isEqualTo(
+                        List.of(entry.getKey().equals("toxiproxy") ? "chaos" : "observability")));
+    }
+
+    /**
+     * CH-03 blocks the orchestrators' produce, not their consumption: Kafka advertises a listener of its own at the
+     * proxy's port, so a client that bootstraps there keeps talking through the proxy, and the proxy's ports are
+     * fixed, as the advertised address must be.
+     */
+    @Test
+    @SuppressWarnings("unchecked")
+    void kafkaAdvertisesAChaosListenerAtTheToxiproxyPort() throws IOException {
+        Map<String, Map<String, Object>> services = services();
+        Map<String, Object> kafka = (Map<String, Object>) services.get("kafka").get("environment");
+
+        assertThat(kafka.get("KAFKA_LISTENERS").toString()).contains("CHAOS://:9094");
+        assertThat(kafka.get("KAFKA_ADVERTISED_LISTENERS").toString()).contains("CHAOS://localhost:19094");
+        assertThat(kafka.get("KAFKA_LISTENER_SECURITY_PROTOCOL_MAP").toString()).contains("CHAOS:PLAINTEXT");
+        assertThat((List<Object>) services.get("toxiproxy").get("ports")).contains("8474:8474", "19094:19094");
     }
 
     @Test

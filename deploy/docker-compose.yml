@@ -29,10 +29,11 @@ services:
       KAFKA_PROCESS_ROLES: broker,controller
       KAFKA_CONTROLLER_QUORUM_VOTERS: 1@localhost:9093
       KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
-      # PLAINTEXT for clients on the host, INTERNAL for containers on the compose network
-      KAFKA_LISTENERS: PLAINTEXT://:9092,INTERNAL://:19092,CONTROLLER://:9093
-      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://localhost:9092,INTERNAL://kafka:19092
-      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,INTERNAL:PLAINTEXT,CONTROLLER:PLAINTEXT
+      # PLAINTEXT for clients on the host, INTERNAL for containers on the compose network, CHAOS for host clients
+      # through the toxiproxy of profile `chaos` (advertised at its port, so they stay behind it; CH-03)
+      KAFKA_LISTENERS: PLAINTEXT://:9092,INTERNAL://:19092,CHAOS://:9094,CONTROLLER://:9093
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://localhost:9092,INTERNAL://kafka:19092,CHAOS://localhost:19094
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,INTERNAL:PLAINTEXT,CHAOS:PLAINTEXT,CONTROLLER:PLAINTEXT
       KAFKA_INTER_BROKER_LISTENER_NAME: INTERNAL
       KAFKA_AUTO_CREATE_TOPICS_ENABLE: "false"
       KAFKA_DEFAULT_REPLICATION_FACTOR: 1
@@ -72,6 +73,16 @@ services:
       interval: 2s
       timeout: 5s
       retries: 30
+
+  # ---- profile `chaos` (specs/20-testing-strategy.md §5, CH-02 / CH-03 until M5), off by default:
+  #   docker compose -f deploy/docker-compose.yml --profile chaos up -d --wait postgres kafka oauth2 toxiproxy
+  # the chaos run creates its proxy localhost:19094 -> kafka:9094 through the control API on 8474 and blocks it
+  toxiproxy:
+    profiles: [chaos]
+    image: ghcr.io/shopify/toxiproxy:2.12.0
+    ports:
+      - "8474:8474"
+      - "19094:19094"
 
   # ---- profile `observability` (specs/26-observability.md §13), off by default:
   #   ./mvnw -pl tests/observability-sample -am package -DskipTests

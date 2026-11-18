@@ -3,7 +3,7 @@ package com.tpe.systemtests.payments;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.tpe.systemtests.harness.JsonHttp;
-import com.tpe.systemtests.harness.OrchestratorProxy;
+import com.tpe.systemtests.harness.HostProxy;
 import com.tpe.systemtests.harness.PaymentSystemTest;
 import com.tpe.systemtests.harness.Response;
 import com.tpe.systemtests.harness.ServiceJar;
@@ -31,7 +31,7 @@ class IdempotentRetryIT extends PaymentSystemTest {
     private static final Duration SUBMIT_TIMEOUT = ServiceProfile.systemtest(ServiceJar.PAYMENT_API)
             .duration("tpe.clients.orchestrator.timeout").orElseThrow();
 
-    private OrchestratorProxy proxy;
+    private HostProxy proxy;
     private JsonHttp proxied;
 
     /** A toxic left by a failed test would delay every later test's submits through the proxy. */
@@ -93,7 +93,7 @@ class IdempotentRetryIT extends PaymentSystemTest {
 
     /** A second payment-api calling the orchestrator through the proxy, beside the harness's own. */
     private void proxiedPaymentApi() {
-        proxy = OrchestratorProxy.of(orchestratorService());
+        proxy = HostProxy.of("orchestrator", orchestratorService());
         proxied = new JsonHttp(ServiceProcess.of("payment-api-proxied", ServiceJar.PAYMENT_API, Map.of(
                 "tpe.clients.orchestrator.base-url", proxy.uri().toString(),
                 "tpe.clients.vop.base-url", vopService().toString())).baseUrl());

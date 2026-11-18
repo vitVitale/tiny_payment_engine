@@ -90,6 +90,49 @@ class RelayLivenessIT {
         load.assertDeliveredInKeyOrder(Duration.ofSeconds(30));
     }
 
+    /**
+     * MSG-AC-08, Kafka down (CH-03): every send of a batch fails on missing metadata, each only after
+     * {@code max.block.ms}. The batch stops at the first failed send and backs off, and the failure counts as progress
+     * before the back-off as after it, so the loop never looks stalled: the leader keeps its lease and stays live,
+     * also once the back-off has reached its maximum, and no other instance would take over.
+     */
+    @Test
+    void MSG_AC_08_aLeaderWhoseSendsFailWhileKafkaIsDownKeepsItsLeaseAndStaysLive() {
+        DataSource outage = MessagingContainers.dataSource("kafka_outage_it");
+        MessagingContainers.migrate(outage);
+        OutboxRelay.Settings settings = OutboxRelay.Settings.defaults(SERVICE);
+        var leader = new OutboxRelay(outage, new JdbcOutboxRepository(new JdbcTemplate(outage)),
+                OutboxRelay.producerConfig(UNREACHABLE_KAFKA), settings);
+        try (OutboxLoad backlog = new OutboxLoad(outage, "relay.outage." + UUID.randomUUID(), 10, SERVICE)) {
+            backlog.write(20);
+            leader.start();
+            Topics.await(Duration.ofSeconds(10), leader::isLeader);
+
+            // the back-off doubles from minBackoff to maxBackoff over the first failures; then several more at it
+            long until = System.nanoTime() + settings.stallAfter().multipliedBy(6).toNanos();
+            while (System.nanoTime() < until) {
+                assertThat(leader.isLeader()).as("leader while its sends fail").isTrue();
+                assertThat(leader.isLive()).as("live while its sends fail").isTrue();
+                sleep(Duration.ofMillis(100));
+            }
+            assertThat(leader.published()).isZero();
+        } finally {
+            leader.stop();
+        }
+    }
+
+    /** No broker listens here: a producer never gets metadata. */
+    private static final String UNREACHABLE_KAFKA = "localhost:1";
+
+    private static void sleep(Duration duration) {
+        try {
+            Thread.sleep(duration);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new IllegalStateException(e);
+        }
+    }
+
     private static Status liveness(HealthEndpoint health) {
         return health.healthForPath("liveness").getStatus();
     }

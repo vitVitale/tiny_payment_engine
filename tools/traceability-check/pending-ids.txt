@@ -3,8 +3,6 @@
 # pact test and a provider verification). The list only shrinks: remove an id once its test exists; an id may be
 # added only in the change that adds it to the specs. One id per line.
 CH-01
-CH-02
-CH-03
 CH-04
 CH-05
 CH-06

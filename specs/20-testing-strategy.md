@@ -194,6 +194,16 @@ Rules:
 - **Pages.** Each scenario lists the pages it must raise. Any other page during the run fails it. The recorded
   series of each run are kept as fixtures for the alert-rule tests (§1).
 
+**Until M5** (the minimal harness of M3): CH-02 and CH-03 run on main builds against the compose stack with its
+`chaos` profile, not in the environment above, and without budget or page checks. They keep the default timings, run
+two payment-orchestrator and two csm-gateway instances, and load the system with 2 outgoing payments/s
+(`tests/system-tests`, `-Pchaos`, `@Tag("chaos")`). The orchestrators produce to Kafka through Toxiproxy (a listener
+of its own, advertised at the proxy) and consume directly. CH-02 kills (`SIGKILL`) the second gateway, which the CSM
+never calls, at a moment when it has a `pacs.008` in flight on a link slowed to 700 ms. CH-02's "no `DEADLINE`
+answers" concerns incoming payments: checked once the load has both directions (M4). CH-03's `AB03` covers the
+payments whose `SendCreditTransfer` the block held past `sendBy` (accepted in it, `sendBy` before its end); one
+produced before the block may settle although its `sendBy` fell in it. M5 moves both into the nightly job.
+
 | Id | Injection | Specifically checks | Expected pages |
 |---|---|---|---|
 | CH-01 | Kill a random payment-orchestrator instance every 30 s | saga resume (ADR-003, ADR-008); no `AB03` (SLO-GW-03), no `DEADLINE` answers (SLO-GW-05) | none |
