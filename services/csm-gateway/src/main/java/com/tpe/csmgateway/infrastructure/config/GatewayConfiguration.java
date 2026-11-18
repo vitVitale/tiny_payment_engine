@@ -3,6 +3,10 @@ package com.tpe.csmgateway.infrastructure.config;
 import com.tpe.contracts.ContractsModule;
 import com.tpe.csmgateway.application.GatewayMetrics;
 import com.tpe.csmgateway.application.correlation.StatusReportCorrelation;
+import com.tpe.csmgateway.application.inbound.InboundMessages;
+import com.tpe.csmgateway.application.incoming.AnswerTransmissions;
+import com.tpe.csmgateway.application.incoming.CreditTransferReceiving;
+import com.tpe.csmgateway.application.incoming.IncomingTransfers;
 import com.tpe.csmgateway.application.investigation.PaymentStatusRequesting;
 import com.tpe.csmgateway.application.investigation.StatusRequestTransmissions;
 import com.tpe.csmgateway.application.investigation.StatusRequests;
@@ -36,14 +40,18 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.web.client.RestClient;
 
-/** Time, ids, the CSM client, the outgoing flow and status requests (specs/15-csm-gateway.md §2, §6, §7). */
+/**
+ * Time, ids, the CSM client, the outgoing and incoming flows and status requests (specs/15-csm-gateway.md §2, §6,
+ * §7).
+ */
 @Configuration(proxyBeanMethods = false)
 @EnableConfigurationProperties(GatewayConfiguration.CsmProperties.class)
 class GatewayConfiguration {
 
     /** {@code tpe.csm.*} (15 §7). */
     @ConfigurationProperties("tpe.csm")
-    record CsmProperties(URI baseUrl, String bic, Transmit transmit, Timeouts timeouts) {
+    record CsmProperties(URI baseUrl, String bic, Duration answerDeadlineOffset, Duration answerTransmitWindow,
+            Transmit transmit, Timeouts timeouts) {
 
         record Transmit(Duration lease, Duration pollInterval) {}
 
@@ -52,6 +60,8 @@ class GatewayConfiguration {
         CsmProperties {
             Objects.requireNonNull(baseUrl, "tpe.csm.base-url");
             Objects.requireNonNull(bic, "tpe.csm.bic");
+            Objects.requireNonNull(answerDeadlineOffset, "tpe.csm.answer-deadline-offset");
+            Objects.requireNonNull(answerTransmitWindow, "tpe.csm.answer-transmit-window");
             Objects.requireNonNull(transmit, "tpe.csm.transmit");
             Objects.requireNonNull(transmit.lease(), "tpe.csm.transmit.lease");
             Objects.requireNonNull(transmit.pollInterval(), "tpe.csm.transmit.poll-interval");
@@ -148,8 +158,35 @@ class GatewayConfiguration {
 
     @Bean
     StatusReportCorrelation statusReportCorrelation(OutgoingTransfers transfers, StatusRequests requests,
-            MessageJournal journal, OutgoingEvents events, GatewayMetrics metrics, Clock clock,
-            BankDirectory directory) {
-        return new StatusReportCorrelation(transfers, requests, journal, events, metrics, clock, directory.ownBic());
+            MessageJournal journal, OutgoingEvents events, GatewayMetrics metrics, BankDirectory directory) {
+        return new StatusReportCorrelation(transfers, requests, journal, events, metrics, directory.ownBic());
+    }
+
+    @Bean
+    AnswerTransmissions answerTransmissions(IncomingTransfers transfers, MessageJournal journal,
+            CsmProperties properties) {
+        return new AnswerTransmissions(transfers, journal, properties.answerTransmitWindow());
+    }
+
+    /** Transmits the answers to incoming transfers. */
+    @Bean
+    @Qualifier("answers")
+    Transmitter answerTransmitter(AnswerTransmissions answers, CsmClient csm, Clock clock, CsmProperties properties,
+            ExecutorService transmissions, Spans spans, GatewayMetrics metrics) {
+        return new Transmitter(answers, csm, clock, properties.transmit().lease(), transmissions, spans, metrics);
+    }
+
+    @Bean
+    CreditTransferReceiving creditTransferReceiving(IncomingTransfers transfers, MessageJournal journal,
+            OutboxWriter outbox, @Qualifier("answers") Transmitter answerTransmitter, GatewayMetrics metrics,
+            Spans spans, UlidGenerator ulids, BankDirectory directory, CsmProperties properties) {
+        return new CreditTransferReceiving(transfers, journal, outbox, answerTransmitter, metrics, spans, ulids,
+                directory.ownBic(), new Bic(properties.bic()), properties.answerDeadlineOffset());
+    }
+
+    @Bean
+    InboundMessages inboundMessages(CreditTransferReceiving creditTransfers, StatusReportCorrelation statusReports,
+            MessageJournal journal, GatewayMetrics metrics, Clock clock) {
+        return new InboundMessages(creditTransfers, statusReports, journal, metrics, clock);
     }
 }

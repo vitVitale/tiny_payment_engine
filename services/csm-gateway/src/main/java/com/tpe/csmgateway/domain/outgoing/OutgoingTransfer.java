@@ -1,5 +1,6 @@
 package com.tpe.csmgateway.domain.outgoing;
 
+import com.tpe.csmgateway.domain.transmit.TransmitStatus;
 import com.tpe.paymentdomain.PaymentId;
 import com.tpe.paymentdomain.TxId;
 import java.time.Instant;
@@ -38,8 +39,6 @@ public record OutgoingTransfer(
         String traceContext) {
 
     public enum SendStatus { SENT, NOT_SENT }
-
-    public enum TransmitStatus { PENDING, DELIVERED, GAVE_UP }
 
     public OutgoingTransfer {
         Objects.requireNonNull(txId, "txId");

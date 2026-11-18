@@ -40,7 +40,8 @@ public interface MessageJournal {
     /**
      * A journalled message as the admin API shows it.
      *
-     * @param transmitStatus for the {@code pacs.008} of an outgoing transfer, that transfer's transmit status
+     * @param transmitStatus for the {@code pacs.008} of an outgoing transfer or the answer to an incoming one, its
+     *     transmit status
      */
     record Journalled(long id, Entry entry, String transmitStatus) {}
 

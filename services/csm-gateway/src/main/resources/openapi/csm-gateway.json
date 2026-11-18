@@ -37,7 +37,7 @@
                 }
               }
             },
-            "description" : "The envelope cannot be parsed"
+            "description" : "The envelope cannot be parsed, or a pacs.008 names no transaction"
           }
         },
         "summary" : "A message from the CSM (envelope with pacs.002 or pacs.008)",
@@ -199,6 +199,26 @@
             "type" : "string",
             "format" : "date-time"
           },
+          "answerDeadline" : {
+            "type" : "string",
+            "format" : "date-time"
+          },
+          "answerDecidedBy" : {
+            "type" : "string"
+          },
+          "answerMsgId" : {
+            "type" : "string"
+          },
+          "answerReason" : {
+            "type" : "string"
+          },
+          "answerStatus" : {
+            "type" : "string"
+          },
+          "answeredAt" : {
+            "type" : "string",
+            "format" : "date-time"
+          },
           "deadlineAt" : {
             "type" : "string",
             "format" : "date-time"
@@ -236,6 +256,10 @@
           "paymentId" : {
             "type" : "string",
             "format" : "uuid"
+          },
+          "receivedAt" : {
+            "type" : "string",
+            "format" : "date-time"
           },
           "sendBy" : {
             "type" : "string",

@@ -9,7 +9,7 @@ import com.tpe.csmgateway.application.journal.MessageJournal.Entry;
 import com.tpe.csmgateway.application.transmit.Transmitter;
 import com.tpe.csmgateway.domain.outgoing.OutgoingTransfer;
 import com.tpe.csmgateway.domain.outgoing.OutgoingTransfer.SendStatus;
-import com.tpe.csmgateway.domain.outgoing.OutgoingTransfer.TransmitStatus;
+import com.tpe.csmgateway.domain.transmit.TransmitStatus;
 import com.tpe.iso20022model.CsmEnvelope;
 import com.tpe.iso20022model.CsmMessageType;
 import com.tpe.iso20022model.EnvelopeCodec;

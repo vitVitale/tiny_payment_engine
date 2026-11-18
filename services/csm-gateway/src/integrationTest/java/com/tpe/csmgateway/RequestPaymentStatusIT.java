@@ -19,6 +19,7 @@ import com.tpe.iso20022model.Pacs002Builder.StatusReport;
 import com.tpe.iso20022model.pacs028v03.PaymentTransaction113;
 import com.tpe.paymentdomain.Bic;
 import com.tpe.paymentdomain.MsgId;
+import java.sql.Timestamp;
 import java.time.Duration;
 import java.util.List;
 import java.util.Map;
@@ -189,11 +190,13 @@ class RequestPaymentStatusIT extends GatewayStack {
 
         publishCommand("TX-GIVEUP", requestPaymentStatus(command, 1), UUID.randomUUID());
         await().atMost(HANDLED).until(() -> sentToCsm().size() == 2);
+        retrySet("TX-GIVEUP", 1);
         // back-off 200, 400, 800, 1000 ms: one more attempt per second of the service's time
         for (int second = 1; second <= 4; second++) {
             int sends = second + 2;
             CLOCK.set(START.plusSeconds(second));
             await().atMost(HANDLED).until(() -> sentToCsm().size() == sends);
+            retrySet("TX-GIVEUP", second + 1);
         }
         CLOCK.set(START.plusSeconds(5));
 
@@ -230,6 +233,20 @@ class RequestPaymentStatusIT extends GatewayStack {
         return envelopes.join(new Pacs002Builder().build(new StatusReport(msgId, CLOCK.instant(),
                 new MsgId(originalMsgId), originalType, command.txId(), command.endToEndId(), command.uetr(), OWN_BIC,
                 status, CSM_BIC, OWN_BIC)));
+    }
+
+    /**
+     * Waits until the failed attempt {@code attempt} has set its retry: the CSM saw the request before the transmitter
+     * read the clock to back off, so a clock moved before then would push the retry past where the test expects it.
+     * A retry is at most 1 s ahead, a claim's lease 2 s.
+     */
+    private void retrySet(String txId, int attempt) {
+        await().atMost(HANDLED).until(() -> {
+            Map<String, Object> request = statusRequests(txId).getFirst();
+            return Integer.valueOf(attempt).equals(request.get("transmit_attempts"))
+                    && request.get("next_transmit_at") instanceof Timestamp next
+                    && next.toInstant().isBefore(CLOCK.instant().plusMillis(1_500));
+        });
     }
 
     private List<Map<String, Object>> statusRequests(String txId) {

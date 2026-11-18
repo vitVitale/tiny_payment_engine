@@ -47,6 +47,11 @@
             <artifactId>test-support</artifactId>
             <scope>test</scope>
         </dependency>
+        <!-- P-07, consumer csm-simulator (specs/20-testing-strategy.md §10.1, §10.2) -->
+        <dependency>
+            <groupId>au.com.dius.pact.consumer</groupId>
+            <artifactId>junit5</artifactId>
+        </dependency>
         <!-- provider verification of the pacts that name this service: P-06 of csm-gateway (specs/20-testing-strategy.md §10.3) -->
         <dependency>
             <groupId>au.com.dius.pact.provider</groupId>
