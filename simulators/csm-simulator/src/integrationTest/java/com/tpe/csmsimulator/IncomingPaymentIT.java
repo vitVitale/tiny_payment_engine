@@ -1,6 +1,7 @@
 package com.tpe.csmsimulator;
 
 import static com.tpe.csmsimulator.CreditTransfers.answer;
+import static com.tpe.csmsimulator.CreditTransfers.investigation;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.awaitility.Awaitility.await;
 
@@ -75,11 +76,55 @@ class IncomingPaymentIT extends SimulatorStack {
         assertThat(sentToGateway()).hasSize(1);
     }
 
+    @Test
+    void rejectAfterAccpAnswersOurAccpWithOneRejectionAb05AndNoSettlement() throws Exception {
+        String txId = txId(createIncomingPayment(body("REJECT_AFTER_ACCP")).body());
+        String incoming = sentToGateway().getFirst();
+
+        transmit(answer("ANS-1", incoming, Status.ACCEPTED, CLOCK.instant()));
+
+        await().atMost(DUE_WORK).until(() -> sentToGateway().size() == 2);
+        assertThat(sentToGateway().get(1)).contains("<TxSts>RJCT</TxSts>", "<Cd>AB05</Cd>",
+                "<OrgnlTxId>" + txId + "</OrgnlTxId>");
+        CLOCK.advance(Duration.ofMinutes(1));
+        assertThat(get("/sim/v1/settlements").body()).isEqualTo("[]");
+        assertThat(sentToGateway()).hasSize(2);
+    }
+
+    @Test
+    void noConfirmationSettlesWithoutAConfirmationAndAnInvestigationFindsItSettled() throws Exception {
+        String txId = txId(createIncomingPayment(body("NO_CONFIRMATION")).body());
+        String incoming = sentToGateway().getFirst();
+
+        transmit(answer("ANS-1", incoming, Status.ACCEPTED, CLOCK.instant()));
+        await().atMost(DUE_WORK).until(() -> get("/sim/v1/settlements").body().contains(txId));
+        CLOCK.advance(Duration.ofMinutes(1));
+        assertThat(sentToGateway()).as("no confirmation").hasSize(1);
+
+        transmit(investigation("INV-1", incoming, CLOCK.instant()));
+
+        await().atMost(DUE_WORK).until(() -> sentToGateway().size() == 2);
+        assertThat(sentToGateway().get(1)).contains("<TxSts>ACSC</TxSts>", "<OrgnlMsgId>INV-1</OrgnlMsgId>",
+                "<OrgnlTxId>" + txId + "</OrgnlTxId>", "<BICFI>PEERDEFFXXX</BICFI>");
+    }
+
+    @Test
+    void aRawDocumentWithADoctypeGoesToTheGatewayUnchanged() throws Exception {
+        String withDoctype = "<?xml version=\"1.0\"?><!DOCTYPE x [<!ENTITY e SYSTEM \"file:///etc/passwd\">]>"
+                + "<x>&e;</x>";
+
+        var response = send("POST", "/sim/v1/incoming-payments/raw", "application/xml", withDoctype);
+
+        assertThat(response.statusCode()).isEqualTo(200);
+        assertThat(response.body()).isEqualTo("{\"gatewayStatus\":202}");
+        assertThat(sentToGateway()).containsExactly(withDoctype);
+    }
+
     @ParameterizedTest
     @ValueSource(strings = {
             "{\"amount\": \"1.00\", \"debtorName\": \"X\", \"debtorIban\": \"" + PEER_ACCOUNT + "\"}",
             "{\"creditorIban\": \"" + OUR_ACCOUNT + "\", \"amount\": \"1.00\", \"debtorName\": \"X\","
-                    + " \"debtorIban\": \"" + PEER_ACCOUNT + "\", \"scenario\": \"NO_CONFIRMATION\"}",
+                    + " \"debtorIban\": \"" + PEER_ACCOUNT + "\", \"scenario\": \"TIMEOUT\"}",
             "{\"creditorIban\": \"" + OUR_ACCOUNT + "\", \"amount\": \"1.00\", \"debtorName\": \"X\","
                     + " \"debtorIban\": \"DE89370400440532013000\"}",
             "{\"creditorIban\": \"" + OUR_ACCOUNT + "\", \"amount\": \"abc\", \"debtorName\": \"X\","
@@ -94,6 +139,11 @@ class IncomingPaymentIT extends SimulatorStack {
 
     private java.net.http.HttpResponse<String> createIncomingPayment(String body) throws Exception {
         return send("POST", "/sim/v1/incoming-payments", "application/json", body);
+    }
+
+    private static String body(String scenario) {
+        return "{\"creditorIban\": \"" + OUR_ACCOUNT + "\", \"amount\": \"12.34\", \"debtorName\": \"Hans Mueller\","
+                + " \"debtorIban\": \"" + PEER_ACCOUNT + "\", \"scenario\": \"" + scenario + "\"}";
     }
 
     private static String txId(String body) {

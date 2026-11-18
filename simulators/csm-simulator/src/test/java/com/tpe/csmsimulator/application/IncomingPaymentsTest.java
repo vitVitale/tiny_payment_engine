@@ -4,12 +4,14 @@ import static com.tpe.csmsimulator.CreditTransfers.CSM_BIC;
 import static com.tpe.csmsimulator.CreditTransfers.OUR_BIC;
 import static com.tpe.csmsimulator.CreditTransfers.PEER_BIC;
 import static com.tpe.csmsimulator.CreditTransfers.answer;
+import static com.tpe.csmsimulator.CreditTransfers.investigation;
 import static com.tpe.csmsimulator.CreditTransfers.pacs008;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.assertj.core.api.Assertions.tuple;
 
 import com.tpe.csmsimulator.application.JournalEntry.Kind;
+import com.tpe.csmsimulator.domain.scenarios.IncomingScenario;
 import com.tpe.csmsimulator.domain.scenarios.Scenario;
 import com.tpe.csmsimulator.domain.scheme.IncomingScheme;
 import com.tpe.csmsimulator.domain.scheme.OutgoingScheme;
@@ -234,7 +236,7 @@ class IncomingPaymentsTest {
     @Test
     void aDebtorIbanOfNoBankInTheDirectoryNeedsAnExplicitDebtorAgent() {
         var unknownBank = new IncomingPayment(OUR_ACCOUNT, Money.parse("1.00"), new PartyName("Hans Mueller"),
-                new Iban("DE89370400440532013000"), null, null);
+                new Iban("DE89370400440532013000"), null, null, IncomingScenario.ACCEPT);
 
         assertThatThrownBy(() -> simulation.sendIncomingPayment(unknownBank))
                 .isInstanceOfSatisfying(InvalidIncomingPaymentException.class,
@@ -305,9 +307,186 @@ class IncomingPaymentsTest {
         assertThat(sent).as("the TxId is free again").hasSize(2);
     }
 
+    @Test
+    void rejectAfterAccpAnswersOurAccpWithExactlyOneRejectionAb05AndNeverSettles() {
+        TxId txId = simulation.sendIncomingPayment(payment("12.34", IncomingScenario.REJECT_AFTER_ACCP)).txId();
+        String incoming = sent.getFirst();
+
+        simulation.receive(answer("ANS-1", incoming, Status.ACCEPTED, clock.instant()));
+        simulation.tick();
+        simulation.receive(answer("ANS-2", incoming, Status.ACCEPTED, clock.instant()));
+        clock.advance(Duration.ofMinutes(1));
+        simulation.tick();
+
+        assertThat(simulation.settlements(Instant.EPOCH)).isEmpty();
+        assertThat(sent).hasSize(2);
+        var rejection = statusReport(sent.get(1)).getTxInfAndSts().getFirst();
+        assertThat(rejection.getTxSts()).isEqualTo("RJCT");
+        assertThat(rejection.getStsRsnInf().getFirst().getRsn().getCd()).isEqualTo("AB05");
+        assertThat(rejection.getOrgnlTxId()).isEqualTo(txId.value());
+        assertThat(rejection.getOrgnlTxRef().getDbtrAgt().getFinInstnId().getBICFI()).isEqualTo(PEER_BIC.value());
+        assertThat(rejection.getInstdAgt().getFinInstnId().getBICFI()).isEqualTo(OUR_BIC.value());
+        assertThat(simulation.journal(txId)).extracting(JournalEntry::kind)
+                .containsExactly(Kind.SENT, Kind.RECEIVED, Kind.SENT, Kind.RECEIVED);
+    }
+
+    @Test
+    void rejectAfterAccpRecordsARejectionOfOursLikeAnyOther() {
+        simulation.sendIncomingPayment(payment("12.34", IncomingScenario.REJECT_AFTER_ACCP));
+
+        simulation.receive(answer("ANS-1", sent.getFirst(), Status.rejected(ReasonCode.AC04), clock.instant()));
+        simulation.tick();
+
+        assertThat(sent).hasSize(1);
+        assertThat(simulation.settlements(Instant.EPOCH)).isEmpty();
+    }
+
+    @Test
+    void noConfirmationSettlesOnceSendsNoStatusReportAndAnswersAnInvestigationSettled() {
+        TxId txId = simulation.sendIncomingPayment(payment("12.34", IncomingScenario.NO_CONFIRMATION)).txId();
+        String incoming = sent.getFirst();
+
+        clock.advance(Duration.ofSeconds(1));
+        simulation.receive(answer("ANS-1", incoming, Status.ACCEPTED, clock.instant()));
+        simulation.tick();
+        clock.advance(Duration.ofMinutes(1));
+        simulation.tick();
+        assertThat(sent).as("no settlement confirmation").hasSize(1);
+
+        simulation.receive(investigation("INV-1", incoming, clock.instant()));
+        simulation.tick();
+
+        assertThat(simulation.settlements(Instant.EPOCH)).containsExactly(
+                new Settlement(txId, PEER_BIC, Direction.INCOMING, 1234, START.plusSeconds(1)));
+        assertThat(sent).hasSize(2);
+        FIToFIPaymentStatusReportV10 answer = statusReport(sent.get(1));
+        var transaction = answer.getTxInfAndSts().getFirst();
+        assertThat(transaction.getTxSts()).isEqualTo("ACSC");
+        assertThat(transaction.getOrgnlTxId()).isEqualTo(txId.value());
+        assertThat(transaction.getOrgnlTxRef().getDbtrAgt().getFinInstnId().getBICFI()).isEqualTo(PEER_BIC.value());
+        assertThat(transaction.getInstdAgt().getFinInstnId().getBICFI()).isEqualTo(OUR_BIC.value());
+        assertThat(answer.getOrgnlGrpInfAndSts().getFirst().getOrgnlMsgId()).isEqualTo("INV-1");
+        assertThat(answer.getOrgnlGrpInfAndSts().getFirst().getOrgnlMsgNmId())
+                .isEqualTo(CsmMessageType.PACS_028.version());
+    }
+
+    @Test
+    void anInvestigationOfAnIncomingTransactionIsMatchedByItsDebtorAgentAndTxId() {
+        TxId txId = new TxId("PEER-TX-1");
+        simulation.sendIncomingPayment(payment("10.00", txId, PEER_BIC));
+        String fromPeer = sent.getLast();
+        simulation.sendIncomingPayment(payment("20.00", txId, OTHER_BIC));
+        String fromOther = sent.getLast();
+        simulation.receive(answer("ANS-1", fromPeer, Status.ACCEPTED, clock.instant()));
+        simulation.receive(answer("ANS-2", fromOther, Status.rejected(ReasonCode.AC04), clock.instant()));
+        simulation.tick();
+        sent.clear();
+
+        simulation.receive(investigation("INV-1", fromOther, clock.instant()));
+        simulation.receive(investigation("INV-2", fromPeer, clock.instant()));
+        simulation.tick();
+
+        assertThat(sent).extracting(xml -> statusReport(xml).getTxInfAndSts().getFirst())
+                .extracting(t -> t.getOrgnlTxRef().getDbtrAgt().getFinInstnId().getBICFI(), t -> t.getTxSts(),
+                        t -> t.getStsRsnInf().stream().map(r -> r.getRsn().getCd()).toList())
+                .containsExactly(
+                        tuple(OTHER_BIC.value(), "RJCT", List.of("AC04")),
+                        tuple(PEER_BIC.value(), "ACSC", List.of()));
+    }
+
+    @Test
+    void anIncomingTransactionAwaitingOurAnswerIsNotAnsweredAndATimedOutOneIsRejectedAb05() {
+        simulation.sendIncomingPayment(payment("12.34", null, null));
+        String incoming = sent.getFirst();
+
+        simulation.receive(investigation("INV-1", incoming, clock.instant()));
+        simulation.tick();
+        assertThat(sent).as("no final status yet").hasSize(1);
+
+        clock.advance(ANSWER_TIMEOUT);
+        simulation.tick();
+        simulation.receive(investigation("INV-2", incoming, clock.instant()));
+        simulation.tick();
+
+        assertThat(sent).hasSize(2);
+        var answer = statusReport(sent.get(1)).getTxInfAndSts().getFirst();
+        assertThat(answer.getTxSts()).isEqualTo("RJCT");
+        assertThat(answer.getStsRsnInf().getFirst().getRsn().getCd()).isEqualTo("AB05");
+    }
+
+    @Test
+    void anInvestigationOfARejectAfterAccpTransactionIsAnsweredWithItsRejection() {
+        simulation.sendIncomingPayment(payment("12.34", IncomingScenario.REJECT_AFTER_ACCP));
+        String incoming = sent.getFirst();
+        simulation.receive(answer("ANS-1", incoming, Status.ACCEPTED, clock.instant()));
+        simulation.tick();
+
+        simulation.receive(investigation("INV-1", incoming, clock.instant()));
+        simulation.tick();
+
+        assertThat(sent).hasSize(3);
+        var answer = statusReport(sent.get(2)).getTxInfAndSts().getFirst();
+        assertThat(answer.getTxSts()).isEqualTo("RJCT");
+        assertThat(answer.getStsRsnInf().getFirst().getRsn().getCd()).isEqualTo("AB05");
+    }
+
+    @Test
+    void anInvestigationOfAnIncomingTransactionTheCsmNeverSentIsUnknown() {
+        simulation.sendIncomingPayment(payment("12.34", new TxId("PEER-TX-1"), PEER_BIC));
+        String fromOther = sent.getFirst().replace("<BICFI>" + PEER_BIC.value() + "</BICFI>",
+                "<BICFI>" + OTHER_BIC.value() + "</BICFI>");
+
+        simulation.receive(investigation("INV-1", fromOther, clock.instant()));
+        simulation.tick();
+
+        assertThat(sent).hasSize(2);
+        var answer = statusReport(sent.get(1)).getTxInfAndSts().getFirst();
+        assertThat(answer.getTxSts()).isEqualTo("RJCT");
+        assertThat(answer.getStsRsnInf().getFirst().getRsn().getPrtry()).isEqualTo(Status.UNKNOWN_TX_REASON);
+    }
+
+    @Test
+    void aRejectionOfOursWithoutAReasonCodeIsRefused() {
+        simulation.sendIncomingPayment(payment("12.34", null, null));
+        String withoutReason = answer("ANS-1", sent.getFirst(), Status.rejected(ReasonCode.AC04), clock.instant())
+                .replaceAll("(?s)<StsRsnInf>.*?</StsRsnInf>", "");
+
+        assertThat(simulation.receive(withoutReason)).isInstanceOf(CsmSimulation.Refused.class);
+    }
+
+    @Test
+    void SIM_AC_06_aPaymentRejectedAfterOurAccpHasNoSettlementAndAnUnconfirmedOneHasOne() {
+        simulation.sendIncomingPayment(payment("1.00", IncomingScenario.REJECT_AFTER_ACCP));
+        String rejected = sent.getLast();
+        TxId unconfirmed = simulation.sendIncomingPayment(payment("2.00", IncomingScenario.NO_CONFIRMATION)).txId();
+        String settled = sent.getLast();
+        simulation.receive(answer("ANS-1", rejected, Status.ACCEPTED, clock.instant()));
+        simulation.receive(answer("ANS-2", settled, Status.ACCEPTED, clock.instant()));
+        simulation.tick();
+
+        assertThat(simulation.settlements(Instant.EPOCH)).extracting(Settlement::txId).containsExactly(unconfirmed);
+    }
+
+    @Test
+    void aRawDocumentWithADoctypeGoesToTheGatewayUnchanged() {
+        String withDoctype = """
+                <?xml version="1.0" encoding="UTF-8"?>
+                <!DOCTYPE Envelope [<!ENTITY xxe SYSTEM "file:///etc/passwd">]>
+                <Envelope><TxId>&xxe;</TxId></Envelope>""";
+
+        assertThat(simulation.sendRaw(withDoctype)).isEqualTo(202);
+
+        assertThat(sent).containsExactly(withDoctype);
+    }
+
     private static IncomingPayment payment(String amount, TxId txId, Bic debtorAgent) {
         return new IncomingPayment(OUR_ACCOUNT, Money.parse(amount), new PartyName("Hans Mueller"), PEER_ACCOUNT,
-                txId, debtorAgent);
+                txId, debtorAgent, IncomingScenario.ACCEPT);
+    }
+
+    private static IncomingPayment payment(String amount, IncomingScenario scenario) {
+        return new IncomingPayment(OUR_ACCOUNT, Money.parse(amount), new PartyName("Hans Mueller"), PEER_ACCOUNT,
+                null, null, scenario);
     }
 
     private int gateway(String envelope) {

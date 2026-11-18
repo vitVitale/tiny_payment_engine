@@ -8,6 +8,7 @@ import com.tpe.csmsimulator.application.InvalidIncomingPaymentException;
 import com.tpe.csmsimulator.application.JournalEntry;
 import com.tpe.csmsimulator.application.Outage;
 import com.tpe.csmsimulator.domain.scenarios.CounterpartyAccount;
+import com.tpe.csmsimulator.domain.scenarios.IncomingScenario;
 import com.tpe.csmsimulator.domain.scenarios.Scenario;
 import com.tpe.csmsimulator.domain.scheme.Settlement;
 import com.tpe.paymentdomain.Bic;
@@ -54,7 +55,7 @@ class ControlController {
 
     /**
      * @param amount in euros, e.g. {@code "12.34"}
-     * @param scenario {@code ACCEPT} (the default)
+     * @param scenario {@code ACCEPT} (the default), {@code REJECT_AFTER_ACCP} or {@code NO_CONFIRMATION}
      * @param txId optional: a new one if absent
      * @param debtorAgentBic optional: the bank of {@code debtorIban} in the bank directory if absent
      */
@@ -63,8 +64,6 @@ class ControlController {
 
     /** @param gatewayStatus the HTTP status csm-gateway answered; a payment it did not take is forgotten */
     record IncomingPaymentCreated(String txId, int gatewayStatus) {}
-
-    private static final String ACCEPT = "ACCEPT";
 
     record SettlementView(String txId, String debtorAgentBic, String direction, long amountMinor, Instant settledAt) {
 
@@ -104,14 +103,14 @@ class ControlController {
         return ResponseEntity.noContent().build();
     }
 
-    /**
-     * Builds a {@code pacs.008} and sends it to csm-gateway; {@code 502} if the gateway gave no answer. Only the
-     * default scenario, {@code ACCEPT}, is played so far.
-     */
+    /** Builds a {@code pacs.008} and sends it to csm-gateway; {@code 502} if the gateway gave no answer. */
     @PostMapping("/incoming-payments")
     IncomingPaymentCreated incomingPayment(@RequestBody IncomingPaymentBody body) {
-        if (body.scenario() != null && !body.scenario().equals(ACCEPT)) {
-            throw new InvalidControlRequestException("scenario", "incoming payments play ACCEPT only so far");
+        IncomingScenario scenario;
+        try {
+            scenario = body.scenario() == null ? IncomingScenario.ACCEPT : IncomingScenario.parse(body.scenario());
+        } catch (IllegalArgumentException e) {
+            throw new InvalidControlRequestException("scenario", e.getMessage());
         }
         IncomingPayment payment = new IncomingPayment(
                 new Iban(required("creditorIban", body.creditorIban())),
@@ -119,7 +118,7 @@ class ControlController {
                 new PartyName(required("debtorName", body.debtorName())),
                 new Iban(required("debtorIban", body.debtorIban())),
                 body.txId() == null ? null : new TxId(body.txId()),
-                body.debtorAgentBic() == null ? null : new Bic(body.debtorAgentBic()));
+                body.debtorAgentBic() == null ? null : new Bic(body.debtorAgentBic()), scenario);
         IncomingPaymentSent sent;
         try {
             sent = simulation.sendIncomingPayment(payment);
