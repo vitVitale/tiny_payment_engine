@@ -2,6 +2,7 @@ package com.tpe.invariantchecker;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.tpe.invariantchecker.CsmInvariants.Answer;
 import com.tpe.invariantchecker.CsmInvariants.SimulatorMessage;
 import com.tpe.invariantchecker.CsmInvariants.Settlement;
 import java.nio.file.Path;
@@ -23,7 +24,7 @@ import org.junit.jupiter.api.Test;
 import org.testcontainers.postgresql.PostgreSQLContainer;
 
 /**
- * INV-5, INV-10 and INV-11 (gateway part) of specs/20-testing-strategy.md §3 against the schemas of csm-gateway's,
+ * INV-5, INV-6, INV-10 and INV-11 (gateway part) of specs/20-testing-strategy.md §3 against the schemas of csm-gateway's,
  * payment-orchestrator's and ledger-service's own migrations, each in its own database as in the compose stack, with
  * the simulator's logs (17 §3.5) as the checks receive them. Each check has a negative test (20 §3).
  */
@@ -153,7 +154,139 @@ class CsmInvariantsIT {
                 List.of(payment)), "INV-10", payment.toString());
     }
 
+    @Test
+    void anIncomingSettlementTheLedgerBookedPassesInv10() throws SQLException {
+        UUID settled = incomingPayment("SETTLED", null, null, 400);
+        incomingEntry(settled, 400);
+        UUID rejected = incomingPayment("REJECTED", "AC01", null, 400);
+
+        assertThat(CsmInvariants.ledgerAgreesWithCsm(payments, ledger, List.of(incomingSettlement(settled, 400)),
+                List.of(settled, rejected))).isEmpty();
+    }
+
+    @Test
+    void INV_10_anIncomingTransferTheCsmSettledWithoutItsLedgerPostingFails() throws SQLException {
+        UUID payment = incomingPayment("ACCEPTED", null, null, 400);
+
+        assertViolation(CsmInvariants.ledgerAgreesWithCsm(payments, ledger, List.of(incomingSettlement(payment, 400)),
+                List.of(payment)), "INV-10", payment.toString());
+    }
+
+    @Test
+    void INV_10_anIncomingPostingForATransferTheCsmDidNotSettleFails() throws SQLException {
+        UUID payment = incomingPayment("SETTLED", null, null, 400);
+        incomingEntry(payment, 400);
+
+        assertViolation(CsmInvariants.ledgerAgreesWithCsm(payments, ledger, List.of(), List.of(payment)), "INV-10",
+                payment.toString());
+    }
+
+    // ---- INV-6
+
+    @Test
+    void oneAnswerTheOrchestratorFollowsPassesInv6() throws SQLException {
+        UUID settled = incomingPayment("SETTLED", null, "SETTLED", 100);
+        UUID rejectedByCsm = incomingPayment("REJECTED", "AB05", "REJECTED", 100);
+        UUID refused = incomingPayment("REJECTED", "AC01", null, 100);
+
+        assertThat(CsmInvariants.oneAnswerPerIncoming(payments, List.of(
+                answer(settled, "M1", "ACCP", null),
+                answer(rejectedByCsm, "M2", "ACCP", null),
+                answer(refused, "M3", "RJCT", "AC01"),
+                // the same answer re-sent for a duplicate pacs.008 (E2E-I-10): one answer
+                answer(refused, "M3", "RJCT", "AC01")), List.of(settled, rejectedByCsm, refused))).isEmpty();
+    }
+
+    @Test
+    void INV_6_twoAnswersForOneIncomingTransferFail() throws SQLException {
+        UUID payment = incomingPayment("SETTLED", null, "SETTLED", 100);
+
+        assertViolation(CsmInvariants.oneAnswerPerIncoming(payments, List.of(answer(payment, "M1", "ACCP", null),
+                answer(payment, "M2", "RJCT", "AB05")), List.of(payment)), "INV-6", payment.toString());
+    }
+
+    @Test
+    void INV_6_anIncomingTransferNeverAnsweredFails() throws SQLException {
+        UUID payment = incomingPayment("REJECTED", "AB05", null, 100);
+
+        assertViolation(CsmInvariants.oneAnswerPerIncoming(payments, List.of(), List.of(payment)), "INV-6",
+                payment.toString());
+    }
+
+    @Test
+    void INV_6_anAcceptingAnswerForARejectedPaymentFails() throws SQLException {
+        UUID payment = incomingPayment("REJECTED", "AC01", null, 100);
+
+        assertViolation(CsmInvariants.oneAnswerPerIncoming(payments, List.of(answer(payment, "M1", "ACCP", null)),
+                List.of(payment)), "INV-6", payment.toString());
+    }
+
+    @Test
+    void INV_6_aRejectingAnswerWithAnotherReasonThanThePaymentsFails() throws SQLException {
+        UUID payment = incomingPayment("REJECTED", "AC01", null, 100);
+
+        assertViolation(CsmInvariants.oneAnswerPerIncoming(payments, List.of(answer(payment, "M1", "RJCT", "AB05")),
+                List.of(payment)), "INV-6", payment.toString());
+    }
+
+    @Test
+    void INV_6_oneAnswerReachingTheCsmWithTwoStatusesFails() throws SQLException {
+        UUID payment = incomingPayment("SETTLED", null, "SETTLED", 100);
+
+        assertViolation(CsmInvariants.oneAnswerPerIncoming(payments, List.of(answer(payment, "M1", "ACCP", null),
+                answer(payment, "M1", "RJCT", "AB05")), List.of(payment)), "INV-6", "PEERDEFFXXX:" + txIdOf(payment));
+    }
+
+    @Test
+    void INV_6_aRejectingAnswerForAPaymentTheCsmRejectedFails() throws SQLException {
+        UUID payment = incomingPayment("REJECTED", "AB05", "REJECTED", 100);
+
+        assertViolation(CsmInvariants.oneAnswerPerIncoming(payments, List.of(answer(payment, "M1", "RJCT", "AB05")),
+                List.of(payment)), "INV-6", payment.toString());
+    }
+
+    @Test
+    void INV_6_anAcceptingAnswerForAPaymentStillAwaitingItFails() throws SQLException {
+        UUID payment = incomingPayment("ACCEPT_REQUESTED", null, null, 100);
+
+        assertViolation(CsmInvariants.oneAnswerPerIncoming(payments, List.of(answer(payment, "M1", "ACCP", null)),
+                List.of(payment)), "INV-6", payment.toString());
+    }
+
+    @Test
+    void INV_6_aRejectingAnswerForASettledPaymentFails() throws SQLException {
+        UUID payment = incomingPayment("SETTLED", null, "SETTLED", 100);
+
+        assertViolation(CsmInvariants.oneAnswerPerIncoming(payments, List.of(answer(payment, "M1", "RJCT", "AB05")),
+                List.of(payment)), "INV-6", payment.toString());
+    }
+
     // ---- INV-11, the gateway part
+
+    @Test
+    void anIncomingTransferAnsweredAndDeliveredPassesInv11() throws SQLException {
+        String delivered = incomingTransfer(Instant.now().minusSeconds(60), "ACCP", "DELIVERED");
+        String withinItsWindow = incomingTransfer(Instant.now(), null, null);
+
+        assertThat(CsmInvariants.gatewayIncomingNothingStuck(gateway, List.of(delivered, withinItsWindow),
+                TOLERANCE)).isEmpty();
+    }
+
+    @Test
+    void INV_11_anIncomingTransferUnansweredPastItsDeadlineFails() throws SQLException {
+        String transaction = incomingTransfer(Instant.now().minus(TOLERANCE).minusSeconds(1), null, null);
+
+        assertViolation(CsmInvariants.gatewayIncomingNothingStuck(gateway, List.of(transaction), TOLERANCE),
+                "INV-11", transaction);
+    }
+
+    @Test
+    void INV_11_anAnswerPendingPastItsTransmitWindowFails() throws SQLException {
+        String transaction = incomingTransfer(Instant.now().minus(TOLERANCE).minusSeconds(1), "ACCP", "PENDING");
+
+        assertViolation(CsmInvariants.gatewayIncomingNothingStuck(gateway, List.of(transaction), TOLERANCE),
+                "INV-11", transaction);
+    }
 
     @Test
     void aPendingTransmissionWithinItsWindowPassesInv11() throws SQLException {
@@ -185,6 +318,16 @@ class CsmInvariantsIT {
             assertThat(violation.invariant()).isEqualTo(invariant);
             assertThat(violation.subject()).isEqualTo(subject);
         });
+    }
+
+    /** The answer {@code pacs.002} the CSM received for {@code payment}'s transaction. */
+    private Answer answer(UUID payment, String msgId, String status, String reason) throws SQLException {
+        return new Answer("PEERDEFFXXX", txIdOf(payment), msgId, status, reason);
+    }
+
+    /** The CSM's settlement of an incoming {@code payment}'s transaction from the peer bank. */
+    private Settlement incomingSettlement(UUID payment, long amountMinor) throws SQLException {
+        return new Settlement(txIdOf(payment), "PEERDEFFXXX", "INCOMING", amountMinor, Instant.now());
     }
 
     private static SimulatorMessage received(String txId, String messageType, Instant at) {
@@ -259,6 +402,57 @@ class CsmInvariantsIT {
         return id;
     }
 
+    /** An incoming payment from the peer bank to us. */
+    private UUID incomingPayment(String state, String reasonCode, String csmOutcome, long amountMinor)
+            throws SQLException {
+        UUID id = UUID.randomUUID();
+        try (var statement = payments.prepareStatement("""
+                INSERT INTO payments (payment_id, direction, state, reason_code, on_us, tx_id, uetr, end_to_end_id,
+                  msg_id, amount_minor, currency, debtor_name, debtor_iban, debtor_agent_bic, creditor_name,
+                  creditor_iban, creditor_agent_bic, accepted_at, answer_deadline, csm_outcome, finalised_at,
+                  created_at, updated_at)
+                VALUES (?, 'INCOMING', ?, ?, false, ?, ?, 'E2E', 'MSG', ?, 'EUR', 'Payer', 'DE00PAYER', 'PEERDEFFXXX',
+                  'Payee', 'DE00PAYEE', ?, now(), now(), ?, now(), now(), now())""")) {
+            statement.setObject(1, id);
+            statement.setString(2, state);
+            statement.setString(3, reasonCode);
+            statement.setString(4, "TX" + NUMBERS.incrementAndGet());
+            statement.setObject(5, UUID.randomUUID());
+            statement.setLong(6, amountMinor);
+            statement.setString(7, OUR_BIC);
+            statement.setString(8, csmOutcome);
+            statement.executeUpdate();
+        }
+        return id;
+    }
+
+    /** An incoming transfer the gateway recorded, as {@code <debtorAgentBic>:<txId>}; its answer may be missing. */
+    private String incomingTransfer(Instant answerDeadline, String answerStatus, String transmitStatus)
+            throws SQLException {
+        String txId = "TX" + NUMBERS.incrementAndGet();
+        try (var statement = gateway.prepareStatement("""
+                INSERT INTO incoming_transfers (debtor_agent_bic, tx_id, msg_id, received_at, answer_deadline,
+                  answer_status, answer_reason, answer_decided_by, answered_at, transmit_status)
+                VALUES ('PEERDEFFXXX', ?, ?, ?, ?, ?, NULL, CASE WHEN ? THEN 'VERDICT' END, CASE WHEN ? THEN now() END,
+                  ?)""")) {
+            statement.setString(1, txId);
+            statement.setString(2, "MSG" + txId);
+            statement.setTimestamp(3, Timestamp.from(answerDeadline.minusSeconds(2)));
+            statement.setTimestamp(4, Timestamp.from(answerDeadline));
+            statement.setString(5, answerStatus);
+            statement.setBoolean(6, answerStatus != null);
+            statement.setBoolean(7, answerStatus != null);
+            statement.setString(8, transmitStatus);
+            statement.executeUpdate();
+        }
+        return "PEERDEFFXXX:" + txId;
+    }
+
+    /** The incoming payment's {@code PAYMENT_IN} entry: DR {@code CSM_SETTLEMENT}, CR a customer. */
+    private void incomingEntry(UUID payment, long amountMinor) throws SQLException {
+        entry(payment, amountMinor, "PAYMENT_IN", "CR", "DR");
+    }
+
     private String txIdOf(UUID payment) throws SQLException {
         try (var statement = payments.prepareStatement("SELECT tx_id FROM payments WHERE payment_id = ?")) {
             statement.setObject(1, payment);
@@ -271,6 +465,12 @@ class CsmInvariantsIT {
 
     /** The payment's {@code PAYMENT_OUT} entry: DR a customer, CR {@code CSM_SETTLEMENT}, of {@code amountMinor}. */
     private void entry(UUID payment, long amountMinor) throws SQLException {
+        entry(payment, amountMinor, "PAYMENT_OUT", "DR", "CR");
+    }
+
+    /** An entry of {@code type}: the customer on {@code customerSide}, {@code CSM_SETTLEMENT} on {@code csmSide}. */
+    private void entry(UUID payment, long amountMinor, String type, String customerSide, String csmSide)
+            throws SQLException {
         UUID customer = UUID.randomUUID();
         UUID csm;
         try (var statement = ledger.prepareStatement(
@@ -293,12 +493,13 @@ class CsmInvariantsIT {
             UUID entry = UUID.randomUUID();
             try (var statement = ledger.prepareStatement("""
                     INSERT INTO journal_entries (entry_id, entry_type, payment_id, created_at)
-                    VALUES (?, 'PAYMENT_OUT', ?, now())""")) {
+                    VALUES (?, ?, ?, now())""")) {
                 statement.setObject(1, entry);
-                statement.setObject(2, payment);
+                statement.setString(2, type);
+                statement.setObject(3, payment);
                 statement.executeUpdate();
             }
-            for (var posting : List.of(Map.entry(customer, "DR"), Map.entry(csm, "CR"))) {
+            for (var posting : List.of(Map.entry(customer, customerSide), Map.entry(csm, csmSide))) {
                 try (var statement = ledger.prepareStatement("""
                         INSERT INTO postings (entry_id, account_id, side, amount_minor, created_at)
                         VALUES (?, ?, ?, ?, now())""")) {

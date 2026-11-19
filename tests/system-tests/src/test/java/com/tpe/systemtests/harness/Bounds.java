@@ -88,6 +88,16 @@ public final class Bounds {
     }
 
     /**
+     * How long past its {@code answer_deadline} an incoming transfer may still be unanswered, or its answer
+     * {@code PENDING}, before INV-11 calls it stuck: csm-gateway's {@code tpe.csm.answer-transmit-window} (the answer is
+     * sent until then) and {@link #transmissionOverdue()}.
+     */
+    public static Duration answerOverdue() {
+        return ServiceProfile.systemtest(ServiceJar.CSM_GATEWAY).duration("tpe.csm.answer-transmit-window")
+                .orElseThrow().plus(transmissionOverdue());
+    }
+
+    /**
      * How long after the start of a transmission the CSM may log its receipt: csm-gateway's
      * {@code tpe.csm.timeouts.connect}, within which the request has reached the simulator or failed. INV-5 counts a
      * {@code pacs.008} sent just before its {@code sendBy} as sent in time.

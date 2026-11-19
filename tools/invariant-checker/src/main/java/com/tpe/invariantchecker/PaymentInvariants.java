@@ -22,6 +22,9 @@ import java.util.UUID;
  *   (an on-us payment's by an {@code ON_US} entry, one to another PSP's by a {@code PAYMENT_OUT} entry to the
  *   CSM); {@code REJECTED} ⇔ its hold {@code RELEASED}, tombstoned or never created. The hold id is the payment id
  *   (orchestrator {@code HttpLedger}).</li>
+ *   <li><b>INV-4</b> a final incoming payment has no {@code ACTIVE} pending credit; {@code SETTLED} ⇔ its pending
+ *   credit {@code CONFIRMED}; {@code REJECTED} ⇔ it {@code CANCELLED}, tombstoned or never created. The pending credit
+ *   id is the payment id (ADR-010).</li>
  *   <li><b>INV-8</b> a {@code SETTLED} outgoing payment that is not on-us has exactly one {@code CR CSM_SETTLEMENT}
  *   posting of its amount, a {@code SETTLED} incoming payment exactly one {@code DR CSM_SETTLEMENT}; on-us and
  *   {@code REJECTED} payments none.</li>
@@ -44,6 +47,9 @@ public final class PaymentInvariants {
             SELECT h.hold_id, h.status, e.entry_type
               FROM holds h LEFT JOIN journal_entries e ON e.entry_id = h.entry_id
              WHERE h.hold_id = ANY (?)""";
+
+    private static final String PENDING_CREDITS = """
+            SELECT pending_credit_id, status FROM pending_credits WHERE pending_credit_id = ANY (?)""";
 
     private static final String CSM_SETTLEMENT_POSTINGS = """
             SELECT e.payment_id, p.side, p.amount_minor
@@ -117,6 +123,34 @@ public final class PaymentInvariants {
                 }
             } else if (hold != null && !hold.status().equals("RELEASED")) {
                 violations.add(new Violation("INV-3", subject, "REJECTED, hold " + hold.status()));
+            }
+        }
+        return violations;
+    }
+
+    /** INV-4. A tombstone is {@code CANCELLED} by the ledger's schema, so its status says all INV-4 needs. */
+    public static List<Violation> pendingCreditsMatchOutcomes(Connection payments, Connection ledger,
+            Collection<UUID> paymentIds) throws SQLException {
+        Map<UUID, String> credits = new HashMap<>();
+        try (var statement = withIds(ledger, PENDING_CREDITS, paymentIds); var rs = statement.executeQuery()) {
+            while (rs.next()) {
+                credits.put(rs.getObject("pending_credit_id", UUID.class), rs.getString("status"));
+            }
+        }
+        var violations = new ArrayList<Violation>();
+        for (Payment payment : payments(payments, paymentIds)) {
+            if (!payment.direction().equals("INCOMING") || !payment.isFinal()) {
+                continue;
+            }
+            String credit = credits.get(payment.id());
+            String subject = payment.id().toString();
+            if ("ACTIVE".equals(credit)) {
+                violations.add(new Violation("INV-4", subject, payment.state() + " with an ACTIVE pending credit"));
+            } else if (payment.state().equals("SETTLED") && !"CONFIRMED".equals(credit)) {
+                violations.add(new Violation("INV-4", subject, "SETTLED, pending credit "
+                        + (credit == null ? "never created" : credit)));
+            } else if (payment.state().equals("REJECTED") && credit != null && !credit.equals("CANCELLED")) {
+                violations.add(new Violation("INV-4", subject, "REJECTED, pending credit " + credit));
             }
         }
         return violations;

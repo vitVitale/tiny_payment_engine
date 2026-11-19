@@ -72,12 +72,20 @@ class PaymentInvariantsIT {
         UUID tombstoned = payment("OUTGOING", "REJECTED", false, 800);
         tombstone(tombstoned);
         UUID incoming = payment("INCOMING", "SETTLED", false, 200);
-        entry("PAYMENT_IN", incoming, posting(csmSettlement(), "DR", 200), posting(payer, "CR", 200));
+        pendingCredit(incoming, payer, "CONFIRMED",
+                entry("PAYMENT_IN", incoming, posting(csmSettlement(), "DR", 200), posting(payer, "CR", 200)));
+        UUID incomingCancelled = payment("INCOMING", "REJECTED", false, 250);
+        pendingCredit(incomingCancelled, payer, "CANCELLED", null);
+        UUID incomingTombstoned = payment("INCOMING", "REJECTED", false, 260);
+        pendingCreditTombstone(incomingTombstoned);
+        UUID incomingNeverCredited = payment("INCOMING", "REJECTED", false, 270);
         UUID investigating = payment("OUTGOING", "INVESTIGATING", false, 100);
         exceptionCase(investigating, "UNRESOLVED_INVESTIGATION");
-        List<UUID> all = List.of(onUs, toPeer, rejected, neverHeld, tombstoned, incoming, investigating);
+        List<UUID> all = List.of(onUs, toPeer, rejected, neverHeld, tombstoned, incoming, incomingCancelled,
+                incomingTombstoned, incomingNeverCredited, investigating);
 
         assertThat(PaymentInvariants.holdsMatchOutcomes(payments, ledger, all)).isEmpty();
+        assertThat(PaymentInvariants.pendingCreditsMatchOutcomes(payments, ledger, all)).isEmpty();
         assertThat(PaymentInvariants.csmSettlementPostings(payments, ledger, all)).isEmpty();
         assertThat(PaymentInvariants.noUnexpectedCases(payments, all, Set.of("UNRESOLVED_INVESTIGATION"))).isEmpty();
         assertThat(PaymentInvariants.nothingStuck(payments, all, TOLERANCE)).isEmpty();
@@ -134,6 +142,43 @@ class PaymentInvariantsIT {
                 posting(csmSettlement(), "CR", 300)));
 
         assertViolation(PaymentInvariants.holdsMatchOutcomes(payments, ledger, List.of(payment)), "INV-3", payment);
+    }
+
+    @Test
+    void INV_4_aFinalIncomingPaymentWithAnActivePendingCreditFails() throws SQLException {
+        UUID payment = payment("INCOMING", "REJECTED", false, 300);
+        pendingCredit(payment, customer(), "ACTIVE", null);
+
+        assertViolation(PaymentInvariants.pendingCreditsMatchOutcomes(payments, ledger, List.of(payment)), "INV-4",
+                payment);
+    }
+
+    @Test
+    void INV_4_aSettledIncomingPaymentWhosePendingCreditWasCancelledFails() throws SQLException {
+        UUID payment = payment("INCOMING", "SETTLED", false, 300);
+        pendingCredit(payment, customer(), "CANCELLED", null);
+
+        assertViolation(PaymentInvariants.pendingCreditsMatchOutcomes(payments, ledger, List.of(payment)), "INV-4",
+                payment);
+    }
+
+    @Test
+    void INV_4_aSettledIncomingPaymentWithoutAPendingCreditFails() throws SQLException {
+        UUID payment = payment("INCOMING", "SETTLED", false, 300);
+
+        assertViolation(PaymentInvariants.pendingCreditsMatchOutcomes(payments, ledger, List.of(payment)), "INV-4",
+                payment);
+    }
+
+    @Test
+    void INV_4_aRejectedIncomingPaymentWhosePendingCreditWasConfirmedFails() throws SQLException {
+        UUID payment = payment("INCOMING", "REJECTED", false, 300);
+        UUID payee = customer();
+        pendingCredit(payment, payee, "CONFIRMED",
+                entry("PAYMENT_IN", payment, posting(csmSettlement(), "DR", 300), posting(payee, "CR", 300)));
+
+        assertViolation(PaymentInvariants.pendingCreditsMatchOutcomes(payments, ledger, List.of(payment)), "INV-4",
+                payment);
     }
 
     @Test
@@ -194,6 +239,19 @@ class PaymentInvariantsIT {
         try (var statement = payments.prepareStatement("""
                 INSERT INTO payment_timers (payment_id, type, due_at, status, created_at)
                 VALUES (?, 'OUTGOING_DEADLINE', now(), 'SCHEDULED', now())""")) {
+            statement.setObject(1, payment);
+            statement.executeUpdate();
+        }
+
+        assertViolation(PaymentInvariants.nothingStuck(payments, List.of(payment), TOLERANCE), "INV-11", payment);
+    }
+
+    @Test
+    void INV_11_aScheduledSettlementOverdueTimerOfAFinalIncomingPaymentFails() throws SQLException {
+        UUID payment = payment("INCOMING", "SETTLED", false, 300);
+        try (var statement = payments.prepareStatement("""
+                INSERT INTO payment_timers (payment_id, type, due_at, status, created_at)
+                VALUES (?, 'SETTLEMENT_OVERDUE', now(), 'SCHEDULED', now())""")) {
             statement.setObject(1, payment);
             statement.executeUpdate();
         }
@@ -363,6 +421,33 @@ class PaymentInvariantsIT {
             ledger.setAutoCommit(true);
         }
         return id;
+    }
+
+    /** The pending credit of an incoming {@code payment}: its id is the payment's (ADR-010). */
+    private void pendingCredit(UUID payment, UUID account, String status, UUID entry) throws SQLException {
+        try (var statement = ledger.prepareStatement("""
+                INSERT INTO pending_credits (pending_credit_id, debtor_agent_bic, tx_id, account_id, amount_minor,
+                  status, payment_id, entry_id, finalised_at, created_at)
+                VALUES (?, 'PEERDEFFXXX', ?, ?, 100, ?, ?, ?, CASE WHEN ? THEN now() END, now())""")) {
+            statement.setObject(1, payment);
+            statement.setString(2, "TX" + NUMBERS.incrementAndGet());
+            statement.setObject(3, account);
+            statement.setString(4, status);
+            statement.setObject(5, payment);
+            statement.setObject(6, entry);
+            statement.setBoolean(7, !status.equals("ACTIVE"));
+            statement.executeUpdate();
+        }
+    }
+
+    /** A cancel that arrived before its pending credit: the ledger keeps a tombstone (ADR-009). */
+    private void pendingCreditTombstone(UUID payment) throws SQLException {
+        try (var statement = ledger.prepareStatement("""
+                INSERT INTO pending_credits (pending_credit_id, status, tombstone, finalised_at, created_at)
+                VALUES (?, 'CANCELLED', true, now(), now())""")) {
+            statement.setObject(1, payment);
+            statement.executeUpdate();
+        }
     }
 
     /** A release that arrived before its hold: the ledger keeps a tombstone (12 §5). */
