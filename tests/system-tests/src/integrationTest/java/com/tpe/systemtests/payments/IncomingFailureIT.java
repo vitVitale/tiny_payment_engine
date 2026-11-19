@@ -11,7 +11,7 @@ import com.tpe.contracts.PaymentSettled;
 import com.tpe.invariantchecker.CsmInvariants.Answer;
 import com.tpe.invariantchecker.CsmInvariants.SimulatorMessage;
 import com.tpe.systemtests.harness.Bounds;
-import com.tpe.systemtests.harness.KafkaProduceProxy;
+import com.tpe.systemtests.harness.KafkaProxy;
 import com.tpe.systemtests.harness.LocalDatabases;
 import com.tpe.systemtests.harness.PaymentSystemTest;
 import com.tpe.systemtests.harness.ServiceProcess;
@@ -54,9 +54,9 @@ class IncomingFailureIT extends PaymentSystemTest {
     void E2E_I_06_aVerdictLaterThanTheAnswerDeadlineIsIgnoredAndTheGatewayRejectsAb05() throws SQLException {
         Party payee = customer(0);
         RejectedCount rejected = rejectedIncoming("AB05");
-        KafkaProduceProxy kafka = KafkaProduceProxy.get();
+        KafkaProxy kafka = KafkaProxy.orchestratorProduce();
         IncomingTransfer transfer;
-        kafka.delayProduce(Bounds.verdictHeldPastAnswer());
+        kafka.delayRequests(Bounds.verdictHeldPastAnswer());
         try {
             transfer = received(payee.iban(), AMOUNT, "ACCEPT");
             await().atMost(Bounds.verdictHeldPastAnswer().plus(Bounds.orchestratorEventDelivery())).untilAsserted(() ->

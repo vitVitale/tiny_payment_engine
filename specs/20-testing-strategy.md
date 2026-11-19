@@ -194,15 +194,20 @@ Rules:
 - **Pages.** Each scenario lists the pages it must raise. Any other page during the run fails it. The recorded
   series of each run are kept as fixtures for the alert-rule tests (§1).
 
-**Until M5** (the minimal harness of M3): CH-02 and CH-03 run on main builds against the compose stack with its
-`chaos` profile, not in the environment above, and without budget or page checks. They keep the default timings, run
-two payment-orchestrator and two csm-gateway instances, and load the system with 2 outgoing payments/s
-(`tests/system-tests`, `-Pchaos`, `@Tag("chaos")`). The orchestrators produce to Kafka through Toxiproxy (a listener
-of its own, advertised at the proxy) and consume directly. CH-02 kills (`SIGKILL`) the second gateway, which the CSM
-never calls, at a moment when it has a `pacs.008` in flight on a link slowed to 700 ms. CH-02's "no `DEADLINE`
-answers" concerns incoming payments: checked once the load has both directions (M4). CH-03's `AB03` covers the
-payments whose `SendCreditTransfer` the block held past `sendBy` (accepted in it, `sendBy` before its end); one
-produced before the block may settle although its `sendBy` fell in it. M5 moves both into the nightly job.
+**Until M5** (the minimal harness of M3, extended in M4): CH-02, CH-03 and CH-04 run on main builds against the
+compose stack with its `chaos` profile, not in the environment above, and without budget or page checks. They keep the
+default timings, run two payment-orchestrator and two csm-gateway instances, and load the system with 2 payments/s in
+each direction the scenario needs: both for CH-02, outgoing for CH-03, incoming for CH-04 (`tests/system-tests`,
+`-Pchaos`, `@Tag("chaos")`). The orchestrators produce to Kafka through Toxiproxy (a listener of its own, advertised at
+the proxy) and consume directly; the gateways consume through a second proxy on a second such listener and produce
+directly. CH-02 kills (`SIGKILL`) the second gateway, which the CSM never calls, at a moment when it has a `pacs.008`
+in flight on a link slowed to 700 ms; its "no `DEADLINE` answers" covers the incoming payments of the load
+([#158](https://github.com/vitVitale/tiny_payment_engine/issues/158): a killed instance's command partitions wait for
+its consumer's session timeout, past the answer deadline). CH-03's `AB03` covers the payments whose
+`SendCreditTransfer` the block held past `sendBy` (accepted in it, `sendBy` before its end); one produced before the
+block may settle although its `sendBy` fell in it. CH-04 delays the consumption by cutting the gateways' consume link
+for 15 s, not by a latency: one past the 5 s answer deadline would also hold the consumers' heartbeats past their
+session, and the group would churn instead of resuming once. M5 moves them into the nightly job.
 
 | Id | Injection | Specifically checks | Expected pages |
 |---|---|---|---|

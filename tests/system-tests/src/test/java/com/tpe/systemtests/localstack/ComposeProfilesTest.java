@@ -44,6 +44,23 @@ class ComposeProfilesTest {
         assertThat((List<Object>) services.get("toxiproxy").get("ports")).contains("8474:8474", "19094:19094");
     }
 
+    /**
+     * CH-04 cuts the gateways' consumption off, not their produce, nor the orchestrators': a second listener of its own,
+     * advertised at the second proxy's fixed port, for the gateways' consumers only.
+     */
+    @Test
+    @SuppressWarnings("unchecked")
+    void kafkaAdvertisesAConsumeListenerAtTheSecondToxiproxyPort() throws IOException {
+        Map<String, Map<String, Object>> services = services();
+        Map<String, Object> kafka = (Map<String, Object>) services.get("kafka").get("environment");
+
+        assertThat(kafka.get("KAFKA_LISTENERS").toString()).contains("CHAOS_CONSUME://:9095");
+        assertThat(kafka.get("KAFKA_ADVERTISED_LISTENERS").toString()).contains("CHAOS_CONSUME://localhost:19095");
+        assertThat(kafka.get("KAFKA_LISTENER_SECURITY_PROTOCOL_MAP").toString())
+                .contains("CHAOS_CONSUME:PLAINTEXT");
+        assertThat((List<Object>) services.get("toxiproxy").get("ports")).contains("19095:19095");
+    }
+
     @Test
     @SuppressWarnings("unchecked")
     void grafanaAndOtlpUseThePortsOfTheSpec() throws IOException {
