@@ -119,8 +119,8 @@ jobs:
         if: failure()
         run: tail -n +1 tests/system-tests/target/*-systemtest.log || true
 
-  # CH-02 and CH-03 (specs/20-testing-strategy.md §5) on the compose stack with its chaos profile, on main builds;
-  # M5 moves them into the nightly chaos job with the chaos environment of §5
+  # CH-02, CH-03 and CH-04 (specs/20-testing-strategy.md §5) on the compose stack with its chaos profile, on main
+  # builds; M5 moves them into the nightly chaos job with the chaos environment of §5
   chaos:
     name: Failure injection (CH-02, CH-03)
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'

@@ -31,10 +31,11 @@ services:
       KAFKA_CONTROLLER_QUORUM_VOTERS: 1@localhost:9093
       KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
       # PLAINTEXT for clients on the host, INTERNAL for containers on the compose network, CHAOS for host clients
-      # through the toxiproxy of profile `chaos` (advertised at its port, so they stay behind it; CH-03, E2E-I-06)
-      KAFKA_LISTENERS: PLAINTEXT://:9092,INTERNAL://:19092,CHAOS://:9094,CONTROLLER://:9093
-      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://localhost:9092,INTERNAL://kafka:19092,CHAOS://localhost:19094
-      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,INTERNAL:PLAINTEXT,CHAOS:PLAINTEXT,CONTROLLER:PLAINTEXT
+      # through the toxiproxy of profile `chaos` (advertised at its port, so they stay behind it; CH-03, E2E-I-06),
+      # CHAOS_CONSUME likewise through its second proxy, for the gateways' consumers of the chaos run (CH-04)
+      KAFKA_LISTENERS: PLAINTEXT://:9092,INTERNAL://:19092,CHAOS://:9094,CHAOS_CONSUME://:9095,CONTROLLER://:9093
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://localhost:9092,INTERNAL://kafka:19092,CHAOS://localhost:19094,CHAOS_CONSUME://localhost:19095
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,INTERNAL:PLAINTEXT,CHAOS:PLAINTEXT,CHAOS_CONSUME:PLAINTEXT,CONTROLLER:PLAINTEXT
       KAFKA_INTER_BROKER_LISTENER_NAME: INTERNAL
       KAFKA_AUTO_CREATE_TOPICS_ENABLE: "false"
       KAFKA_DEFAULT_REPLICATION_FACTOR: 1
@@ -79,13 +80,15 @@ services:
   # run needs it as well:
   #   docker compose -f deploy/docker-compose.yml --profile chaos up -d --wait postgres kafka oauth2 toxiproxy
   # the system tests create its proxy localhost:19094 -> kafka:9094 through the control API on 8474, produce through it
-  # from the orchestrators, and block it (CH-03) or slow it (E2E-I-06)
+  # from the orchestrators, and block it (CH-03) or slow it (E2E-I-06); the chaos run also creates localhost:19095 ->
+  # kafka:9095, consumes through it from the gateways, and cuts it off (CH-04)
   toxiproxy:
     profiles: [chaos]
     image: ghcr.io/shopify/toxiproxy:2.12.0
     ports:
       - "8474:8474"
       - "19094:19094"
+      - "19095:19095"
 
   # ---- profile `observability` (specs/26-observability.md §13), off by default:
   #   ./mvnw -pl tests/observability-sample -am package -DskipTests

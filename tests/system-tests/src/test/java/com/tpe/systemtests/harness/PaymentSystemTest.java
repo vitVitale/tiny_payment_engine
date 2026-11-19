@@ -83,9 +83,14 @@ public abstract class PaymentSystemTest extends LedgerSystemTest {
         // a test stops it (E2E-O-21): on Windows by terminating it, so its consumer never leaves the group and the
         // restarted one is assigned nothing until the old one's session times out; the broker's shortest session
         // bounds that, a 1 s heartbeat keeps a frozen one (E2E-O-12, about 4 s) in its group
-        var gateway = Map.of(
+        var gateway = new HashMap<>(Map.of(
                 "spring.kafka.consumer.properties.session.timeout.ms", "6000",
-                "spring.kafka.consumer.heartbeat-interval", "1s");
+                "spring.kafka.consumer.heartbeat-interval", "1s"));
+        if (Chaos.enabled()) {
+            // CH-04: in the chaos run the gateways consume through their proxy (not the orchestrators'), and produce
+            // directly
+            gateway.put("spring.kafka.consumer.bootstrap-servers", KafkaProxy.gatewayConsume().bootstrap());
+        }
         CSM_GATEWAY = ServiceProcess.of(ServiceJar.CSM_GATEWAY, with(gateway,
                 "tpe.csm.base-url", simulator.toString()), gatewayPort);
         GATEWAY_ADMIN = new JsonHttp(CSM_GATEWAY.baseUrl());
@@ -96,8 +101,7 @@ public abstract class PaymentSystemTest extends LedgerSystemTest {
                 "tpe.clients.risk.base-url", risk.toString(),
                 "tpe.clients.ledger.base-url", ledger.toString()));
         // every instance produces through the proxy, and consumes directly: CH-03 blocks it, E2E-I-06 slows it
-        KafkaProduceProxy.get();
-        orchestrator.put("spring.kafka.bootstrap-servers", KafkaProduceProxy.BOOTSTRAP);
+        orchestrator.put("spring.kafka.bootstrap-servers", KafkaProxy.orchestratorProduce().bootstrap());
         orchestrator.put("spring.kafka.consumer.bootstrap-servers", "localhost:9092");
         ORCHESTRATOR = ServiceProcess.of(ServiceJar.ORCHESTRATOR, orchestrator).baseUrl();
         if (Chaos.enabled()) {
