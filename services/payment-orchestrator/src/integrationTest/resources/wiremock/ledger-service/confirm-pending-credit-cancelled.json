@@ -1,0 +1,18 @@
+{
+  "request": {
+    "method": "POST",
+    "url": "/v1/pending-credits/0192f0e4-7b1c-7cc3-a1b2-0000000000a2/confirm"
+  },
+  "response": {
+    "status": 409,
+    "headers": {
+      "Content-Type": "application/problem+json"
+    },
+    "jsonBody": {
+      "type": "https://tpe.example/problems/pending-credit-cancelled",
+      "title": "Pending credit cancelled",
+      "status": 409,
+      "code": "PENDING_CREDIT_CANCELLED"
+    }
+  }
+}

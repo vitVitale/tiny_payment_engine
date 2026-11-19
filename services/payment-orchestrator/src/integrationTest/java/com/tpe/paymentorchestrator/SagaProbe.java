@@ -131,6 +131,10 @@ final class SagaProbe {
                 .withRequestBody(matchingJsonPath("$.pendingCreditId", equalTo(paymentId.toString()))));
     }
 
+    List<LoggedRequest> confirmCreditCalls(UUID paymentId) {
+        return ledger.findAll(postRequestedFor(urlEqualTo("/v1/pending-credits/" + paymentId + "/confirm")));
+    }
+
     List<LoggedRequest> cancelCreditCalls(UUID paymentId) {
         return ledger.findAll(postRequestedFor(urlEqualTo("/v1/pending-credits/" + paymentId + "/cancel")));
     }

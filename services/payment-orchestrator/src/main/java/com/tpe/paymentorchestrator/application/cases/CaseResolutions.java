@@ -8,7 +8,7 @@ import com.tpe.paymentorchestrator.application.runner.SagaRunner;
 import com.tpe.paymentorchestrator.application.timers.InvestigationTimer;
 import com.tpe.paymentorchestrator.domain.payment.CaseResolution;
 import com.tpe.paymentorchestrator.domain.payment.ExceptionCase;
-import com.tpe.paymentorchestrator.domain.payment.OutgoingCsmEvent;
+import com.tpe.paymentorchestrator.domain.payment.CsmReport;
 import com.tpe.paymentorchestrator.domain.payment.Payment;
 import com.tpe.paymentorchestrator.domain.payment.PaymentState;
 import com.tpe.paymentorchestrator.domain.payment.PendingAction;
@@ -108,9 +108,9 @@ public class CaseResolutions {
                 record(payment, cause, operator, now);
                 investigation.restart(payment, now);
             }
-            case CONFIRMED_SETTLED -> confirm(found, locked, new OutgoingCsmEvent.Settled(), cause, operator, now);
+            case CONFIRMED_SETTLED -> confirm(found, locked, new CsmReport.Settled(), cause, operator, now);
             case CONFIRMED_REJECTED ->
-                    confirm(found, locked, new OutgoingCsmEvent.Rejected(reason), cause, operator, now);
+                    confirm(found, locked, new CsmReport.Rejected(reason), cause, operator, now);
             case RETRY_NOW -> {
                 record(payment, cause, operator, now);
                 // only the action the case is about: one that has moved on is not stuck any more
@@ -128,7 +128,7 @@ public class CaseResolutions {
      * investigating; once the CSM answered after all, the confirmation only closes the case if it agrees with that
      * answer.
      */
-    private void confirm(ExceptionCase found, LockedPayment locked, OutgoingCsmEvent event, String cause,
+    private void confirm(ExceptionCase found, LockedPayment locked, CsmReport event, String cause,
             String operator, Instant now) {
         Payment payment = locked.payment();
         if (payment.state() == PaymentState.INVESTIGATING && !locked.csmOutcomeRecorded()) {
@@ -137,7 +137,7 @@ public class CaseResolutions {
         }
         // an outcome other than a rejection keeps the payment with the CSM until its hold is settled
         boolean csmSettled = locked.csmOutcomeRecorded() && payment.state() != PaymentState.REJECTED;
-        boolean agrees = event instanceof OutgoingCsmEvent.Settled ? csmSettled
+        boolean agrees = event instanceof CsmReport.Settled ? csmSettled
                 : payment.state() == PaymentState.REJECTED && locked.csmOutcomeRecorded();
         if (!agrees) {
             throw new CaseOutdatedException(found.caseId(), payment.state());

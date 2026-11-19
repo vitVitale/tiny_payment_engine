@@ -4,17 +4,23 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.awaitility.Awaitility.await;
 
 import com.github.tomakehurst.wiremock.verification.LoggedRequest;
+import com.tpe.contracts.AnswerSent;
+import com.tpe.contracts.AnswerStatus;
+import com.tpe.contracts.CreditTransferRejected;
 import com.tpe.contracts.CreditTransferSettled;
+import com.tpe.contracts.DecidedBy;
 import com.tpe.contracts.Direction;
 import com.tpe.contracts.SettlementSource;
 import com.tpe.paymentdomain.Bic;
 import com.tpe.paymentdomain.PaymentId;
+import com.tpe.paymentdomain.ReasonCode;
 import com.tpe.paymentdomain.TxId;
 import com.tpe.paymentorchestrator.SagaProbe.Row;
 import com.tpe.paymentorchestrator.domain.payment.PendingAction;
 import java.time.Duration;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.UUID;
 import java.util.function.Function;
 import org.junit.jupiter.api.BeforeEach;
@@ -27,7 +33,7 @@ import org.springframework.jdbc.core.simple.JdbcClient;
 import tools.jackson.databind.json.JsonMapper;
 
 /**
- * Crash resume of the M2 actions (ADR-003, ADR-008; ORC-AC-13, whose parameter list M3 and M4 extend): the instance
+ * Crash resume of every action with a remote call, outgoing and incoming (ADR-003, ADR-008, ORC-AC-13): the instance
  * dies after an action's remote call, before its result is applied; once the lease has expired a sweeper hands the
  * action over again. The payment ends as without the crash, the repeated call carries the same idempotency key, so
  * the ledger effect is the same, and there is one final event.
@@ -38,6 +44,7 @@ class SagaResumeIT extends OrchestratorStack {
     private static final Duration AWAIT = Duration.ofSeconds(10);
     /** Past {@code tpe.runner.lease}, 5 s, and well before the hold give-up at 8 s. */
     private static final Duration PAST_LEASE = Duration.ofSeconds(6);
+    private static final Bic PEER = new Bic("PEERDEFFXXX");
 
     @Autowired
     JdbcClient jdbc;
@@ -76,7 +83,7 @@ class SagaResumeIT extends OrchestratorStack {
 
     @ParameterizedTest(name = "{0}")
     @MethodSource("crashes")
-    void aCrashAfterTheRemoteCallResumesToTheSameOutcome(Crash crash) {
+    void ORC_AC_13_aCrashAfterTheRemoteCallResumesToTheSameOutcome(Crash crash) {
         PendingAction crashed = crash.crashed();
         riskAnswers("allow");
         ledgerAnswers(crash.ledger().toArray(String[]::new));
@@ -105,6 +112,81 @@ class SagaResumeIT extends OrchestratorStack {
                 assertThat(calls(other, paymentId)).hasSizeLessThanOrEqualTo(1);
             }
         }
+    }
+
+    /** The incoming actions to crash after, and how the payment ends. */
+    static List<Crash> incomingCrashes() {
+        List<String> settles = List.of("create-pending-credit-created", "confirm-pending-credit-confirmed");
+        return List.of(
+                new Crash(PendingAction.ASSESS_RISK, settles, "SETTLED", null, "PaymentSettled|"),
+                new Crash(PendingAction.CREATE_PENDING_CREDIT, settles, "SETTLED", null, "PaymentSettled|"),
+                new Crash(PendingAction.CONFIRM_CREDIT, settles, "SETTLED", null, "PaymentSettled|"),
+                new Crash(PendingAction.CANCEL_CREDIT,
+                        List.of("create-pending-credit-created", "cancel-pending-credit-cancelled"),
+                        "REJECTED", "AB05", "PaymentRejected|AB05"));
+    }
+
+    /**
+     * An incoming payment, received with an answer deadline past the lease: the crashed action of the verdict can
+     * still be handed over before it (the gateway's own deadline is 5 s, the lease too). It is answered accepting and
+     * settled by the CSM, or rejected by the CSM after the acceptance when the crash is in the cancel.
+     */
+    @ParameterizedTest(name = "incoming: {0}")
+    @MethodSource("incomingCrashes")
+    void ORC_AC_13_aCrashAfterAnIncomingRemoteCallResumesToTheSameOutcome(Crash crash) {
+        PendingAction crashed = crash.crashed();
+        riskAnswers("allow");
+        ledgerAnswers(crash.ledger().toArray(String[]::new));
+        String payee = Ibans.own();
+        ActionInterference.crashAfter(crashed, payee);
+        String txId = IncomingPaymentIT.txId();
+
+        publishCsmEvent(IncomingPaymentIT.creditTransferReceived(PEER, txId, payee, Duration.ofSeconds(60)), txId,
+                UUID.randomUUID());
+        UUID paymentId = await().atMost(AWAIT).until(() -> probe.incoming(PEER.value(), txId),
+                Optional::isPresent).orElseThrow();
+        resumeIfCrashed(crashed, paymentId, PendingAction.ASSESS_RISK, PendingAction.CREATE_PENDING_CREDIT);
+        await().atMost(AWAIT).until(() -> "ACCEPT_REQUESTED".equals(probe.row(paymentId).state()));
+        publishCsmEvent(new AnswerSent(new TxId(txId), PEER, Direction.INCOMING, AnswerStatus.ACCP, null,
+                DecidedBy.VERDICT, CLOCK.instant()), txId, UUID.randomUUID());
+        await().atMost(AWAIT).until(() -> "ACCEPTED".equals(probe.row(paymentId).state()));
+        if (crash.reason() == null) {
+            publishCsmEvent(new CreditTransferSettled(new TxId(txId), PEER, Direction.INCOMING, null,
+                    CLOCK.instant(), SettlementSource.STATUS_REPORT), txId, UUID.randomUUID());
+        } else {
+            publishCsmEvent(new CreditTransferRejected(new TxId(txId), PEER, Direction.INCOMING, null,
+                    ReasonCode.parse(crash.reason()), CLOCK.instant(), SettlementSource.STATUS_REPORT), txId,
+                    UUID.randomUUID());
+        }
+        resumeIfCrashed(crashed, paymentId, PendingAction.CONFIRM_CREDIT, PendingAction.CANCEL_CREDIT);
+
+        await().atMost(AWAIT).untilAsserted(() -> assertThat(probe.row(paymentId)).isEqualTo(
+                new Row(crash.state(), crash.reason(), null, true)));
+        assertThat(probe.finalEvents(paymentId)).containsExactly(crash.finalEvent());
+        assertThat(calls(crashed, paymentId)).hasSize(2);
+        assertSameCall(calls(crashed, paymentId));
+        for (PendingAction other : List.of(PendingAction.CREATE_PENDING_CREDIT, PendingAction.CONFIRM_CREDIT,
+                PendingAction.CANCEL_CREDIT)) {
+            if (other != crashed) {
+                assertThat(calls(other, paymentId)).hasSizeLessThanOrEqualTo(1);
+            }
+        }
+    }
+
+    /**
+     * If {@code crashed} is one of {@code actions}: waits until its one call is made and its claim held, then lets the
+     * lease expire, so a sweeper hands it over again.
+     */
+    private void resumeIfCrashed(PendingAction crashed, UUID paymentId, PendingAction... actions) {
+        if (!List.of(actions).contains(crashed)) {
+            return;
+        }
+        await().atMost(AWAIT).untilAsserted(() -> {
+            assertThat(probe.row(paymentId).pendingAction()).isEqualTo(crashed.name());
+            assertThat(calls(crashed, paymentId)).hasSize(1);
+            assertThat(probe.leased(paymentId)).as("leased").isTrue();
+        });
+        CLOCK.advance(PAST_LEASE);
     }
 
     @Test
@@ -145,16 +227,25 @@ class SagaResumeIT extends OrchestratorStack {
     private List<LoggedRequest> calls(PendingAction action, UUID paymentId) {
         Function<UUID, List<LoggedRequest>> calls = switch (action) {
             case ASSESS_RISK -> id -> probe.riskCalls(id).stream()
-                    .filter(call -> call.getBodyAsString().contains(":OUTGOING")).toList();
+                    .filter(call -> call.getBodyAsString().contains(":" + direction(id))).toList();
             case ASSESS_PAYEE_RISK -> id -> probe.riskCalls(id).stream()
                     .filter(call -> call.getBodyAsString().contains(":INCOMING")).toList();
             case CREATE_HOLD -> probe::holdCalls;
             case SETTLE_ON_US -> probe::settleOnUsCalls;
             case RELEASE_HOLD -> probe::releaseCalls;
             case SETTLE_HOLD -> probe::settleCalls;
-            default -> throw new IllegalArgumentException(action + " is not an M2 action");
+            case CREATE_PENDING_CREDIT -> probe::pendingCreditCalls;
+            case CONFIRM_CREDIT -> probe::confirmCreditCalls;
+            case CANCEL_CREDIT -> probe::cancelCreditCalls;
+            case SEND -> throw new IllegalArgumentException("SEND makes no remote call");
         };
         return calls.apply(paymentId);
+    }
+
+    /** The payment's own direction: its {@code ASSESS_RISK} is assessed in it. */
+    private String direction(UUID paymentId) {
+        return jdbc.sql("SELECT direction FROM payments WHERE payment_id = ?").param(paymentId).query(String.class)
+                .single();
     }
 
     /** A payment from the own bank to {@code payee}: on-us if the payee is at the own bank. */

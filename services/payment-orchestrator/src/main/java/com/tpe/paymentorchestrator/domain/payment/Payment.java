@@ -144,15 +144,63 @@ public record Payment(
     }
 
     /**
-     * The CSM settled the payment (§6.5): the state stays until the hold is settled, next {@code SETTLE_HOLD}.
+     * The CSM settled the payment (§6.5): the state stays until the ledger books it; next {@code SETTLE_HOLD} for an
+     * outgoing payment, {@code CONFIRM_CREDIT} for an incoming one (UC-06 9).
      *
-     * @throws IllegalStateException unless the payment is with the CSM
+     * @throws IllegalStateException unless an outgoing payment is with the CSM, or an incoming one was answered
+     *     accepting
      */
     public Payment csmSettled() {
+        if (direction == PaymentDirection.INCOMING) {
+            if (!isAcceptedIncoming()) {
+                throw new IllegalStateException("only an accepted incoming payment is settled by the CSM, not " + this);
+            }
+            return withAction(PendingAction.CONFIRM_CREDIT);
+        }
         if (!state.isWithCsm()) {
             throw new IllegalStateException("only a payment with the CSM is settled by it, not " + this);
         }
         return withAction(PendingAction.SETTLE_HOLD);
+    }
+
+    /**
+     * An incoming payment the gateway accepted, or asked to accept: {@code ACCEPT_REQUESTED}, {@code ACCEPTED} or
+     * {@code INVESTIGATING}. The CSM decides its outcome.
+     */
+    public boolean isAcceptedIncoming() {
+        return direction == PaymentDirection.INCOMING && (state == PaymentState.ACCEPT_REQUESTED
+                || state == PaymentState.ACCEPTED || state == PaymentState.INVESTIGATING);
+    }
+
+    /**
+     * The ledger booked the pending credit to the payee (§6.2 {@code CONFIRM_CREDIT}): {@code SETTLED} at {@code at},
+     * nothing left to do.
+     *
+     * @throws IllegalStateException unless the payment waits for its credit to be confirmed
+     */
+    public Payment settledFromCredit(UUID bookingEntryId, UUID creditorAccountId, Instant at) {
+        requireConfirmingCredit();
+        return moveTo(PaymentState.SETTLED, null, null, Objects.requireNonNull(at, "at")).withAccounts(
+                debtorAccountId, Objects.requireNonNull(creditorAccountId, "creditorAccountId"),
+                Objects.requireNonNull(bookingEntryId, "bookingEntryId"));
+    }
+
+    /**
+     * The pending credit the CSM's settlement was to confirm is cancelled (§6.2 {@code CONFIRM_CREDIT},
+     * {@code PENDING_CREDIT_CANCELLED}): the money and the record disagree, so the payment stays as it is, with
+     * nothing left to do, for the exception case.
+     *
+     * @throws IllegalStateException unless the payment waits for its credit to be confirmed
+     */
+    public Payment confirmAbandoned() {
+        requireConfirmingCredit();
+        return withAction(null);
+    }
+
+    private void requireConfirmingCredit() {
+        if (!isAcceptedIncoming() || pendingAction != PendingAction.CONFIRM_CREDIT) {
+            throw new IllegalStateException("no credit to confirm for " + this);
+        }
     }
 
     /**
@@ -234,9 +282,12 @@ public record Payment(
                 .withAction(null);
     }
 
-    /** The gateway sent the accepting answer (§6.5 {@code AnswerSent(ACCP)}): {@code ACCEPTED}. */
+    /**
+     * The gateway sent the accepting answer (§6.5 {@code AnswerSent(ACCP)}): {@code ACCEPTED}, keeping a
+     * {@code CONFIRM_CREDIT} the CSM's settlement set when it overtook the answer.
+     */
     Payment answerAccepted() {
-        return moveTo(PaymentState.ACCEPTED, null, null, null);
+        return moveTo(PaymentState.ACCEPTED, null, pendingAction, null);
     }
 
     private void requireAwaitingVerdict() {

@@ -13,7 +13,9 @@ import au.com.dius.pact.provider.junit5.PactVerificationContext;
 import au.com.dius.pact.provider.junitsupport.Provider;
 import au.com.dius.pact.provider.spring.junit5.PactVerificationSpringProvider;
 import com.tpe.contracts.AcceptCreditTransfer;
+import com.tpe.contracts.Direction;
 import com.tpe.contracts.RejectCreditTransfer;
+import com.tpe.contracts.RequestPaymentStatus;
 import com.tpe.contracts.SendCreditTransfer;
 import com.tpe.iso20022model.CsmMessageType;
 import com.tpe.iso20022model.EnvelopeCodec;
@@ -21,6 +23,7 @@ import com.tpe.iso20022model.Pacs002Builder;
 import com.tpe.iso20022model.Pacs002Builder.Status;
 import com.tpe.iso20022model.Pacs002Builder.StatusReport;
 import com.tpe.paymentdomain.Bic;
+import com.tpe.paymentdomain.EndToEndId;
 import com.tpe.paymentdomain.MsgId;
 import com.tpe.paymentdomain.PaymentId;
 import com.tpe.paymentdomain.ReasonCode;
@@ -41,7 +44,9 @@ import tools.jackson.databind.json.JsonMapper;
  * csm-gateway verifies every collected pact that names it (specs/20-testing-strategy.md §10.3): M-02, the outgoing
  * {@code CreditTransferSettled}, {@code CreditTransferRejected} and {@code CreditTransferNotSent} the orchestrator
  * reads from {@code csm.inbound.events}, from a status report and from an investigation's answer, and the incoming
- * {@code CreditTransferReceived} and {@code AnswerSent} (by verdict, and at the answer deadline); and P-07, the CSM
+ * {@code CreditTransferReceived} and {@code AnswerSent} (by verdict, and at the answer deadline), and an accepted
+ * incoming transfer's {@code CreditTransferSettled} and {@code CreditTransferRejected} (status report, investigation);
+ * and P-07, the CSM
  * inbound endpoint the simulator posts to, whose interactions need no state: every message is taken or refused on
  * what it is alone. Runs only with {@code -Ppact-verify}, against this commit's pacts and the last release's
  * ({@link PactVerification}).
@@ -146,6 +151,72 @@ class CsmGatewayPactVerificationIT extends GatewayStack {
         String txId = received();
         CLOCK.set(CLOCK.instant().plus(ANSWER_DEADLINE_OFFSET));
         return published(txId, "AnswerSent");
+    }
+
+    /** The CSM's status report settling an accepted incoming transfer (15 §6.4, UC-06 9). */
+    @PactVerifyProvider("CreditTransferSettled: an incoming transfer settled by the CSM")
+    MessageAndMetadata incomingSettled() {
+        String txId = accepted();
+        inbound(incomingReport(txId, new MsgId("M-PACT-" + txId), CsmMessageType.PACS_008, Status.SETTLED));
+        return published(txId, "CreditTransferSettled");
+    }
+
+    /** The CSM's status report rejecting an incoming transfer after our {@code ACCP} (15 §6.4, UC-06 8a). */
+    @PactVerifyProvider("CreditTransferRejected: an incoming transfer rejected by the CSM after our ACCP")
+    MessageAndMetadata incomingRejected() {
+        String txId = accepted();
+        inbound(incomingReport(txId, new MsgId("M-PACT-" + txId), CsmMessageType.PACS_008,
+                Status.rejected(ReasonCode.AB05)));
+        return published(txId, "CreditTransferRejected");
+    }
+
+    /** A {@code pacs.028} of an accepted incoming transfer answered {@code ACSC} (15 §6.6, UC-06 8b). */
+    @PactVerifyProvider("CreditTransferSettled: an incoming transfer an investigation found settled")
+    MessageAndMetadata incomingSettledByInvestigation() {
+        String txId = accepted();
+        inbound(incomingReport(txId, incomingStatusRequested(txId), CsmMessageType.PACS_028, Status.SETTLED));
+        return published(txId, "CreditTransferSettled");
+    }
+
+    /** A {@code pacs.028} of an accepted incoming transfer answered rejected (15 §6.6, UC-06 8b). */
+    @PactVerifyProvider("CreditTransferRejected: an incoming transfer an investigation found rejected")
+    MessageAndMetadata incomingRejectedByInvestigation() {
+        String txId = accepted();
+        inbound(incomingReport(txId, incomingStatusRequested(txId), CsmMessageType.PACS_028,
+                Status.rejected(ReasonCode.AB05)));
+        return published(txId, "CreditTransferRejected");
+    }
+
+    /** An incoming transfer received and accepted: its {@code ACCP} delivered to the CSM. */
+    private String accepted() {
+        String txId = received();
+        publishCommand(txId, new AcceptCreditTransfer(new PaymentId(UUID.randomUUID()), new TxId(txId), PEER_BIC,
+                CLOCK.instant()), UUID.randomUUID());
+        String select = """
+                SELECT transmit_status FROM incoming_transfers WHERE debtor_agent_bic = ? AND tx_id = ?""";
+        await().atMost(HANDLED).until(() -> jdbc.sql(select).param(PEER_BIC.value()).param(txId)
+                .query(String.class).optional().filter("DELIVERED"::equals).isPresent());
+        return txId;
+    }
+
+    /** The orchestrator asks the status of the incoming transfer (attempt 1): its {@code pacs.028}, delivered. */
+    private MsgId incomingStatusRequested(String txId) {
+        publishCommand(txId, new RequestPaymentStatus(new PaymentId(UUID.randomUUID()), new TxId(txId), PEER_BIC,
+                Direction.INCOMING, 1, CLOCK.instant()), UUID.randomUUID());
+        String select = """
+                SELECT msg_id FROM status_requests
+                 WHERE tx_id = ? AND debtor_agent_bic = ? AND attempt = 1 AND transmit_status = 'DELIVERED'""";
+        await().atMost(HANDLED).until(() -> !jdbc.sql(select).param(txId).param(PEER_BIC.value())
+                .query(String.class).list().isEmpty());
+        return new MsgId(jdbc.sql(select).param(txId).param(PEER_BIC.value()).query(String.class).single());
+    }
+
+    /** The CSM's {@code pacs.002} of the incoming transfer, answering our message {@code original}. */
+    private String incomingReport(String txId, MsgId original, CsmMessageType originalType, Status status) {
+        return envelopes.join(new Pacs002Builder().build(new StatusReport(
+                new MsgId("SIMM-PACT-" + UUID.randomUUID().toString().substring(0, 8)), CLOCK.instant(), original,
+                originalType, new TxId(txId), new EndToEndId("E2E-" + txId), IncomingPacs008.uetr(txId), PEER_BIC,
+                status, CSM_BIC, OWN_BIC)));
     }
 
     /** An incoming transfer the CSM delivered now: its {@code TxId}. */

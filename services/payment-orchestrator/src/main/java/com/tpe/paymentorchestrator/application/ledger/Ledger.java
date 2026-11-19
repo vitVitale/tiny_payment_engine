@@ -10,7 +10,7 @@ import java.util.UUID;
  * an incoming one. The hold id and the pending credit id are the payment's {@code paymentId} (ADR-010), and every
  * call carries the {@code Idempotency-Key} the ledger expects ({@code hold-create:<holdId>},
  * {@code hold-settle-on-us:<holdId>}, {@code hold-release:<holdId>}, {@code pending-credit-create:<id>},
- * {@code pending-credit-cancel:<id>}), so asking again after a lost answer makes no second posting.
+ * {@code pending-credit-confirm:<id>}, {@code pending-credit-cancel:<id>}), so asking again after a lost answer makes no second posting.
  */
 public interface Ledger {
 
@@ -37,6 +37,12 @@ public interface Ledger {
      * Never throws.
      */
     LedgerAnswer<PendingCreditCreated> createPendingCredit(Payment payment, Duration readTimeout);
+
+    /**
+     * {@code POST /v1/pending-credits/{id}/confirm}: one entry Dr the CSM settlement account / Cr payee, after the CSM
+     * settled the payment, whatever the payee account's status. Never throws.
+     */
+    LedgerAnswer<CreditConfirmed> confirmPendingCredit(Payment payment, Duration readTimeout);
 
     /**
      * {@code POST /v1/pending-credits/{id}/cancel}: removes the pending credit; for one that never came, a tombstone
@@ -79,6 +85,18 @@ public interface Ledger {
     record PendingCreditCreated(UUID accountId) {
 
         public PendingCreditCreated {
+            Objects.requireNonNull(accountId, "accountId");
+        }
+    }
+
+    /**
+     * @param journalEntryId the entry that booked the money, {@code bookingEntryId} of {@code PaymentSettled}
+     * @param accountId the payee's account
+     */
+    record CreditConfirmed(UUID journalEntryId, UUID accountId) {
+
+        public CreditConfirmed {
+            Objects.requireNonNull(journalEntryId, "journalEntryId");
             Objects.requireNonNull(accountId, "accountId");
         }
     }

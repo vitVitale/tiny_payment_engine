@@ -13,8 +13,8 @@ import org.springframework.stereotype.Component;
 
 /**
  * The CSM event listener (specs/11-payment-orchestrator.md §4, §6.5): {@code csm.inbound.events}. An event is read
- * and validated ({@link ConsumedMessages#readOneOf}); an invalid one, or one this service does not handle yet (the
- * incoming settlement), goes to the DLT, where it opens a {@code DLT_MESSAGE} case.
+ * and validated ({@link ConsumedMessages#readOneOf}); an invalid one goes to the DLT, where it opens a
+ * {@code DLT_MESSAGE} case.
  */
 @Component
 class CsmEventListener {
