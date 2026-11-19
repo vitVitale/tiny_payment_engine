@@ -63,8 +63,24 @@ public final class SimulatorControl {
      */
     public String incomingPayment(String creditorIban, String amount, String debtorName, String debtorIban,
             String scenario) {
-        JsonNode sent = JSON.readTree(send("POST", "/sim/v1/incoming-payments", Map.of("creditorIban", creditorIban,
-                "amount", amount, "debtorName", debtorName, "debtorIban", debtorIban, "scenario", scenario), 200));
+        return incomingPayment(creditorIban, amount, debtorName, debtorIban, scenario, null, null);
+    }
+
+    /**
+     * As {@link #incomingPayment(String, String, String, String, String)}, as transaction {@code txId} of
+     * {@code debtorAgentBic} (ADR-010) where given; a new {@code txId}, and the debtor IBAN's bank, where {@code null}.
+     */
+    public String incomingPayment(String creditorIban, String amount, String debtorName, String debtorIban,
+            String scenario, String txId, String debtorAgentBic) {
+        var body = new LinkedHashMap<String, String>(Map.of("creditorIban", creditorIban, "amount", amount,
+                "debtorName", debtorName, "debtorIban", debtorIban, "scenario", scenario));
+        if (txId != null) {
+            body.put("txId", txId);
+        }
+        if (debtorAgentBic != null) {
+            body.put("debtorAgentBic", debtorAgentBic);
+        }
+        JsonNode sent = JSON.readTree(send("POST", "/sim/v1/incoming-payments", body, 200));
         if (sent.get("gatewayStatus").asInt() != 202) {
             throw new IllegalStateException("csm-gateway answered " + sent.get("gatewayStatus") + " to the pacs.008");
         }
