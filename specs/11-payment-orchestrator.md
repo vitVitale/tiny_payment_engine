@@ -331,8 +331,7 @@ Rules:
 
 Handled by a `PollingWorker` over `payment_timers` (100 ms). Handlers only change local state and write the outbox.
 A handler locks the payment row (`FOR UPDATE`) and moves its `version` on, so the result of an action still in
-flight is discarded (§6.2, §6.6); a compensation it sets runs after the commit. As the sweeper, the worker picks only
-the timer types the service handles: `SETTLEMENT_OVERDUE` waits until the incoming flow handles it (M4).
+flight is discarded (§6.2, §6.6); a compensation it sets runs after the commit.
 `INVESTIGATION_RETRY` carries in `attempt` the status requests of its investigation so far, which picks the next
 back-off value.
 
@@ -360,7 +359,7 @@ Listener transaction: validate → inbox → load payment by `(direction, debtor
 |---|---|---|
 | `CreditTransferReceived` | none | create incoming payment `RECEIVED`, `accepted_at = receivedAt`, `answer_deadline`, next `ASSESS_RISK` (UC-06 2) |
 | | exists | no-op (duplicate with new dedup key — should not happen) |
-| `AnswerSent(ACCP)` | `ACCEPT_REQUESTED` | `ACCEPTED`, schedule `SETTLEMENT_OVERDUE` (UC-06 7); a `CONFIRM_CREDIT` the CSM's settlement set stays |
+| `AnswerSent(ACCP)` | `ACCEPT_REQUESTED` | `ACCEPTED`, schedule `SETTLEMENT_OVERDUE` (UC-06 7) unless the CSM's outcome is recorded; a `CONFIRM_CREDIT` the CSM's settlement set stays |
 | | `SETTLED` / `REJECTED` with verdict `ACCEPT` | no-op (the CSM's outcome overtook the answer) |
 | | other | `CONTRADICTING_CSM_OUTCOME` case (we never sent an accept verdict) |
 | `AnswerSent(RJCT)` | `RECEIVED`, `ACCEPT_REQUESTED` | `REJECTED` with the sent reason, next `CANCEL_CREDIT` (UC-06 6a, 6b); with the CSM's settlement recorded (`CONFIRM_CREDIT` pending) a contradiction case |

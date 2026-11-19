@@ -147,6 +147,23 @@ class IncomingSettlementTest {
                 .isInstanceOf(AnswerDecision.Contradiction.class);
     }
 
+    @Test
+    void anAcceptedTransferWithoutSettlementGoesIntoInvestigation() {
+        Payment investigating = accepted().settlementOverdue().orElseThrow();
+
+        assertThat(investigating.state()).isEqualTo(PaymentState.INVESTIGATING);
+        assertThat(investigating.pendingAction()).isNull();
+    }
+
+    @Test
+    void onlyAnAcceptedTransferWithNothingPendingIsOverdue() {
+        Payment confirming = ((Apply) CsmEventDecision.decide(accepted(), false, SETTLED, NOW)).next();
+
+        assertThat(IncomingPayments.acceptRequested().settlementOverdue()).isEmpty();
+        assertThat(confirming.settlementOverdue()).isEmpty();
+        assertThat(settled().settlementOverdue()).isEmpty();
+    }
+
     private static Payment accepted() {
         return ((AnswerDecision.Moved) AnswerDecision.decide(IncomingPayments.acceptRequested(),
                 AnswerDecision.Answer.ACCP, null, RECEIVED_AT.plusSeconds(1))).next();

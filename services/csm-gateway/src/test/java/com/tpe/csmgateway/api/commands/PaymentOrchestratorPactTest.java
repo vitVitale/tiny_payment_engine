@@ -110,6 +110,39 @@ class PaymentOrchestratorPactTest {
                 .toPact(V4Pact.class);
     }
 
+    /** An accepted incoming transfer whose settlement is overdue (UC-06 8b): the debtor agent is the peer bank. */
+    @Pact(consumer = CONSUMER)
+    V4Pact requestIncomingPaymentStatus(MessagePactBuilder builder) {
+        return builder
+                .expectsToReceive("RequestPaymentStatus: the status of an incoming transfer")
+                .withMetadata(metadata -> metadata
+                        .add("tpe-message-type", "RequestPaymentStatus")
+                        .add("tpe-schema-version", "1")
+                        .uuid("tpe-event-id", EVENT))
+                .withContent(newJsonBody(command -> {
+                    command.uuid("paymentId", PAYMENT);
+                    command.stringType("txId", "PEER20261021000017");
+                    command.stringMatcher("debtorAgentBic", BIC_PATTERN, "PEERDEFFXXX");
+                    command.stringValue("direction", "INCOMING");
+                    command.integerType("attempt", 1);
+                    command.stringMatcher("requestedAt", TIMESTAMP_PATTERN, "2026-10-21T09:16:31.000Z");
+                }).build())
+                .toPact(V4Pact.class);
+    }
+
+    @Test
+    @PactTestFor(pactMethod = "requestIncomingPaymentStatus")
+    void PACT_M01_requestIncomingPaymentStatus(V4Interaction.AsynchronousMessage message) {
+        listener.on(record(message));
+
+        var command = ArgumentCaptor.forClass(RequestPaymentStatus.class);
+        verify(statusRequesting).request(eq(EVENT), command.capture());
+        assertThat(command.getValue().txId().value()).isEqualTo("PEER20261021000017");
+        assertThat(command.getValue().debtorAgentBic().value()).isEqualTo("PEERDEFFXXX");
+        assertThat(command.getValue().direction()).isEqualTo(Direction.INCOMING);
+        assertThat(command.getValue().attempt()).isEqualTo(1);
+    }
+
     @Test
     @PactTestFor(pactMethod = "requestPaymentStatus")
     void PACT_M01_requestPaymentStatus(V4Interaction.AsynchronousMessage message) {

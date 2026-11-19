@@ -10,6 +10,12 @@ import au.com.dius.pact.provider.junit5.PactVerificationContext;
 import au.com.dius.pact.provider.junitsupport.Provider;
 import au.com.dius.pact.provider.junitsupport.State;
 import au.com.dius.pact.provider.spring.junit5.PactVerificationSpringProvider;
+import com.tpe.contracts.AnswerSent;
+import com.tpe.contracts.AnswerStatus;
+import com.tpe.contracts.DecidedBy;
+import com.tpe.contracts.Direction;
+import com.tpe.paymentdomain.Bic;
+import com.tpe.paymentdomain.TxId;
 import com.tpe.testsupport.pact.PactVerification;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
@@ -30,12 +36,13 @@ import tools.jackson.databind.json.JsonMapper;
 /**
  * payment-orchestrator verifies every collected pact that names it (specs/20-testing-strategy.md §10.3): P-01 of
  * payment-api, against the running service with the default bank directory, and M-01, csm-gateway's
- * {@code SendCreditTransfer} and {@code RequestPaymentStatus}. Every state gives the interaction a new
+ * {@code SendCreditTransfer} and {@code RequestPaymentStatus} (outgoing and incoming). Every state gives the interaction a new
  * {@code commandId} or {@code paymentId}, so repeated runs never meet each other's payments. Runs only with
  * {@code -Ppact-verify}.
  *
  * <p>A command is produced through the real path: a payment to the peer bank submitted and sent (risk allows, the
- * ledger holds), and for a status request taken past its deadline into investigation; the verified bytes are the
+ * ledger holds), and for a status request taken past its deadline into investigation, or an incoming transfer
+ * accepted and taken past its settlement-overdue time; the verified bytes are the
  * payload and headers of the outbox row the relay publishes.
  */
 @Provider("payment-orchestrator")
@@ -46,6 +53,8 @@ class PaymentOrchestratorPactVerificationIT extends OrchestratorStack {
     private static final Duration AWAIT = Duration.ofSeconds(15);
     /** Past {@code deadline_at}: 20 s after acceptance. */
     private static final Duration PAST_DEADLINE = Duration.ofSeconds(21);
+    /** Past {@code tpe.incoming.settlement-overdue}: 30 s after the accepting answer. */
+    private static final Duration PAST_SETTLEMENT_OVERDUE = Duration.ofSeconds(31);
 
     @Autowired
     private JdbcClient jdbc;
@@ -84,6 +93,36 @@ class PaymentOrchestratorPactVerificationIT extends OrchestratorStack {
                            AND message_type = 'RequestPaymentStatus'""")
                 .param(txId).query(Integer.class).single() > 0);
         return published(txId, "RequestPaymentStatus");
+    }
+
+    /**
+     * An incoming transfer answered accepting whose settlement is overdue (UC-06 8b): the investigation's first status
+     * request.
+     */
+    @PactVerifyProvider("RequestPaymentStatus: the status of an incoming transfer")
+    MessageAndMetadata requestIncomingPaymentStatus() {
+        riskAnswers("allow");
+        ledgerAnswers("create-pending-credit-created");
+        Bic peer = new Bic("PEERDEFFXXX");
+        String txId = IncomingPaymentIT.txId();
+        publishCsmEvent(IncomingPaymentIT.creditTransferReceived(peer, txId, Ibans.own()), txId, UUID.randomUUID());
+        await().atMost(AWAIT).until(() -> "ACCEPT_REQUESTED".equals(incomingState(peer, txId)));
+        publishCsmEvent(new AnswerSent(new TxId(txId), peer, Direction.INCOMING, AnswerStatus.ACCP, null,
+                DecidedBy.VERDICT, CLOCK.instant()), txId, UUID.randomUUID());
+        await().atMost(AWAIT).until(() -> "ACCEPTED".equals(incomingState(peer, txId)));
+        CLOCK.advance(PAST_SETTLEMENT_OVERDUE);
+        await().atMost(AWAIT).until(() -> jdbc.sql("""
+                        SELECT count(*) FROM outbox
+                         WHERE topic = 'csm.outbound.commands' AND message_key = ?
+                           AND message_type = 'RequestPaymentStatus'""")
+                .param(txId).query(Integer.class).single() > 0);
+        return published(txId, "RequestPaymentStatus");
+    }
+
+    private String incomingState(Bic debtorAgent, String txId) {
+        return jdbc.sql("""
+                        SELECT state FROM payments WHERE direction = 'INCOMING' AND debtor_agent_bic = ? AND tx_id = ?""")
+                .param(debtorAgent.value()).param(txId).query(String.class).optional().orElse(null);
     }
 
     /** A payment to the peer bank, submitted and {@code SENT_TO_CSM}: its {@code txId}. */

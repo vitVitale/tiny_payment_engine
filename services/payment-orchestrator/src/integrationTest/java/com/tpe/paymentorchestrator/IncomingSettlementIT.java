@@ -117,11 +117,8 @@ class IncomingSettlementIT extends OrchestratorStack {
     void ORC_AC_25_aRejectionAfterOurAcceptanceRejectsWithTheReasonAndCancelsTheCredit() {
         String txId = txId();
         UUID paymentId = acceptedPayment(txId);
-        // as AnswerSent(ACCP) schedules it once the settlement-overdue timer exists (§6.4): due far later
-        jdbc.sql("""
-                INSERT INTO payment_timers (payment_id, type, due_at, status, created_at)
-                VALUES (?, 'SETTLEMENT_OVERDUE', CAST(? AS TIMESTAMPTZ) + interval '30 seconds', 'SCHEDULED', now())""")
-                .param(paymentId).param(java.sql.Timestamp.from(CLOCK.instant())).update();
+        assertThat(probe.timers(paymentId)).as("scheduled by AnswerSent(ACCP)")
+                .containsExactly("SETTLEMENT_OVERDUE|SCHEDULED");
 
         rejected(txId, ReasonCode.AB05);
 
