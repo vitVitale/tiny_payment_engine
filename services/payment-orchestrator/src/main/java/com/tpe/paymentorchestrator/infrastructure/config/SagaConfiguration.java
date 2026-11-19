@@ -13,6 +13,7 @@ import com.tpe.paymentorchestrator.application.csm.CsmEventHandling;
 import com.tpe.paymentorchestrator.application.ledger.Ledger;
 import com.tpe.paymentorchestrator.application.incoming.AssessIncomingRiskAction;
 import com.tpe.paymentorchestrator.application.incoming.CancelCreditAction;
+import com.tpe.paymentorchestrator.application.incoming.ConfirmCreditAction;
 import com.tpe.paymentorchestrator.application.incoming.CreatePendingCreditAction;
 import com.tpe.paymentorchestrator.application.incoming.IncomingCsmEvents;
 import com.tpe.paymentorchestrator.application.outgoing.AssessPayeeRiskAction;
@@ -99,6 +100,12 @@ class SagaConfiguration {
             LedgerProperties properties, IncomingProperties incoming, Clock clock) {
         return new CreatePendingCreditAction(ledger, settings, properties.timeout(), incoming.verdictGiveUpMargin(),
                 clock);
+    }
+
+    @Bean
+    ConfirmCreditAction confirmCreditAction(Ledger ledger, RunnerSettings settings, LedgerProperties properties,
+            Clock clock) {
+        return new ConfirmCreditAction(ledger, settings, properties.timeout(), clock);
     }
 
     @Bean

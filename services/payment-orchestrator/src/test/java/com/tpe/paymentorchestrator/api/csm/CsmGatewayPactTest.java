@@ -42,7 +42,8 @@ import org.mockito.ArgumentCaptor;
  * is mocked. The bodies pin the fields the orchestrator reads and those the contracts require. The answers of an
  * investigation ({@code source = INVESTIGATION}: settled, or unknown after the deadline, UC-05) are interactions of
  * their own. Of the incoming events: {@code CreditTransferReceived}, and {@code AnswerSent} accepted, rejected by our
- * verdict, and rejected {@code AB05} at the answer deadline; the incoming settlement follows with its flow.
+ * verdict, and rejected {@code AB05} at the answer deadline; {@code CreditTransferSettled} and
+ * {@code CreditTransferRejected} of an incoming transfer, from a status report and from an investigation.
  */
 @ExtendWith(PactConsumerTestExt.class)
 @PactTestFor(providerName = CsmGatewayPactTest.PROVIDER, providerType = ProviderType.ASYNCH,
@@ -178,6 +179,74 @@ class CsmGatewayPactTest {
                 });
     }
 
+    @Pact(consumer = CONSUMER)
+    V4Pact incomingSettled(MessagePactBuilder builder) {
+        return incomingOutcome(builder, "CreditTransferSettled: an incoming transfer settled by the CSM",
+                "CreditTransferSettled", "STATUS_REPORT", null);
+    }
+
+    @Pact(consumer = CONSUMER)
+    V4Pact incomingRejected(MessagePactBuilder builder) {
+        return incomingOutcome(builder, "CreditTransferRejected: an incoming transfer rejected by the CSM after our ACCP",
+                "CreditTransferRejected", "STATUS_REPORT", "AB05");
+    }
+
+    /** An investigation of an accepted incoming transfer found it settled (UC-06 8b). */
+    @Pact(consumer = CONSUMER)
+    V4Pact incomingSettledByInvestigation(MessagePactBuilder builder) {
+        return incomingOutcome(builder, "CreditTransferSettled: an incoming transfer an investigation found settled",
+                "CreditTransferSettled", "INVESTIGATION", null);
+    }
+
+    /** An investigation of an accepted incoming transfer found it rejected (UC-06 8b). */
+    @Pact(consumer = CONSUMER)
+    V4Pact incomingRejectedByInvestigation(MessagePactBuilder builder) {
+        return incomingOutcome(builder,
+                "CreditTransferRejected: an incoming transfer an investigation found rejected",
+                "CreditTransferRejected", "INVESTIGATION", "AB05");
+    }
+
+    @Test
+    @PactTestFor(pactMethod = "incomingSettled")
+    void PACT_M02_incomingSettled(V4Interaction.AsynchronousMessage message) {
+        var event = (CreditTransferSettled) handled(message);
+
+        assertThat(event.txId().value()).isEqualTo(INCOMING_TX_ID);
+        assertThat(event.debtorAgentBic().value()).isEqualTo("PEERDEFFXXX");
+        assertThat(event.direction()).isEqualTo(Direction.INCOMING);
+        assertThat(event.paymentId()).as("the gateway knows no incoming paymentId").isNull();
+        assertThat(event.source()).isEqualTo(SettlementSource.STATUS_REPORT);
+    }
+
+    @Test
+    @PactTestFor(pactMethod = "incomingRejected")
+    void PACT_M02_incomingRejected(V4Interaction.AsynchronousMessage message) {
+        var event = (CreditTransferRejected) handled(message);
+
+        assertThat(event.direction()).isEqualTo(Direction.INCOMING);
+        assertThat(event.reasonCode()).isEqualTo(ReasonCode.AB05);
+        assertThat(event.source()).isEqualTo(SettlementSource.STATUS_REPORT);
+    }
+
+    @Test
+    @PactTestFor(pactMethod = "incomingSettledByInvestigation")
+    void PACT_M02_incomingSettledByInvestigation(V4Interaction.AsynchronousMessage message) {
+        var event = (CreditTransferSettled) handled(message);
+
+        assertThat(event.direction()).isEqualTo(Direction.INCOMING);
+        assertThat(event.source()).isEqualTo(SettlementSource.INVESTIGATION);
+    }
+
+    @Test
+    @PactTestFor(pactMethod = "incomingRejectedByInvestigation")
+    void PACT_M02_incomingRejectedByInvestigation(V4Interaction.AsynchronousMessage message) {
+        var event = (CreditTransferRejected) handled(message);
+
+        assertThat(event.direction()).isEqualTo(Direction.INCOMING);
+        assertThat(event.reasonCode()).isEqualTo(ReasonCode.AB05);
+        assertThat(event.source()).isEqualTo(SettlementSource.INVESTIGATION);
+    }
+
     @Test
     @PactTestFor(pactMethod = "creditTransferReceived")
     void PACT_M02_creditTransferReceived(V4Interaction.AsynchronousMessage message) {
@@ -285,6 +354,24 @@ class CsmGatewayPactTest {
                         .uuid("tpe-event-id", EVENT))
                 .withContent(newJsonBody(body::accept).build())
                 .toPact(V4Pact.class);
+    }
+
+    /**
+     * The CSM's outcome of an incoming transfer from {@code source}: {@code CreditTransferSettled}, or with
+     * {@code reasonCode} {@code CreditTransferRejected}.
+     */
+    private static V4Pact incomingOutcome(MessagePactBuilder builder, String description, String type, String source,
+            String reasonCode) {
+        return event(builder, description, type, body -> {
+            incoming(body);
+            if (reasonCode == null) {
+                body.stringMatcher("settledAt", TIMESTAMP_PATTERN, "2026-10-21T09:16:02.000Z");
+            } else {
+                body.stringValue("reasonCode", reasonCode);
+                body.stringMatcher("rejectedAt", TIMESTAMP_PATTERN, "2026-10-21T09:16:02.000Z");
+            }
+            body.stringValue("source", source);
+        });
     }
 
     private static void incoming(LambdaDslObject body) {

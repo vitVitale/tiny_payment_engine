@@ -7,7 +7,6 @@ import com.tpe.contracts.CreditTransferRejected;
 import com.tpe.contracts.CreditTransferSettled;
 import com.tpe.contracts.Direction;
 import com.tpe.contracts.Message;
-import com.tpe.messaging.consumer.UnknownMessageTypeException;
 import com.tpe.messaging.inbox.InboxGuard;
 import com.tpe.paymentdomain.Bic;
 import com.tpe.paymentdomain.TxId;
@@ -23,7 +22,7 @@ import com.tpe.paymentorchestrator.domain.payment.CsmEventDecision.Contradiction
 import com.tpe.paymentorchestrator.domain.payment.CsmEventDecision.NoOp;
 import com.tpe.paymentorchestrator.domain.payment.CsmOutcome;
 import com.tpe.paymentorchestrator.domain.payment.ExceptionCaseType;
-import com.tpe.paymentorchestrator.domain.payment.OutgoingCsmEvent;
+import com.tpe.paymentorchestrator.domain.payment.CsmReport;
 import com.tpe.paymentorchestrator.domain.payment.Payment;
 import com.tpe.paymentorchestrator.domain.payment.PaymentDirection;
 import com.tpe.paymentorchestrator.domain.payment.PaymentState;
@@ -43,8 +42,9 @@ import org.springframework.transaction.support.TransactionSynchronizationManager
  * inbox (key {@code <debtorAgentBic>:<txId>:<type>:<outcome>}, 02 §4) → lock the payment by its transaction → apply.
  * An outgoing outcome is applied by {@link CsmEventDecision}: recording it cancels the payment's timers and sets the
  * next action, run after the commit; a contradiction opens a {@code CONTRADICTING_CSM_OUTCOME} case and changes
- * nothing else. {@code CreditTransferReceived} and {@code AnswerSent} go to {@link IncomingCsmEvents}. An event for no
- * known payment opens a case without a payment and is acknowledged. The incoming settlement follows with its flow.
+ * nothing else; the same holds for an incoming payment's settlement or rejection (UC-06 8a, 9).
+ * {@code CreditTransferReceived} and {@code AnswerSent} go to {@link IncomingCsmEvents}. An event for no known payment
+ * opens a case without a payment and is acknowledged.
  */
 public class CsmEventHandling {
 
@@ -75,16 +75,10 @@ public class CsmEventHandling {
     /**
      * @param event {@code CreditTransferReceived}, {@code AnswerSent}, {@code CreditTransferSettled},
      *     {@code CreditTransferRejected} or {@code CreditTransferNotSent}
-     * @throws UnknownMessageTypeException for an incoming settlement or rejection, which this service does not handle
-     *     yet: not retried, it goes to the DLT
      */
     @Transactional
     public void handle(UUID eventId, Message event) {
         Received received = Received.of(event);
-        if (received.incomingOutcome()) {
-            // the incoming settlement follows with its flow
-            throw new UnknownMessageTypeException(EVENTS, received.type() + " " + received.direction());
-        }
         String dedupKey = received.debtorAgentBic().value() + ":" + received.txId().value() + ":" + received.type()
                 + ":" + received.outcome();
         if (!inbox.firstTime(dedupKey, EVENTS, eventId)) {
@@ -132,7 +126,7 @@ public class CsmEventHandling {
      *
      * @throws IllegalStateException if the event would not move the payment on
      */
-    public void applyConfirmed(LockedPayment locked, OutgoingCsmEvent event, String cause, String operator,
+    public void applyConfirmed(LockedPayment locked, CsmReport event, String cause, String operator,
             Instant now) {
         if (!(CsmEventDecision.decide(locked.payment(), locked.csmOutcomeRecorded(), event, now)
                 instanceof Apply apply)) {
@@ -192,23 +186,18 @@ public class CsmEventHandling {
      *     {@code AnswerSent}
      */
     private record Received(TxId txId, Bic debtorAgentBic, Direction direction, String type, String outcome,
-            OutgoingCsmEvent event) {
-
-        /** The CSM's settlement or rejection of an incoming payment. */
-        boolean incomingOutcome() {
-            return direction == Direction.INCOMING && event != null;
-        }
+            CsmReport event) {
 
         static Received of(Message message) {
             String type = Message.contractOf(message.getClass()).type();
             return switch (message) {
                 case CreditTransferSettled settled -> new Received(settled.txId(), settled.debtorAgentBic(),
-                        settled.direction(), type, "SETTLED", new OutgoingCsmEvent.Settled());
+                        settled.direction(), type, "SETTLED", new CsmReport.Settled());
                 case CreditTransferRejected rejected -> new Received(rejected.txId(), rejected.debtorAgentBic(),
                         rejected.direction(), type, "REJECTED-" + rejected.reasonCode().code(),
-                        new OutgoingCsmEvent.Rejected(rejected.reasonCode()));
+                        new CsmReport.Rejected(rejected.reasonCode()));
                 case CreditTransferNotSent notSent -> new Received(notSent.txId(), notSent.debtorAgentBic(),
-                        notSent.direction(), type, "NOT_SENT", new OutgoingCsmEvent.NotSent(notSent.reasonCode()));
+                        notSent.direction(), type, "NOT_SENT", new CsmReport.NotSent(notSent.reasonCode()));
                 case CreditTransferReceived transfer -> new Received(transfer.txId(), transfer.debtorAgentBic(),
                         Direction.INCOMING, type, "RECEIVED", null);
                 case AnswerSent answer -> new Received(answer.txId(), answer.debtorAgentBic(), Direction.INCOMING,

@@ -360,9 +360,11 @@ Listener transaction: validate → inbox → load payment by `(direction, debtor
 |---|---|---|
 | `CreditTransferReceived` | none | create incoming payment `RECEIVED`, `accepted_at = receivedAt`, `answer_deadline`, next `ASSESS_RISK` (UC-06 2) |
 | | exists | no-op (duplicate with new dedup key — should not happen) |
-| `AnswerSent(ACCP)` | `ACCEPT_REQUESTED` | `ACCEPTED`, schedule `SETTLEMENT_OVERDUE` (UC-06 7) |
+| `AnswerSent(ACCP)` | `ACCEPT_REQUESTED` | `ACCEPTED`, schedule `SETTLEMENT_OVERDUE` (UC-06 7); a `CONFIRM_CREDIT` the CSM's settlement set stays |
+| | `SETTLED` / `REJECTED` with verdict `ACCEPT` | no-op (the CSM's outcome overtook the answer) |
 | | other | `CONTRADICTING_CSM_OUTCOME` case (we never sent an accept verdict) |
-| `AnswerSent(RJCT)` | `RECEIVED`, `ACCEPT_REQUESTED` | `REJECTED` with the sent reason, next `CANCEL_CREDIT` (UC-06 6a, 6b) |
+| `AnswerSent(RJCT)` | `RECEIVED`, `ACCEPT_REQUESTED` | `REJECTED` with the sent reason, next `CANCEL_CREDIT` (UC-06 6a, 6b); with the CSM's settlement recorded (`CONFIRM_CREDIT` pending) a contradiction case |
+| | `REJECTED` | no-op · after `ACCEPTED` → contradiction case |
 | `CreditTransferSettled` OUTGOING | `SENT_TO_CSM`, `INVESTIGATING` | `csm_outcome = SETTLED`, next `SETTLE_HOLD` (UC-04 8, UC-05 6) |
 | | `SETTLED` | no-op |
 | | `REJECTED` | `CONTRADICTING_CSM_OUTCOME` case (UC-04 8a) |
@@ -383,7 +385,6 @@ Listener transaction: validate → inbox → load payment by `(direction, debtor
 - `CreditTransferSettled` while `SETTLE_HOLD` is pending (the outcome is recorded, the hold not yet settled) is a
   no-op; a rejection or `CreditTransferNotSent` then is a contradiction case.
 - A contradiction case changes nothing else: no transition, no ledger call, no final event.
-- `CreditTransferSettled` / `CreditTransferRejected` INCOMING go to the DLT until the incoming settlement exists (M4).
 - `SETTLE_HOLD` answered `HOLD_RELEASED` leaves the payment in its state with `pending_action` cleared and opens the
   case, without a final event (§6.2): the CSM moved the money, the payer's funds came free.
 

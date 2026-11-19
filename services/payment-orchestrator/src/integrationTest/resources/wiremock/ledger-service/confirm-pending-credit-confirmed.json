@@ -1,0 +1,18 @@
+{
+  "request": {
+    "method": "POST",
+    "url": "/v1/pending-credits/0192f0e4-7b1c-7cc3-a1b2-0000000000a2/confirm"
+  },
+  "response": {
+    "status": 200,
+    "headers": {
+      "Content-Type": "application/json"
+    },
+    "jsonBody": {
+      "pendingCreditId": "0192f0e4-7b1c-7cc3-a1b2-0000000000a2",
+      "status": "CONFIRMED",
+      "journalEntryId": "0192f0e4-7b1c-7cc3-a1b2-0000000000c1",
+      "accountId": "0192f0e4-7b1c-7cc3-a1b2-0000000000b2"
+    }
+  }
+}

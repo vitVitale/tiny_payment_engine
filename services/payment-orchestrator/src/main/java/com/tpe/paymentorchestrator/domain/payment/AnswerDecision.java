@@ -9,11 +9,13 @@ import java.util.Objects;
  * §6.5, UC-06 6–7, ADR-003): the payment follows the answer actually sent, whatever its verdict was.
  *
  * <ul>
- *   <li>{@code ACCP} in {@code ACCEPT_REQUESTED} → {@code ACCEPTED}; in any other state a {@code CONTRADICTING_CSM_OUTCOME}
- *       case: we never sent an accepting verdict for it;
+ *   <li>{@code ACCP} in {@code ACCEPT_REQUESTED} → {@code ACCEPTED}, keeping the credit's confirmation if the CSM's
+ *       settlement overtook the answer; final with the verdict {@code ACCEPT} (the CSM's outcome overtook the answer) a
+ *       no-op; in any other state a {@code CONTRADICTING_CSM_OUTCOME} case: we never sent an accepting verdict for it;
  *   <li>{@code RJCT} in {@code RECEIVED} or {@code ACCEPT_REQUESTED} → {@code REJECTED} with the sent reason, next
- *       {@code CANCEL_CREDIT}: a pending credit may have been created (the cancel tombstones one that was not); in
- *       {@code REJECTED} a no-op; in a state after the accepting answer a contradiction.
+ *       {@code CANCEL_CREDIT}: a pending credit may have been created (the cancel tombstones one that was not); with
+ *       the CSM's settlement recorded ({@code CONFIRM_CREDIT} pending) a contradiction; in {@code REJECTED} a no-op; in
+ *       a state after the accepting answer a contradiction.
  * </ul>
  */
 public final class AnswerDecision {
@@ -53,12 +55,20 @@ public final class AnswerDecision {
         }
         PaymentState state = payment.state();
         return switch (answer) {
-            case ACCP -> state == PaymentState.ACCEPT_REQUESTED
-                    ? new Moved(payment.answerAccepted(), "ANSWER_ACCP")
-                    : new Contradiction("accepted in " + state + ": no accepting verdict was sent");
+            case ACCP -> {
+                if (state == PaymentState.ACCEPT_REQUESTED) {
+                    yield new Moved(payment.answerAccepted(), "ANSWER_ACCP");
+                }
+                // the CSM's outcome overtook the answer: the inbox drops a repeated ACCP, so only this way is it late
+                boolean overtaken = state.isFinal() && payment.incoming().verdict() == Verdict.ACCEPT;
+                yield overtaken ? new NoOp("the CSM's outcome overtook the accepting answer")
+                        : new Contradiction("accepted in " + state + ": no accepting verdict was sent");
+            }
             case RJCT -> switch (state) {
-                case RECEIVED, ACCEPT_REQUESTED -> new Moved(payment.rejected(
-                        Objects.requireNonNull(reason, "reason"), PendingAction.CANCEL_CREDIT, now), "ANSWER_RJCT");
+                case RECEIVED, ACCEPT_REQUESTED -> payment.pendingAction() == PendingAction.CONFIRM_CREDIT
+                        ? new Contradiction("rejected after the CSM settled")
+                        : new Moved(payment.rejected(Objects.requireNonNull(reason, "reason"),
+                                PendingAction.CANCEL_CREDIT, now), "ANSWER_RJCT");
                 case REJECTED -> new NoOp("rejected already");
                 default -> new Contradiction("rejected in " + state + ", after the accepting answer");
             };

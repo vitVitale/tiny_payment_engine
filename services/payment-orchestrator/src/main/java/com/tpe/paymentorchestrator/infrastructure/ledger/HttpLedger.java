@@ -26,8 +26,8 @@ import tools.jackson.databind.json.JsonMapper;
  * ledger-service's Posting API (specs/12-ledger-service.md §3.1) over HTTP, connect timeout 200 ms and the read
  * timeout the runner computed (specs/00-engineering-baseline.md §8). The hold id and the pending credit id are the
  * {@code paymentId}; the {@code Idempotency-Key} is {@code hold-create:<holdId>}, {@code hold-settle-on-us:<holdId>},
- * {@code hold-settle:<holdId>}, {@code hold-release:<holdId>}, {@code pending-credit-create:<id>} or
- * {@code pending-credit-cancel:<id>}, so a retry replays the ledger's stored answer.
+ * {@code hold-settle:<holdId>}, {@code hold-release:<holdId>}, {@code pending-credit-create:<id>},
+ * {@code pending-credit-confirm:<id>} or {@code pending-credit-cancel:<id>}, so a retry replays the ledger's stored answer.
  *
  * <p>A {@code 4xx} Problem Details with a {@code code} (specs/12-ledger-service.md §3.4) is
  * {@link LedgerAnswer.Refused}, except {@code CONCURRENT_MODIFICATION}, which asks to retry;
@@ -104,6 +104,15 @@ public class HttpLedger implements Ledger {
         return post(payment, "create pending credit", PENDING_CREDITS, "pending-credit-create:" + id, request,
                 readTimeout, PendingCreditBody.class,
                 credit -> credit.accountId() == null ? null : new PendingCreditCreated(credit.accountId()));
+    }
+
+    @Override
+    public LedgerAnswer<CreditConfirmed> confirmPendingCredit(Payment payment, Duration readTimeout) {
+        UUID id = payment.paymentId().value();
+        return post(payment, "confirm pending credit", PENDING_CREDITS + "/" + id + "/confirm",
+                "pending-credit-confirm:" + id, Map.of(), readTimeout, ConfirmationBody.class,
+                confirmed -> confirmed.journalEntryId() == null || confirmed.accountId() == null ? null
+                        : new CreditConfirmed(confirmed.journalEntryId(), confirmed.accountId()));
     }
 
     @Override
@@ -192,6 +201,10 @@ public class HttpLedger implements Ledger {
     /** What the orchestrator reads of a pending credit: the payee's account, or a cancel's status. */
     @JsonIgnoreProperties(ignoreUnknown = true)
     record PendingCreditBody(UUID accountId, String status) {}
+
+    /** What the orchestrator reads of a confirmation. */
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    record ConfirmationBody(UUID journalEntryId, UUID accountId) {}
 
     /** What the orchestrator reads of a hold. */
     @JsonIgnoreProperties(ignoreUnknown = true)

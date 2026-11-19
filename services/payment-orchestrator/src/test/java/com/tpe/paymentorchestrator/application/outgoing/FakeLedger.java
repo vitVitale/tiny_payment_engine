@@ -17,6 +17,7 @@ public final class FakeLedger implements Ledger {
     public LedgerAnswer<HoldSettled> holdSettlement;
     public LedgerAnswer<PendingCreditCreated> pendingCredit;
     public LedgerAnswer<Cancelled> cancel;
+    public LedgerAnswer<CreditConfirmed> confirm;
 
     @Override
     public LedgerAnswer<HoldCreated> createHold(Payment payment, Duration readTimeout) {
@@ -46,6 +47,12 @@ public final class FakeLedger implements Ledger {
     public LedgerAnswer<PendingCreditCreated> createPendingCredit(Payment payment, Duration readTimeout) {
         timeouts.add(readTimeout);
         return pendingCredit;
+    }
+
+    @Override
+    public LedgerAnswer<CreditConfirmed> confirmPendingCredit(Payment payment, Duration readTimeout) {
+        timeouts.add(readTimeout);
+        return confirm;
     }
 
     @Override

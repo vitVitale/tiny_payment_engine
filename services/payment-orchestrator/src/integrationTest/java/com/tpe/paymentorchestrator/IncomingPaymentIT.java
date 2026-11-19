@@ -246,10 +246,16 @@ class IncomingPaymentIT extends OrchestratorStack {
 
     /** As the gateway reports a valid incoming {@code pacs.008} received now, answered by 5 s later. */
     static CreditTransferReceived creditTransferReceived(Bic debtorAgent, String txId, String creditorIban) {
+        return creditTransferReceived(debtorAgent, txId, creditorIban, ANSWER_WINDOW);
+    }
+
+    /** As {@link #creditTransferReceived(Bic, String, String)}, answered by {@code window} later. */
+    static CreditTransferReceived creditTransferReceived(Bic debtorAgent, String txId, String creditorIban,
+            Duration window) {
         Instant now = CLOCK.instant();
         return new CreditTransferReceived(new TxId(txId), debtorAgent, Direction.INCOMING,
                 new MsgId("M-" + txId), new Uetr(UUID.randomUUID().toString()), new EndToEndId("E2E-" + txId), now,
-                now.plus(ANSWER_WINDOW), now.minusMillis(20), LocalDate.ofInstant(now, ZoneOffset.UTC),
+                now.plus(window), now.minusMillis(20), LocalDate.ofInstant(now, ZoneOffset.UTC),
                 Money.parse("12.34"),
                 new Party(new PartyName("Hans Mueller"), new Iban(Ibans.peer()), null),
                 new Party(new PartyName("Anna Schmidt"), new Iban(creditorIban), null), new Bic("TPEBDEFFXXX"),

@@ -275,6 +275,13 @@ class LedgerServicePactVerificationIT extends LedgerStack {
         return credit;
     }
 
+    @State("pending credit is CANCELLED")
+    Map<String, Object> pendingCreditIsCancelled(Map<String, Object> parameters) {
+        Map<String, Object> credit = activePendingCredit(amount(parameters, "amountMinor"));
+        pendingCredits.cancel(UUID.fromString((String) credit.get("pendingCreditId")));
+        return credit;
+    }
+
     /** The cancel came first and left a tombstone (ADR-009). */
     @State("pending credit was cancelled")
     Map<String, Object> pendingCreditWasCancelled() {

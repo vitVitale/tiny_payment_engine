@@ -168,18 +168,6 @@ class OutgoingCsmOutcomeIT extends OrchestratorStack {
     }
 
     @Test
-    void anIncomingOutcomeGoesToTheDltUntilTheIncomingFlowExists() {
-        String txId = "TPE01INCOMIN" + UUID.randomUUID().toString().substring(0, 8).toUpperCase();
-
-        publishCsmEvent(new CreditTransferSettled(new TxId(txId), new Bic("PEERDEFFXXX"), Direction.INCOMING, null,
-                CLOCK.instant(), SettlementSource.STATUS_REPORT), txId, UUID.randomUUID());
-
-        await().atMost(AWAIT).until(() -> probe.casesWithoutPayment().stream().anyMatch(case_ -> case_.contains(txId)));
-        assertThat(probe.casesWithoutPayment()).filteredOn(details -> details.contains(txId)).singleElement()
-                .satisfies(details -> assertThat(details).contains("\"cause\": \"UnknownMessageTypeException\""));
-    }
-
-    @Test
     void anEventForNoPaymentOfOursOpensACaseWithoutAPaymentAndIsAcknowledged() {
         String txId = "TPE01UNKNOWN" + UUID.randomUUID().toString().substring(0, 8).toUpperCase();
 

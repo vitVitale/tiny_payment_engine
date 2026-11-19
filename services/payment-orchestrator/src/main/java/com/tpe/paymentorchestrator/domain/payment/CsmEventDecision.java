@@ -1,14 +1,14 @@
 package com.tpe.paymentorchestrator.domain.payment;
 
 import com.tpe.paymentdomain.StatusReason;
-import com.tpe.paymentorchestrator.domain.payment.OutgoingCsmEvent.NotSent;
-import com.tpe.paymentorchestrator.domain.payment.OutgoingCsmEvent.Rejected;
-import com.tpe.paymentorchestrator.domain.payment.OutgoingCsmEvent.Settled;
+import com.tpe.paymentorchestrator.domain.payment.CsmReport.NotSent;
+import com.tpe.paymentorchestrator.domain.payment.CsmReport.Rejected;
+import com.tpe.paymentorchestrator.domain.payment.CsmReport.Settled;
 import java.time.Instant;
 import java.util.Objects;
 
 /**
- * What a CSM event does to an outgoing payment (specs/11-payment-orchestrator.md §6.5, UC-04 6–8, UC-05 2a):
+ * What a CSM event does to a payment (specs/11-payment-orchestrator.md §6.5); an outgoing one (UC-04 6–8, UC-05 2a):
  *
  * <ul>
  *   <li>with the CSM ({@code SENT_TO_CSM}, {@code INVESTIGATING}) and no outcome yet: settled → {@code SETTLE_HOLD}
@@ -19,6 +19,8 @@ import java.util.Objects;
  *   <li>a contradicting outcome, or any event before the payment was sent (the gateway cannot know it yet) → a
  *       {@code CONTRADICTING_CSM_OUTCOME} case; the payment stays as it is.
  * </ul>
+ *
+ * An incoming one is decided by the same rules on its own states (UC-06 8a, 9): see {@code decideIncoming}.
  */
 public final class CsmEventDecision {
 
@@ -43,8 +45,11 @@ public final class CsmEventDecision {
     private CsmEventDecision() {}
 
     /** @param csmOutcomeRecorded {@code csm_outcome} is set */
-    public static Decision decide(Payment payment, boolean csmOutcomeRecorded, OutgoingCsmEvent event,
+    public static Decision decide(Payment payment, boolean csmOutcomeRecorded, CsmReport event,
             Instant now) {
+        if (payment.direction() == PaymentDirection.INCOMING) {
+            return decideIncoming(payment, csmOutcomeRecorded, event, now);
+        }
         PaymentState state = payment.state();
         boolean withCsm = state.isWithCsm();
         if (!withCsm && !state.isFinal()) {
@@ -64,6 +69,44 @@ public final class CsmEventDecision {
                     CsmOutcome.REJECTED, now);
             case NotSent notSent -> rejection(payment, settlementRecorded, notSent.reason(), "CSM_NOT_SENT",
                     CsmOutcome.NOT_SENT, now);
+        };
+    }
+
+    /**
+     * An incoming payment (UC-06 8a, 9): accepted ({@code ACCEPT_REQUESTED}, {@code ACCEPTED}, {@code INVESTIGATING})
+     * with no outcome yet: settled → {@code CONFIRM_CREDIT} next; rejected → {@code REJECTED} with the reason,
+     * {@code CANCEL_CREDIT} next. Accepted with an outcome recorded, the CSM settled: its credit is being confirmed,
+     * or was cancelled under it. The same final outcome again → no-op; a contradicting one, or one before any
+     * accepting answer ({@code RECEIVED}: the gateway publishes in causal order, 02 §4) → a case.
+     */
+    private static Decision decideIncoming(Payment payment, boolean csmOutcomeRecorded, CsmReport event,
+            Instant now) {
+        PaymentState state = payment.state();
+        boolean accepted = payment.isAcceptedIncoming();
+        if (!accepted && !state.isFinal()) {
+            return new Contradiction(event.getClass().getSimpleName() + " in " + state + ": not answered accepting");
+        }
+        boolean settlementRecorded = accepted
+                && (csmOutcomeRecorded || payment.pendingAction() == PendingAction.CONFIRM_CREDIT);
+        return switch (event) {
+            case Settled settled -> {
+                if (settlementRecorded || state == PaymentState.SETTLED) {
+                    yield new NoOp("settled already");
+                }
+                yield accepted ? new Apply(payment.csmSettled(), "CSM_SETTLED", CsmOutcome.SETTLED)
+                        : new Contradiction("settled after " + state);
+            }
+            case Rejected rejected -> {
+                if (state == PaymentState.REJECTED) {
+                    yield new NoOp("rejected already");
+                }
+                if (settlementRecorded || state == PaymentState.SETTLED) {
+                    yield new Contradiction("REJECTED after the CSM settled");
+                }
+                yield new Apply(payment.rejected(rejected.reason(), PendingAction.CANCEL_CREDIT, now),
+                        "CSM_REJECTED", CsmOutcome.REJECTED);
+            }
+            case NotSent notSent -> throw new IllegalArgumentException("an incoming payment is never sent: " + payment);
         };
     }
 

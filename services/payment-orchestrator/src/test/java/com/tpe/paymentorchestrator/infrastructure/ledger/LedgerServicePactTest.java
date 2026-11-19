@@ -49,9 +49,9 @@ import tools.jackson.databind.json.JsonMapper;
  * payment meets: create hold {@code 201} / replay {@code 200} / each refusal the orchestrator maps; settle-on-us
  * {@code 200} / replay / payee refusals / {@code 409 IDEMPOTENCY_CONFLICT}; release {@code 200} / unknown id
  * (tombstone) / {@code 409 HOLD_SETTLED}; settle to the CSM; and an incoming payment's pending credit: create
- * {@code 201} / replay {@code 200} / payee refusals / {@code 409} after the cancel (tombstone), cancel {@code 200} /
- * unknown id (tombstone) / {@code 409 PENDING_CREDIT_CONFIRMED}; through the real {@link HttpLedger}. Confirm follows
- * with the incoming settlement. Verified by ledger-service's {@code LedgerServicePactVerificationIT} with
+ * {@code 201} / replay {@code 200} / payee refusals / {@code 409} after the cancel (tombstone), confirm {@code 200} /
+ * replay / {@code 409 PENDING_CREDIT_CANCELLED}, cancel {@code 200} / unknown id (tombstone) /
+ * {@code 409 PENDING_CREDIT_CONFIRMED}; through the real {@link HttpLedger}. Verified by ledger-service's {@code LedgerServicePactVerificationIT} with
  * {@code -Ppact-verify}.
  *
  * <p>The ledger chooses IBANs and the provider states choose fresh hold ids, so both come from the provider state;
@@ -231,6 +231,25 @@ class LedgerServicePactTest {
     }
 
     @Pact(consumer = CONSUMER)
+    V4Pact confirmPendingCredit(PactDslWithProvider builder) {
+        return confirmed(confirmPendingCredit(builder.given("pending credit is ACTIVE",
+                Map.of("amountMinor", AMOUNT_MINOR)), "confirm pending credit: booked to the payee"));
+    }
+
+    @Pact(consumer = CONSUMER)
+    V4Pact confirmPendingCreditReplayed(PactDslWithProvider builder) {
+        return confirmed(confirmPendingCredit(builder.given("pending credit is CONFIRMED",
+                Map.of("amountMinor", AMOUNT_MINOR)), "confirm pending credit: a retry answers the booking"));
+    }
+
+    @Pact(consumer = CONSUMER)
+    V4Pact confirmCancelledPendingCredit(PactDslWithProvider builder) {
+        return refused(confirmPendingCredit(builder.given("pending credit is CANCELLED",
+                Map.of("amountMinor", AMOUNT_MINOR)), "confirm pending credit: a cancelled one"), 409,
+                "PENDING_CREDIT_CANCELLED");
+    }
+
+    @Pact(consumer = CONSUMER)
     V4Pact cancelPendingCredit(PactDslWithProvider builder) {
         return cancelled(cancelPendingCredit(builder.given("pending credit is ACTIVE",
                 Map.of("amountMinor", AMOUNT_MINOR)), "cancel pending credit: cancelled"));
@@ -279,6 +298,27 @@ class LedgerServicePactTest {
     @PactTestFor(pactMethod = "createPendingCreditAfterCancel")
     void PACT_P04_aCreateAfterTheCancelIsRefused(MockServer server) {
         assertThat(client(server).createPendingCredit(incoming(), TIMEOUT))
+                .isEqualTo(refusal(LedgerRefusal.PENDING_CREDIT_CANCELLED));
+    }
+
+    @Test
+    @PactTestFor(pactMethod = "confirmPendingCredit")
+    void PACT_P04_aPendingCreditIsConfirmedToThePayee(MockServer server) {
+        assertThat(client(server).confirmPendingCredit(incoming(), TIMEOUT))
+                .isEqualTo(new LedgerAnswer.Done<>(new Ledger.CreditConfirmed(ENTRY, PAYEE_ACCOUNT)));
+    }
+
+    @Test
+    @PactTestFor(pactMethod = "confirmPendingCreditReplayed")
+    void PACT_P04_aRetriedConfirmAnswersTheBooking(MockServer server) {
+        assertThat(client(server).confirmPendingCredit(incoming(), TIMEOUT))
+                .isEqualTo(new LedgerAnswer.Done<>(new Ledger.CreditConfirmed(ENTRY, PAYEE_ACCOUNT)));
+    }
+
+    @Test
+    @PactTestFor(pactMethod = "confirmCancelledPendingCredit")
+    void PACT_P04_aCancelledPendingCreditIsNotConfirmed(MockServer server) {
+        assertThat(client(server).confirmPendingCredit(incoming(), TIMEOUT))
                 .isEqualTo(refusal(LedgerRefusal.PENDING_CREDIT_CANCELLED));
     }
 
@@ -552,6 +592,29 @@ class LedgerServicePactTest {
         return response.status(status)
                 .matchHeader("Content-Type", "application/json.*", "application/json")
                 .body(newJsonBody(body -> body.uuid("accountId", PAYEE_ACCOUNT)).build())
+                .toPact(V4Pact.class);
+    }
+
+    private static PactDslResponse confirmPendingCredit(PactDslWithState given, String description) {
+        return given.uponReceiving(description)
+                .method("POST")
+                .pathFromProviderState("/v1/pending-credits/${pendingCreditId}/confirm",
+                        "/v1/pending-credits/" + PENDING_CREDIT_ID + "/confirm")
+                .matchHeader("Content-Type", "application/json.*", "application/json")
+                .matchHeader("Idempotency-Key", "pending-credit-confirm:" + UUID_REGEX,
+                        "pending-credit-confirm:" + PENDING_CREDIT_ID)
+                .body("{}", "application/json")
+                .willRespondWith();
+    }
+
+    /** Only what the orchestrator reads of a confirmation: the entry and the payee's account. */
+    private static V4Pact confirmed(PactDslResponse response) {
+        return response.status(200)
+                .matchHeader("Content-Type", "application/json.*", "application/json")
+                .body(newJsonBody(body -> {
+                    body.uuid("journalEntryId", ENTRY);
+                    body.uuid("accountId", PAYEE_ACCOUNT);
+                }).build())
                 .toPact(V4Pact.class);
     }
 
