@@ -36,7 +36,8 @@ import tools.jackson.databind.json.JsonMapper;
 /**
  * payment-orchestrator verifies every collected pact that names it (specs/20-testing-strategy.md §10.3): P-01 of
  * payment-api, against the running service with the default bank directory, and M-01, csm-gateway's
- * {@code SendCreditTransfer} and {@code RequestPaymentStatus} (outgoing and incoming). Every state gives the interaction a new
+ * {@code SendCreditTransfer}, {@code RequestPaymentStatus} (outgoing and incoming) and the incoming verdicts
+ * {@code AcceptCreditTransfer} and {@code RejectCreditTransfer}. Every state gives the interaction a new
  * {@code commandId} or {@code paymentId}, so repeated runs never meet each other's payments. Runs only with
  * {@code -Ppact-verify}.
  *
@@ -93,6 +94,33 @@ class PaymentOrchestratorPactVerificationIT extends OrchestratorStack {
                            AND message_type = 'RequestPaymentStatus'""")
                 .param(txId).query(Integer.class).single() > 0);
         return published(txId, "RequestPaymentStatus");
+    }
+
+    /** An incoming transfer to an open account: risk allows, the pending credit is created (UC-06 4, 5). */
+    @PactVerifyProvider("AcceptCreditTransfer: accept an incoming transfer")
+    MessageAndMetadata acceptCreditTransfer() {
+        ledgerAnswers("create-pending-credit-created");
+        return published(incomingWithVerdict(), "AcceptCreditTransfer");
+    }
+
+    /** An incoming transfer whose pending credit the ledger refuses: the reject verdict (UC-06 4a). */
+    @PactVerifyProvider("RejectCreditTransfer: reject an incoming transfer")
+    MessageAndMetadata rejectCreditTransfer() {
+        ledgerAnswers("create-pending-credit-blocked-payee");
+        return published(incomingWithVerdict(), "RejectCreditTransfer");
+    }
+
+    /** A {@code CreditTransferReceived} from the peer bank, risk allowing: its {@code txId} once a verdict is out. */
+    private String incomingWithVerdict() {
+        riskAnswers("allow");
+        String txId = IncomingPaymentIT.txId();
+        publishCsmEvent(IncomingPaymentIT.creditTransferReceived(new Bic("PEERDEFFXXX"), txId, Ibans.own()), txId,
+                UUID.randomUUID());
+        await().atMost(AWAIT).until(() -> jdbc.sql("""
+                        SELECT count(*) FROM outbox
+                         WHERE topic = 'csm.outbound.commands' AND message_key = ?""")
+                .param(txId).query(Integer.class).single() > 0);
+        return txId;
     }
 
     /**

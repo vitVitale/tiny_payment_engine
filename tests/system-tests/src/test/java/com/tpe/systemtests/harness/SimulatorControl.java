@@ -1,5 +1,6 @@
 package com.tpe.systemtests.harness;
 
+import com.tpe.invariantchecker.CsmInvariants.Answer;
 import com.tpe.invariantchecker.CsmInvariants.Settlement;
 import com.tpe.invariantchecker.CsmInvariants.SimulatorMessage;
 import java.io.IOException;
@@ -19,7 +20,7 @@ import tools.jackson.databind.json.JsonMapper;
 
 /**
  * csm-simulator's control API (specs/17-csm-simulator.md §3.5), for test use: the peer banks' accounts, the scenario of
- * a creditor, and the CSM's received and settlement logs. The simulator is shared by every test of the JVM, so the
+ * a creditor, incoming payments to our bank, and the CSM's received and settlement logs. The simulator is shared by every test of the JVM, so the
  * accounts are kept here and {@code PUT} as a whole, each test adding its own; scenarios are per creditor IBAN, and
  * every test uses its own payees.
  */
@@ -51,6 +52,38 @@ public final class SimulatorControl {
     /** The CSM's behaviour for payments to {@code creditorIban}, e.g. {@code ACCEPT} or {@code REJECT:AC04}. */
     public void scenario(String creditorIban, String scenario) {
         send("PUT", "/sim/v1/scenarios/" + creditorIban, Map.of("scenario", scenario), 204);
+    }
+
+    /**
+     * The CSM delivers a credit transfer to our bank ({@code POST /sim/v1/incoming-payments}, 17 §3.2): from
+     * {@code debtorIban} at its peer bank to {@code creditorIban}, {@code amount} EUR (a decimal string), played as
+     * {@code scenario} ({@code ACCEPT}, {@code REJECT_AFTER_ACCP}, {@code NO_CONFIRMATION}); its {@code txId}.
+     *
+     * @throws IllegalStateException unless the gateway took the {@code pacs.008} ({@code 202})
+     */
+    public String incomingPayment(String creditorIban, String amount, String debtorName, String debtorIban,
+            String scenario) {
+        JsonNode sent = JSON.readTree(send("POST", "/sim/v1/incoming-payments", Map.of("creditorIban", creditorIban,
+                "amount", amount, "debtorName", debtorName, "debtorIban", debtorIban, "scenario", scenario), 200));
+        if (sent.get("gatewayStatus").asInt() != 202) {
+            throw new IllegalStateException("csm-gateway answered " + sent.get("gatewayStatus") + " to the pacs.008");
+        }
+        return sent.get("txId").asString();
+    }
+
+    /**
+     * The answers {@code pacs.002} the simulator received from csm-gateway for {@code txId}, oldest first, from any
+     * debtor agent (ADR-010: each names its own): what INV-6 counts.
+     */
+    public List<Answer> answers(String txId) {
+        var answers = new ArrayList<Answer>();
+        for (JsonNode message : get("/sim/v1/received?txId=" + URLEncoder.encode(txId, StandardCharsets.UTF_8))) {
+            if (message.get("kind").asString().equals("RECEIVED")
+                    && message.get("messageType").asString().startsWith("pacs.002")) {
+                answers.add(StatusReports.answer(message.get("envelope").asString()));
+            }
+        }
+        return answers;
     }
 
     /** Every message the simulator received or sent for {@code txId}, oldest first. */

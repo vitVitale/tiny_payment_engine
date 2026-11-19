@@ -3,6 +3,7 @@ package com.tpe.systemtests.harness;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import com.tpe.invariantchecker.CsmInvariants;
 import com.tpe.iso20022model.CsmMessageType;
 import com.tpe.iso20022model.EnvelopeCodec;
 import com.tpe.iso20022model.EnvelopeCodec.Accepted;
@@ -54,6 +55,23 @@ class StatusReportsTest {
         PaymentTransaction110 transaction = transaction(contradicting);
         assertThat(transaction.getTxSts()).isEqualTo("RJCT");
         assertThat(transaction.getStsRsnInf().getFirst().getRsn().getCd()).isEqualTo("AC04");
+    }
+
+    @Test
+    void anAnswerIsReadAsTheCsmReceivedIt() {
+        String accepted = ENVELOPES.join(new Pacs002Builder().build(new StatusReport(new MsgId("TPEM-ANSWER"),
+                Instant.parse("2026-11-17T10:00:00Z"), new MsgId("PEERM-1"), CsmMessageType.PACS_008,
+                new TxId("PEER-I01"), new EndToEndId("E2E-I-01"), new Uetr("6f1a0c2e-5b7d-4c3e-9a8f-1d2e3f4a5b6c"),
+                new Bic("PEERDEFFXXX"), Status.ACCEPTED, new Bic("TPEBDEFFXXX"), new Bic("TIPSXXXXXXX"))));
+        String rejected = ENVELOPES.join(new Pacs002Builder().build(new StatusReport(new MsgId("TPEM-ANSWER-2"),
+                Instant.parse("2026-11-17T10:00:00Z"), new MsgId("PEERM-2"), CsmMessageType.PACS_008,
+                new TxId("PEER-I02"), new EndToEndId("E2E-I-02"), null, new Bic("PEERDEFFXXX"),
+                Status.rejected(ReasonCode.AC01), new Bic("TPEBDEFFXXX"), new Bic("TIPSXXXXXXX"))));
+
+        assertThat(StatusReports.answer(accepted))
+                .isEqualTo(new CsmInvariants.Answer("PEERDEFFXXX", "PEER-I01", "TPEM-ANSWER", "ACCP", null));
+        assertThat(StatusReports.answer(rejected))
+                .isEqualTo(new CsmInvariants.Answer("PEERDEFFXXX", "PEER-I02", "TPEM-ANSWER-2", "RJCT", "AC01"));
     }
 
     @Test

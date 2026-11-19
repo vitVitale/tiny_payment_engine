@@ -36,8 +36,9 @@ import tools.jackson.databind.JsonNode;
  * simulator's responder for a peer bank's payee (asked once its remote client exists); a {@link TopicRecorder} on
  * {@code payments.events},
  * {@code csm.outbound.commands} and the dead-letter topics. After every test, beside the ledger's checks, the per-test
- * invariants over the payments the test initiated (specs/20-testing-strategy.md §3): INV-3, INV-5, INV-7, INV-8, INV-9,
- * INV-10, INV-11 (orchestrator and gateway parts). INV-13 (webhooks) comes with the notifications track.
+ * invariants over the payments the test initiated or received (specs/20-testing-strategy.md §3): INV-3, INV-4, INV-5,
+ * INV-6, INV-7, INV-8, INV-9, INV-10, INV-11 (orchestrator and gateway parts, outgoing and incoming). INV-13 (webhooks)
+ * comes with the notifications track.
  *
  * <p>As for {@link LedgerSystemTest}, every subclass carries
  * {@code @EnabledIfSystemProperty(named = "tpe.local-stack", matches = "true")} itself.
@@ -129,11 +130,12 @@ public abstract class PaymentSystemTest extends LedgerSystemTest {
     /** The case types this test opens on purpose; JUnit makes a new instance per test. */
     private final Set<String> expectedCases = new CopyOnWriteArraySet<>();
 
-    /** The payments this test initiated: the scope of its invariant checks. */
+    /** The payments this test initiated or received: the scope of its invariant checks. */
     private final CopyOnWriteArrayList<UUID> payments = new CopyOnWriteArrayList<>();
 
     /**
-     * After the test, at quiescence (20 §3): INV-3, -5, -7, -8, -9, -10, -11. Quiescence comes by the payments' deadlines: a
+     * After the test, at quiescence (20 §3): INV-3, -4, -5, -6, -7, -8, -9, -10, -11. Quiescence comes by the
+     * payments' deadlines: a
      * final event is delivered after the final state, and the deadline timer of an on-us payment stays
      * {@code SCHEDULED} until it fires as a no-op (11 §6.4). So the checks are repeated until they hold, at most
      * {@link Bounds#paymentFinal()}, and what is left then is the failure: a passing test waits for its own timers only.
@@ -149,7 +151,7 @@ public abstract class PaymentSystemTest extends LedgerSystemTest {
         } catch (ConditionTimeoutException e) {
             // reported below, as found now
         }
-        assertThat(paymentViolations()).as("INV-3, -5, -7, -8, -9, -10, -11 over %s", payments).isEmpty();
+        assertThat(paymentViolations()).as("INV-3, -4, -5, -6, -7, -8, -9, -10, -11 over %s", payments).isEmpty();
     }
 
     /** Every final event of the test's payments was read a whole delivery bound ago: a duplicate would be here. */
@@ -171,7 +173,13 @@ public abstract class PaymentSystemTest extends LedgerSystemTest {
             violations.addAll(CsmInvariants.ledgerAgreesWithCsm(orchestrator, ledger, SIMULATOR.settlements(STARTED),
                     payments));
             violations.addAll(CsmInvariants.gatewayNothingStuck(gateway, transfers, Bounds.transmissionOverdue()));
+            List<String> incoming = incomingTransactions(orchestrator);
+            violations.addAll(CsmInvariants.oneAnswerPerIncoming(orchestrator, incoming.stream()
+                    .map(transaction -> transaction.substring(transaction.indexOf(':') + 1)).distinct()
+                    .flatMap(txId -> SIMULATOR.answers(txId).stream()).toList(), payments));
+            violations.addAll(CsmInvariants.gatewayIncomingNothingStuck(gateway, incoming, Bounds.answerOverdue()));
             violations.addAll(PaymentInvariants.holdsMatchOutcomes(orchestrator, ledger, payments));
+            violations.addAll(PaymentInvariants.pendingCreditsMatchOutcomes(orchestrator, ledger, payments));
             violations.addAll(PaymentInvariants.csmSettlementPostings(orchestrator, ledger, payments));
             violations.addAll(PaymentInvariants.noUnexpectedCases(orchestrator, payments, expectedCases()));
             violations.addAll(PaymentInvariants.nothingStuck(orchestrator, payments, Bounds.actionOverdue()));
@@ -195,6 +203,72 @@ public abstract class PaymentSystemTest extends LedgerSystemTest {
             }
             return txIds;
         }
+    }
+
+    /** {@code <debtorAgentBic>:<txId>} of every incoming payment of the test: what the gateway and the CSM know. */
+    private List<String> incomingTransactions(Connection orchestrator) throws SQLException {
+        try (var statement = orchestrator.prepareStatement("""
+                SELECT debtor_agent_bic || ':' || tx_id FROM payments
+                 WHERE payment_id = ANY (?) AND direction = 'INCOMING' ORDER BY created_at""")) {
+            statement.setArray(1, orchestrator.createArrayOf("uuid", payments.toArray(UUID[]::new)));
+            var transactions = new ArrayList<String>();
+            try (var rs = statement.executeQuery()) {
+                while (rs.next()) {
+                    transactions.add(rs.getString(1));
+                }
+            }
+            return transactions;
+        }
+    }
+
+    /** An incoming transfer a test received: its transaction (ADR-010) and the orchestrator's payment of it. */
+    public record IncomingTransfer(String txId, String debtorAgentBic, UUID payment) {}
+
+    /**
+     * The CSM delivers {@code amount} EUR (a decimal string) from a fresh debtor at the peer bank to
+     * {@code creditorIban}, played as {@code scenario} (17 §3.2); once csm-gateway took it and the orchestrator made
+     * its payment, the payment joins the checks.
+     */
+    protected IncomingTransfer received(String creditorIban, String amount, String scenario) {
+        TestData.Customer debtor = TestData.newCustomer();
+        String txId = SIMULATOR.incomingPayment(creditorIban, amount, debtor.name(), TestData.peerIban(), scenario);
+        var found = new AtomicReference<IncomingTransfer>();
+        try {
+            await().atMost(Bounds.csmEventHandled()).pollInterval(Duration.ofMillis(100)).until(() -> {
+                found.set(incomingPayment(txId));
+                return found.get() != null;
+            });
+        } catch (ConditionTimeoutException e) {
+            throw new AssertionError("no incoming payment of txId " + txId + " within " + Bounds.csmEventHandled(), e);
+        }
+        payments.addIfAbsent(found.get().payment());
+        return found.get();
+    }
+
+    /** The orchestrator's incoming payment of {@code txId}, from whichever debtor agent; {@code null} if none yet. */
+    private static IncomingTransfer incomingPayment(String txId) throws SQLException {
+        try (var orchestrator = LocalDatabases.payments(); var statement = orchestrator.prepareStatement("""
+                SELECT payment_id, debtor_agent_bic FROM payments WHERE direction = 'INCOMING' AND tx_id = ?""")) {
+            statement.setString(1, txId);
+            try (var rs = statement.executeQuery()) {
+                return rs.next() ? new IncomingTransfer(txId, rs.getString(2), rs.getObject(1, UUID.class)) : null;
+            }
+        }
+    }
+
+    /** The orchestrator's state of {@code payment} once final, within {@code bound}: an incoming one has no API. */
+    protected static String finalState(UUID payment, Duration bound) {
+        var state = new AtomicReference<String>();
+        await().atMost(bound).pollInterval(Duration.ofMillis(100)).until(() -> {
+            state.set(orchestratorPayment(payment).state());
+            return state.get().equals("SETTLED") || state.get().equals("REJECTED");
+        });
+        return state.get();
+    }
+
+    /** The ledger's pending credit of an incoming {@code payment} ({@code GET /v1/pending-credits/{id}}). */
+    protected static Response pendingCredit(UUID payment) {
+        return LEDGER.get(null, "/v1/pending-credits/" + payment);
     }
 
     /** The exception case types this test opens on purpose ({@link #expectCase}); any other is a breach of INV-9. */
@@ -311,17 +385,19 @@ public abstract class PaymentSystemTest extends LedgerSystemTest {
 
     /** The payment's row in the orchestrator, as far as the CSM side needs it. */
     public record OrchestratorPayment(String txId, Instant acceptedAt, String state, Instant sendBy,
-            Instant deadlineAt) {}
+            Instant deadlineAt, String reasonCode) {}
 
-    /** The orchestrator's {@code txId}, acceptance, state, {@code sendBy} and deadline of {@code payment}, now. */
+    /** The orchestrator's {@code txId}, acceptance, state, {@code sendBy}, deadline and reason of a payment, now. */
     protected static OrchestratorPayment orchestratorPayment(UUID payment) throws SQLException {
         try (var orchestrator = LocalDatabases.payments(); var statement = orchestrator.prepareStatement(
-                "SELECT tx_id, accepted_at, state, send_by, deadline_at FROM payments WHERE payment_id = ?")) {
+                """
+                SELECT tx_id, accepted_at, state, send_by, deadline_at, reason_code FROM payments
+                 WHERE payment_id = ?""")) {
             statement.setObject(1, payment);
             try (var rs = statement.executeQuery()) {
                 rs.next();
                 return new OrchestratorPayment(rs.getString(1), rs.getTimestamp(2).toInstant(), rs.getString(3),
-                        instant(rs.getTimestamp(4)), instant(rs.getTimestamp(5)));
+                        instant(rs.getTimestamp(4)), instant(rs.getTimestamp(5)), rs.getString(6));
             }
         }
     }
@@ -494,22 +570,31 @@ public abstract class PaymentSystemTest extends LedgerSystemTest {
      * whatever another test class rejects meanwhile under the right one.
      */
     protected static RejectedCount rejectedOutgoing(String reason) {
+        return rejectedCount("OUTGOING", reason);
+    }
+
+    /** As {@link #rejectedOutgoing}, for an incoming payment: {@code tpe.payment.rejected{direction=INCOMING}}. */
+    protected static RejectedCount rejectedIncoming(String reason) {
+        return rejectedCount("INCOMING", reason);
+    }
+
+    private static RejectedCount rejectedCount(String direction, String reason) {
         var counts = new HashMap<String, Double>();
         for (String cause : CAUSES) {
-            counts.put(cause, rejected(reason, cause));
+            counts.put(cause, rejected(direction, reason, cause));
         }
-        return new RejectedCount(reason, Map.copyOf(counts));
+        return new RejectedCount(direction, reason, Map.copyOf(counts));
     }
 
     /** The {@code cause} tags of {@code tpe.payment.rejected} (25 §11): a business refusal, ours, the scheme's. */
     private static final List<String> CAUSES = List.of("BUSINESS", "TECHNICAL", "EXTERNAL");
 
     /** The counts of a reason under each {@code cause} at one moment. */
-    public record RejectedCount(String reason, Map<String, Double> byCause) {
+    public record RejectedCount(String direction, String reason, Map<String, Double> byCause) {
 
         /** The reason was counted under {@code cause} since this snapshot, and under no other cause. */
         public void assertTaggedOnce(String cause) {
-            RejectedCount now = rejectedOutgoing(reason);
+            RejectedCount now = rejectedCount(direction, reason);
             for (String tag : CAUSES) {
                 if (tag.equals(cause)) {
                     assertThat(now.byCause().get(tag)).as("tpe.payment.rejected{reason=%s,cause=%s}", reason, tag)
@@ -523,9 +608,30 @@ public abstract class PaymentSystemTest extends LedgerSystemTest {
         }
     }
 
-    private static double rejected(String reason, String cause) {
+    private static double rejected(String direction, String reason, String cause) {
         return Scrape.value(ORCHESTRATOR, "tpe_payment_rejected_total",
-                Map.of("direction", "OUTGOING", "reason", reason, "cause", cause));
+                Map.of("direction", direction, "reason", reason, "cause", cause));
+    }
+
+    /**
+     * The ledger's postings of {@code payment} on the CSM settlement account, as {@code <side> <amountMinor>}: INV-8's
+     * side of a payment through the CSM.
+     */
+    protected static List<String> csmSettlementPostings(UUID payment) throws SQLException {
+        try (var ledger = LocalDatabases.ledger(); var statement = ledger.prepareStatement("""
+                SELECT p.side || ' ' || p.amount_minor FROM postings p
+                  JOIN journal_entries e ON e.entry_id = p.entry_id
+                  JOIN accounts a ON a.account_id = p.account_id
+                 WHERE a.technical_code = 'CSM_SETTLEMENT' AND e.payment_id = ? ORDER BY p.posting_id""")) {
+            statement.setObject(1, payment);
+            var found = new ArrayList<String>();
+            try (var rs = statement.executeQuery()) {
+                while (rs.next()) {
+                    found.add(rs.getString(1));
+                }
+            }
+            return found;
+        }
     }
 
     /** The account's postings of {@code payment}, as {@code <entryType> <side> <amountMinor>}. */
@@ -597,8 +703,9 @@ public abstract class PaymentSystemTest extends LedgerSystemTest {
     }
 
     /**
-     * The ledger's part, then the test's payments, their transitions, cases, postings and recorded records, and the
-     * CSM side of its transfers: the gateway's records and journal, the simulator's received log.
+     * The ledger's part, then the test's payments, their transitions, cases, postings, holds, pending credits and
+     * recorded records, and the CSM side of its transfers, outgoing and incoming: the gateway's records and journal (an
+     * incoming one by {@code txId} and debtor agent), the simulator's received log.
      */
     @Override
     public String debugBundle() throws SQLException {
@@ -606,6 +713,24 @@ public abstract class PaymentSystemTest extends LedgerSystemTest {
         try (var orchestrator = LocalDatabases.payments(); var ledger = LocalDatabases.ledger();
                 var gateway = LocalDatabases.csm()) {
             List<String> transfers = transfersToPeers(orchestrator);
+            List<String> incoming = incomingTransactions(orchestrator);
+            bundle.append(SqlDump.ofKeys(gateway, "gateway incoming transfers", """
+                    SELECT debtor_agent_bic, tx_id, msg_id, received_at, answer_deadline, answer_status, answer_reason,
+                           answer_decided_by, answered_at, answer_msg_id, transmit_status, transmit_attempts,
+                           final_status, final_reason, final_at
+                      FROM incoming_transfers WHERE debtor_agent_bic || ':' || tx_id = ANY (?) ORDER BY received_at""",
+                    incoming));
+            bundle.append("== gateway journal of incoming transfers (GET /v1/journal?txId=&debtorAgentBic=)\n");
+            for (String transaction : incoming) {
+                String bic = transaction.substring(0, transaction.indexOf(':'));
+                String txId = transaction.substring(transaction.indexOf(':') + 1);
+                bundle.append(transaction).append('\t').append(GATEWAY_ADMIN.get(OPERATOR,
+                        "/v1/journal?txId=" + txId + "&debtorAgentBic=" + bic).body()).append('\n');
+            }
+            bundle.append("== simulator received log of incoming transfers (GET /sim/v1/received?txId=)\n");
+            for (String txId : incoming.stream().map(t -> t.substring(t.indexOf(':') + 1)).distinct().toList()) {
+                bundle.append(txId).append('\t').append(SIMULATOR.receivedLog(txId)).append('\n');
+            }
             bundle.append(SqlDump.ofKeys(gateway, "gateway outgoing transfers", """
                     SELECT tx_id, payment_id, msg_id, send_by, deadline_at, send_status, not_sent_reason,
                            transmit_status, transmit_attempts, delivered_at, final_status, final_reason, final_source,
@@ -637,6 +762,9 @@ public abstract class PaymentSystemTest extends LedgerSystemTest {
                     SELECT e.created_at, e.entry_id, e.entry_type, e.payment_id, p.account_id, p.side, p.amount_minor
                       FROM journal_entries e JOIN postings p ON p.entry_id = e.entry_id
                      WHERE e.payment_id = ANY (?) ORDER BY e.created_at, p.posting_id""", payments));
+            bundle.append(SqlDump.of(ledger, "ledger pending credits of the test's payments", """
+                    SELECT pending_credit_id, account_id, amount_minor, status, entry_id, finalised_at, tombstone
+                      FROM pending_credits WHERE pending_credit_id = ANY (?) ORDER BY created_at""", payments));
             bundle.append(SqlDump.of(ledger, "ledger holds of the test's payments", """
                     SELECT hold_id, account_id, amount_minor, status, entry_id, finalised_at, tombstone FROM holds
                      WHERE hold_id = ANY (?) ORDER BY created_at""", payments));

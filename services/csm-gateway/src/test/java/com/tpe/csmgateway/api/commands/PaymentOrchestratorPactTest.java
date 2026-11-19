@@ -7,6 +7,7 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 
 import au.com.dius.pact.consumer.MessagePactBuilder;
+import au.com.dius.pact.consumer.dsl.LambdaDslObject;
 import au.com.dius.pact.consumer.junit5.PactConsumerTestExt;
 import au.com.dius.pact.consumer.junit5.PactTestFor;
 import au.com.dius.pact.consumer.junit5.ProviderType;
@@ -15,6 +16,8 @@ import au.com.dius.pact.core.model.V4Interaction;
 import au.com.dius.pact.core.model.V4Pact;
 import au.com.dius.pact.core.model.annotations.Pact;
 import com.tpe.contracts.Direction;
+import com.tpe.contracts.AcceptCreditTransfer;
+import com.tpe.contracts.RejectCreditTransfer;
 import com.tpe.contracts.RequestPaymentStatus;
 import com.tpe.contracts.SendCreditTransfer;
 import com.tpe.csmgateway.application.answer.AnswerCoordinator;
@@ -24,6 +27,7 @@ import com.tpe.paymentdomain.Money;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.util.UUID;
+import java.util.function.Consumer;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -33,9 +37,9 @@ import org.mockito.ArgumentCaptor;
  * M-01, consumer csm-gateway (specs/20-testing-strategy.md §10.1, §10.2): the {@code SendCreditTransfer} of
  * payment-orchestrator on {@code csm.outbound.commands}, through the real listener and {@code ContractValidator} up
  * to the sending service, which is mocked. The body pins the fields the gateway reads and those the contract requires;
- * the times keep {@code acceptedAt < sendBy < deadlineAt}. {@code AcceptCreditTransfer} and
- * {@code RejectCreditTransfer}, which the gateway consumes already, join once payment-orchestrator produces them
- * (its incoming flow): a pact interaction its provider verification cannot produce would fail that verification.
+ * the times keep {@code acceptedAt < sendBy < deadlineAt}. Also the verdicts of an incoming transfer,
+ * {@code AcceptCreditTransfer} and {@code RejectCreditTransfer}, up to the answer coordinator, likewise mocked, and
+ * {@code RequestPaymentStatus} of an outgoing and an incoming transfer.
  */
 @ExtendWith(PactConsumerTestExt.class)
 @PactTestFor(providerName = PaymentOrchestratorPactTest.PROVIDER, providerType = ProviderType.ASYNCH,
@@ -48,14 +52,17 @@ class PaymentOrchestratorPactTest {
     private static final UUID EVENT = UUID.fromString("0192f0e4-6b1d-7c3a-9a55-4c1f3b2e9d21");
     private static final UUID PAYMENT = UUID.fromString("0192f0e4-6b1d-7c3a-9a55-4c1f3b2e9d10");
     private static final String TX_ID = "TPE01JAB3C4D5E6F7G8H9J0K1M2NP";
+    private static final String INCOMING_TX_ID = "PEER20261021000017";
+    /** A TxId: 1 to 35 characters of the ISO 20022 Max35Text the gateway takes. */
+    private static final String TX_ID_PATTERN = "[A-Za-z0-9]{1,35}";
     private static final String IBAN_PATTERN = "[A-Z]{2}[0-9]{2}[A-Z0-9]{11,30}";
     private static final String BIC_PATTERN = "[A-Z]{6}[A-Z0-9]{2}([A-Z0-9]{3})?";
     private static final String TIMESTAMP_PATTERN = "\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z";
 
     private final CreditTransferSending sending = mock(CreditTransferSending.class);
     private final PaymentStatusRequesting statusRequesting = mock(PaymentStatusRequesting.class);
-    private final CsmCommandListener listener = new CsmCommandListener(sending, statusRequesting,
-            mock(AnswerCoordinator.class));
+    private final AnswerCoordinator answers = mock(AnswerCoordinator.class);
+    private final CsmCommandListener listener = new CsmCommandListener(sending, statusRequesting, answers);
 
     @Pact(consumer = CONSUMER)
     V4Pact sendCreditTransfer(MessagePactBuilder builder) {
@@ -106,6 +113,61 @@ class PaymentOrchestratorPactTest {
                     command.stringValue("direction", "OUTGOING");
                     command.integerType("attempt", 2);
                     command.stringMatcher("requestedAt", TIMESTAMP_PATTERN, "2026-10-21T09:16:20.000Z");
+                }).build())
+                .toPact(V4Pact.class);
+    }
+
+    @Pact(consumer = CONSUMER)
+    V4Pact acceptCreditTransfer(MessagePactBuilder builder) {
+        return verdict(builder, "AcceptCreditTransfer: accept an incoming transfer", "AcceptCreditTransfer",
+                command -> { });
+    }
+
+    @Pact(consumer = CONSUMER)
+    V4Pact rejectCreditTransfer(MessagePactBuilder builder) {
+        return verdict(builder, "RejectCreditTransfer: reject an incoming transfer", "RejectCreditTransfer",
+                command -> command.stringMatcher("reasonCode", "[A-Z0-9]{4}", "AC01"));
+    }
+
+    @Test
+    @PactTestFor(pactMethod = "acceptCreditTransfer")
+    void PACT_M01_acceptCreditTransfer(V4Interaction.AsynchronousMessage message) {
+        listener.on(record(message));
+
+        var verdict = ArgumentCaptor.forClass(AcceptCreditTransfer.class);
+        verify(answers).accept(eq(EVENT), verdict.capture());
+        assertThat(verdict.getValue().paymentId().value()).isEqualTo(PAYMENT);
+        assertThat(verdict.getValue().txId().value()).isEqualTo(INCOMING_TX_ID);
+        assertThat(verdict.getValue().debtorAgentBic().value()).isEqualTo("PEERDEFFXXX");
+    }
+
+    @Test
+    @PactTestFor(pactMethod = "rejectCreditTransfer")
+    void PACT_M01_rejectCreditTransfer(V4Interaction.AsynchronousMessage message) {
+        listener.on(record(message));
+
+        var verdict = ArgumentCaptor.forClass(RejectCreditTransfer.class);
+        verify(answers).reject(eq(EVENT), verdict.capture());
+        assertThat(verdict.getValue().txId().value()).isEqualTo(INCOMING_TX_ID);
+        assertThat(verdict.getValue().debtorAgentBic().value()).isEqualTo("PEERDEFFXXX");
+        assertThat(verdict.getValue().reasonCode().code()).isEqualTo("AC01");
+    }
+
+    /** A verdict on an incoming transfer from the peer bank, with what {@code body} adds. */
+    private static V4Pact verdict(MessagePactBuilder builder, String description, String type,
+            Consumer<LambdaDslObject> body) {
+        return builder
+                .expectsToReceive(description)
+                .withMetadata(metadata -> metadata
+                        .add("tpe-message-type", type)
+                        .add("tpe-schema-version", "1")
+                        .uuid("tpe-event-id", EVENT))
+                .withContent(newJsonBody(command -> {
+                    command.uuid("paymentId", PAYMENT);
+                    command.stringMatcher("txId", TX_ID_PATTERN, INCOMING_TX_ID);
+                    command.stringMatcher("debtorAgentBic", BIC_PATTERN, "PEERDEFFXXX");
+                    command.stringMatcher("decidedAt", TIMESTAMP_PATTERN, "2026-10-21T09:16:00.600Z");
+                    body.accept(command);
                 }).build())
                 .toPact(V4Pact.class);
     }
