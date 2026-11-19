@@ -1,11 +1,14 @@
 package com.tpe.systemtests.payments;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.awaitility.Awaitility.await;
 
 import com.tpe.contracts.BlockReason;
+import com.tpe.systemtests.harness.Bounds;
 import com.tpe.systemtests.harness.PaymentSystemTest;
 import com.tpe.systemtests.harness.PaymentSystemTest.RejectedCount;
 import com.tpe.systemtests.harness.TestData;
+import java.time.Duration;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledIfSystemProperty;
@@ -214,9 +217,15 @@ class OutgoingRejectionIT extends PaymentSystemTest {
         }
     }
 
+    /**
+     * The hold released: by the saga's release action, which may run after the payment is {@code REJECTED}, within
+     * {@link Bounds#actionOverdue()}.
+     */
     private static void assertHoldReleased(UUID payment) {
-        var hold = hold(payment);
-        assertThat(hold.status()).as("hold of %s: %s", payment, hold.body()).isEqualTo(200);
-        assertThat(hold.body().get("status").asString()).isEqualTo("RELEASED");
+        await().atMost(Bounds.actionOverdue()).pollInterval(Duration.ofMillis(100)).untilAsserted(() -> {
+            var hold = hold(payment);
+            assertThat(hold.status()).as("hold of %s: %s", payment, hold.body()).isEqualTo(200);
+            assertThat(hold.body().get("status").asString()).isEqualTo("RELEASED");
+        });
     }
 }
