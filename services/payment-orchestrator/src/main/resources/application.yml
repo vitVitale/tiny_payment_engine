@@ -20,7 +20,7 @@ tpe:
     deadline-offset: 20s
     hold-give-up-margin: 2s
   incoming:
-    # specs/11-payment-orchestrator.md §7 (read by the incoming flow, M4); settlement-overdue > the CSM's beneficiary
+    # specs/11-payment-orchestrator.md §7; settlement-overdue > the CSM's beneficiary
     # delay (specs/20-testing-strategy.md §2.1)
     verdict-give-up-margin: 1s
     settlement-overdue: 30s

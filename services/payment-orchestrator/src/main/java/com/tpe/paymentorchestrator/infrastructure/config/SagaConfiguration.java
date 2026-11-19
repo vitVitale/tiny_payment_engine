@@ -35,6 +35,7 @@ import com.tpe.paymentorchestrator.application.runner.SagaTelemetry;
 import com.tpe.paymentorchestrator.application.runner.StepApplier;
 import com.tpe.paymentorchestrator.application.timers.InvestigationTimer;
 import com.tpe.paymentorchestrator.application.timers.OutgoingDeadlineTimer;
+import com.tpe.paymentorchestrator.application.timers.SettlementOverdueTimer;
 import com.tpe.paymentorchestrator.domain.payment.InvestigationPolicy;
 import com.tpe.paymentorchestrator.domain.payment.OutgoingTimings;
 import com.tpe.paymentorchestrator.domain.payment.TimerType;
@@ -189,8 +190,9 @@ class SagaConfiguration {
 
     @Bean
     IncomingCsmEvents incomingCsmEvents(Payments payments, SagaRunner runner, SagaTelemetry telemetry,
-            UuidV7Generator paymentIds, ObjectProvider<Spans> spans) {
-        return new IncomingCsmEvents(payments, runner, telemetry, paymentIds, spans.getIfAvailable(Spans::noop));
+            UuidV7Generator paymentIds, ObjectProvider<Spans> spans, IncomingProperties incoming) {
+        return new IncomingCsmEvents(payments, runner, telemetry, paymentIds, spans.getIfAvailable(Spans::noop),
+                incoming.settlementOverdue());
     }
 
     @Bean
@@ -223,17 +225,21 @@ class SagaConfiguration {
         return new OutgoingDeadlineTimer(payments, finalEvents, runner, investigation, telemetry, clock);
     }
 
+    @Bean
+    SettlementOverdueTimer settlementOverdueTimer(Payments payments, InvestigationTimer investigation,
+            SagaTelemetry telemetry, Clock clock) {
+        return new SettlementOverdueTimer(payments, investigation, telemetry, clock);
+    }
+
     /**
-     * Fires the due timers the service handles (§6.4), each in the poll's transaction; {@code FOR UPDATE SKIP LOCKED}
-     * spreads them over the instances. {@code SETTLEMENT_OVERDUE} waits until the incoming flow handles it (M4).
+     * Fires the due timers (§6.4), each in the poll's transaction; {@code FOR UPDATE SKIP LOCKED} spreads them over
+     * the instances.
      */
     @Bean
-    PollingWorker<DueTimer> timerWorker(OutgoingDeadlineTimer deadline, InvestigationTimer investigation,
-            JdbcTemplate jdbc, PlatformTransactionManager transactions, Clock clock, MeterRegistry registry,
-            ObjectProvider<Spans> spans) {
-        // enum names, safe to inline
-        String due = "status = 'SCHEDULED' AND type IN ('" + TimerType.OUTGOING_DEADLINE.name() + "', '"
-                + TimerType.INVESTIGATION_RETRY.name() + "') AND due_at <= ?";
+    PollingWorker<DueTimer> timerWorker(OutgoingDeadlineTimer deadline, SettlementOverdueTimer settlementOverdue,
+            InvestigationTimer investigation, JdbcTemplate jdbc, PlatformTransactionManager transactions, Clock clock,
+            MeterRegistry registry, ObjectProvider<Spans> spans) {
+        String due = "status = 'SCHEDULED' AND due_at <= ?";
         return new PollingWorker<>(new PollingWorker.Settings("payment-timers", 100, TIMER_INTERVAL, 1), jdbc,
                 transactions,
                 "SELECT timer_id, payment_id, type, due_at, attempt FROM payment_timers WHERE " + due
@@ -244,7 +250,7 @@ class SagaConfiguration {
                     switch (timer.type()) {
                         case OUTGOING_DEADLINE -> deadline.fire(timer);
                         case INVESTIGATION_RETRY -> investigation.fire(timer);
-                        case SETTLEMENT_OVERDUE -> throw new IllegalStateException("not picked: " + timer);
+                        case SETTLEMENT_OVERDUE -> settlementOverdue.fire(timer);
                     }
                 },
                 "SELECT min(due_at) FROM payment_timers WHERE " + due, clock, registry,
@@ -278,7 +284,6 @@ class SagaConfiguration {
      * @param verdictGiveUpMargin before the answer deadline, {@code CREATE_PENDING_CREDIT} gives up: verdict
      *     {@code REJECT MS03}
      * @param settlementOverdue after {@code AnswerSent(ACCP)}, a payment with no settlement goes into investigation
-     *     (read by the settlement-overdue timer, which follows)
      */
     @ConfigurationProperties("tpe.incoming")
     record IncomingProperties(Duration verdictGiveUpMargin, Duration settlementOverdue) {}

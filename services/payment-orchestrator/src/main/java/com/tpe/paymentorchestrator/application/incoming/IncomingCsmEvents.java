@@ -18,6 +18,8 @@ import com.tpe.paymentorchestrator.domain.payment.Payment;
 import com.tpe.paymentorchestrator.domain.payment.PaymentParty;
 import com.tpe.paymentorchestrator.domain.payment.PaymentState;
 import com.tpe.paymentorchestrator.domain.payment.RejectionCause;
+import com.tpe.paymentorchestrator.domain.payment.TimerType;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.Map;
 import org.slf4j.Logger;
@@ -32,7 +34,8 @@ import org.springframework.transaction.support.TransactionSynchronizationManager
  * <ul>
  *   <li>{@code CreditTransferReceived} → a new incoming payment, {@code RECEIVED}, its risk assessed next, unless its
  *       transaction (direction, debtor agent, {@code TxId}, ADR-010) has one;
- *   <li>{@code AnswerSent} → the payment follows the answer sent ({@link AnswerDecision}).
+ *   <li>{@code AnswerSent} → the payment follows the answer sent ({@link AnswerDecision}); an accepting one schedules
+ *       {@code SETTLEMENT_OVERDUE} at {@code sentAt + settlement-overdue}, unless the CSM's outcome is in already.
  * </ul>
  *
  * The next action runs after the commit.
@@ -51,14 +54,17 @@ public class IncomingCsmEvents {
     private final SagaTelemetry telemetry;
     private final UuidV7Generator paymentIds;
     private final Spans spans;
+    private final Duration settlementOverdue;
 
+    /** @param settlementOverdue {@code tpe.incoming.settlement-overdue}: after the accepting answer, the investigation */
     public IncomingCsmEvents(Payments payments, SagaRunner runner, SagaTelemetry telemetry,
-            UuidV7Generator paymentIds, Spans spans) {
+            UuidV7Generator paymentIds, Spans spans, Duration settlementOverdue) {
         this.payments = payments;
         this.runner = runner;
         this.telemetry = telemetry;
         this.paymentIds = paymentIds;
         this.spans = spans;
+        this.settlementOverdue = settlementOverdue;
     }
 
     /** Must run in the listener transaction. */
@@ -96,7 +102,14 @@ public class IncomingCsmEvents {
             case UNKNOWN -> throw new UnknownMessageTypeException(EVENTS, "AnswerSent " + answer.status());
         };
         switch (AnswerDecision.decide(payment, status, answer.reasonCode(), now)) {
-            case AnswerDecision.Moved moved -> apply(locked, moved, answer.decidedBy(), now);
+            case AnswerDecision.Moved moved -> {
+                apply(locked, moved, answer.decidedBy(), now);
+                if (moved.next().state() == PaymentState.ACCEPTED && !locked.csmOutcomeRecorded()) {
+                    // UC-06 7, 8b: no settlement by then, and the payment goes into investigation
+                    payments.scheduleTimer(payment.paymentId(), TimerType.SETTLEMENT_OVERDUE,
+                            answer.sentAt().plus(settlementOverdue), now);
+                }
+            }
             case AnswerDecision.NoOp noOp -> LOG.info("payment {} AnswerSent {}: {}", payment.paymentId().value(),
                     answer.status(), noOp.why());
             case AnswerDecision.Contradiction contradiction -> {

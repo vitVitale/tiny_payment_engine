@@ -290,6 +290,20 @@ public record Payment(
         return moveTo(PaymentState.ACCEPTED, null, pendingAction, null);
     }
 
+    /**
+     * The {@code SETTLEMENT_OVERDUE} timer fired with no CSM outcome recorded (§6.4, UC-06 8b): an accepted incoming
+     * payment with nothing pending goes {@code INVESTIGATING}, the status requests follow; the pending credit stays,
+     * the CSM may have settled.
+     *
+     * @return empty when the timer changes nothing: the payment moved on, or its credit is being confirmed
+     */
+    public Optional<Payment> settlementOverdue() {
+        if (direction != PaymentDirection.INCOMING || state != PaymentState.ACCEPTED || pendingAction != null) {
+            return Optional.empty();
+        }
+        return Optional.of(moveTo(PaymentState.INVESTIGATING, null, null, null));
+    }
+
     private void requireAwaitingVerdict() {
         if (direction != PaymentDirection.INCOMING || state != PaymentState.RECEIVED || incoming.verdict() != null) {
             throw new IllegalStateException("only a received incoming payment without verdict gets one, not " + this);

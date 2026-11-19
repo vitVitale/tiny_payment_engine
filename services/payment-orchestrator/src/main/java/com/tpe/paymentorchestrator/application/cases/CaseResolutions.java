@@ -29,7 +29,7 @@ import org.springframework.transaction.annotation.Transactional;
  * <ul>
  *   <li>{@code RETRY_INVESTIGATION}: the investigation restarts now, with a status request of the next attempt;
  *   <li>{@code CONFIRMED_SETTLED} / {@code CONFIRMED_REJECTED}: as if the CSM's event arrived: the hold is settled /
- *       released;
+ *       released, an incoming payment's credit confirmed / cancelled;
  *   <li>{@code RETRY_NOW}: the stuck action is due at once;
  *   <li>{@code ACKNOWLEDGED}: nothing else.
  * </ul>
