@@ -4,6 +4,14 @@ spring:
   config:
     # the bank directory (specs/01-shared-libraries.md §1.4): our own BIC
     import: ${tpe.bank-directory.location:classpath:bank-directory.yml}
+  kafka:
+    consumer:
+      # a gateway that dies without leaving the group holds its csm.outbound.commands partitions, and the verdicts on
+      # them, until its session ends: shorter than the answer deadline (specs/15-csm-gateway.md §4, #158); needs the
+      # broker's group.min.session.timeout.ms at most this
+      heartbeat-interval: 1s
+      properties:
+        session.timeout.ms: 3000
 
 management:
   endpoint:

@@ -36,9 +36,11 @@ import java.util.List;
 import java.util.Objects;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import org.springframework.beans.factory.InitializingBean;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
+import org.springframework.boot.kafka.autoconfigure.KafkaProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.web.client.RestClient;
@@ -205,6 +207,13 @@ class GatewayConfiguration {
             InboxGuard inbox, OutboxWriter outbox, GatewayMetrics metrics, Spans spans, Clock clock,
             UlidGenerator ulids) {
         return new AnswerCoordinator(transfers, answers, journal, inbox, outbox, metrics, spans, clock, ulids);
+    }
+
+    /** Startup fails unless a dead gateway's command partitions move on before the answer deadline (15 §4). */
+    @Bean
+    InitializingBean commandSessionBelowAnswerDeadline(KafkaProperties kafka, CsmProperties properties) {
+        return () -> CommandSessionBound.requireBelowAnswerDeadline(kafka.buildConsumerProperties(),
+                properties.answerDeadlineOffset());
     }
 
     @Bean

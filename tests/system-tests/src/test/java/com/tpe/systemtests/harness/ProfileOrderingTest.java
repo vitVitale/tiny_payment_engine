@@ -17,7 +17,10 @@ import org.junit.jupiter.params.provider.ValueSource;
  *   which the CSM and the orchestrator count alike;</li>
  *   <li>{@code answer-deadline-offset + answer-transmit-window ≤ sim.answer-timeout}: the gateway's last answer
  *   reaches the CSM before it gives up waiting;</li>
- *   <li>{@code settlement-overdue > sim.beneficiary-delay}: an ordinary settlement is never taken for a missing one.</li>
+ *   <li>{@code settlement-overdue > sim.beneficiary-delay}: an ordinary settlement is never taken for a missing
+ *   one;</li>
+ *   <li>the gateway's consumer {@code session.timeout.ms < answer-deadline-offset}, its {@code heartbeat-interval} a
+ *   third of the session at most: a dead gateway's verdicts move on before the answer deadline (15 §4).</li>
  * </ul>
  */
 class ProfileOrderingTest {
@@ -46,6 +49,12 @@ class ProfileOrderingTest {
         assertThat(required(orchestrator, "tpe.incoming.settlement-overdue"))
                 .as("settlement-overdue > sim.beneficiary-delay")
                 .isGreaterThan(required(simulator, "tpe.sim.beneficiary-delay"));
+
+        Duration session = required(gateway, "spring.kafka.consumer.properties.session.timeout.ms");
+        assertThat(session).as("gateway session.timeout.ms < answer-deadline-offset")
+                .isLessThan(required(gateway, "tpe.csm.answer-deadline-offset"));
+        assertThat(required(gateway, "spring.kafka.consumer.heartbeat-interval").multipliedBy(3))
+                .as("gateway heartbeat-interval <= session.timeout.ms / 3").isLessThanOrEqualTo(session);
     }
 
     private static Duration required(ServiceProfile profile, String key) {

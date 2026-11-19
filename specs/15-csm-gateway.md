@@ -67,6 +67,18 @@ connection uses mTLS; `local` / `test` use plain HTTP.
 | consume | `csm.outbound.commands` | `SendCreditTransfer`, `RequestPaymentStatus`, `AcceptCreditTransfer`, `RejectCreditTransfer` | `<type>:<debtorAgentBic>:<txId>[:<attempt>]` ([02 §3](02-messaging-contracts.md#3-csmoutboundcommands-orchestrator--gateway), ADR-010) |
 | produce | `csm.inbound.events` | `CreditTransferReceived`, `AnswerSent`, `CreditTransferSettled`, `CreditTransferRejected`, `CreditTransferNotSent` | — |
 
+A gateway that dies without leaving its consumer group (`SIGKILL`, OOM, node loss) holds its partitions of
+`csm.outbound.commands`, and the verdicts on them, until its consumer's session ends; so the session is shorter than
+the answer deadline (§6.2, §7): 3 s with a 1 s heartbeat (1.5 s / 500 ms in the `systemtest` profile, whose deadline
+is 2 s), and the gateway does not start otherwise. Brokers allow it ([02 §2](02-messaging-contracts.md#2-topics)).
+A verdict waits for the session at most once: with the orchestrator's verdict within 1.2 s
+([25 §3.3](25-service-levels.md#33-incoming-latency-budget-answer-deadline-5-s-verdict-give-up-4-s)), the moved
+partition is consumed before the 5 s deadline; the `systemtest` profile keeps the order, not that margin, and no
+system test kills a gateway under incoming load. A gateway paused longer than its session (a long GC pause,
+E2E-O-12's freeze, CH-13's `docker pause`) leaves the group and rejoins; its uncommitted commands are consumed again,
+which the inbox deduplicates. Static membership and the KIP-848 protocol do not help: both detect a dead member by
+its session as well ([#158](https://github.com/vitVitale/tiny_payment_engine/issues/158)).
+
 ## 5. Data model
 
 ```sql
@@ -307,6 +319,7 @@ journalled `pacs.008` to name it by) → journal note and alert (`tpe.csm.uncorr
 | `tpe.csm.transmit.lease` | `2s` |
 | `tpe.csm.transmit.poll-interval` | `50ms` (how often the transmit worker looks for due and expired rows, §6.5) |
 | `tpe.csm.timeouts.connect` / `.read` | `200ms` / `1s` |
+| `spring.kafka.consumer.properties.session.timeout.ms` / `spring.kafka.consumer.heartbeat-interval` | `3000` / `1s` (shorter than `answer-deadline-offset`, §4) |
 | `tpe.csm.mtls.*` | keystore / truststore, `prod` only |
 | `tpe.bank-directory.location` | see [01 §1.4](01-shared-libraries.md#14-bank-directory) (own BIC) |
 

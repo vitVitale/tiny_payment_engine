@@ -80,12 +80,10 @@ public abstract class PaymentSystemTest extends LedgerSystemTest {
         SIMULATOR = new SimulatorControl(simulator);
         // once at suite start, never during a run (20 §2)
         SIMULATOR.reset();
-        // a test stops it (E2E-O-21): on Windows by terminating it, so its consumer never leaves the group and the
-        // restarted one is assigned nothing until the old one's session times out; the broker's shortest session
-        // bounds that, a 1 s heartbeat keeps a frozen one (E2E-O-12, about 4 s) in its group
-        var gateway = new HashMap<>(Map.of(
-                "spring.kafka.consumer.properties.session.timeout.ms", "6000",
-                "spring.kafka.consumer.heartbeat-interval", "1s"));
+        // its own consumer session (1.5 s in the systemtest profile, below the answer deadline, #158) bounds how long
+        // a gateway stopped without leaving the group holds its partitions: E2E-O-21's on Windows, where stopping
+        // terminates it; one frozen longer (E2E-O-12, about 4 s) leaves the group and rejoins when thawed
+        var gateway = new HashMap<String, String>();
         if (Chaos.enabled()) {
             // CH-04: in the chaos run the gateways consume through their proxy (not the orchestrators'), and produce
             // directly
