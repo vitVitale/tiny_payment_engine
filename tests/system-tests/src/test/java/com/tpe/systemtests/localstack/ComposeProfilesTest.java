@@ -11,7 +11,7 @@ import org.yaml.snakeyaml.Yaml;
 /**
  * The compose file's profiles (specs/26-observability.md §13, issue #19): without a profile the stack is the
  * infrastructure of 00 §13 only; everything of the observability stack is behind {@code observability}, the Toxiproxy
- * of the chaos run (specs/20-testing-strategy.md §5, CH-03) behind {@code chaos}.
+ * the system tests produce through (specs/20-testing-strategy.md §4 E2E-I-06, §5 CH-03) behind {@code chaos}.
  */
 class ComposeProfilesTest {
 

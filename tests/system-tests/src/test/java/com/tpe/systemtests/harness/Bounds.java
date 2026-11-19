@@ -67,6 +67,32 @@ public final class Bounds {
                 .plus(HARNESS);
     }
 
+    /**
+     * How long E2E-I-06 holds the orchestrator's produce back: csm-gateway's {@code tpe.csm.answer-deadline-offset} and
+     * {@code tpe.csm.answer-transmit-window}, so the verdict reaches the gateway only after its deadline answer has
+     * been decided and sent. A delay, not an upper bound: derived from the same profile.
+     */
+    public static Duration verdictHeldPastAnswer() {
+        ServiceProfile gateway = ServiceProfile.systemtest(ServiceJar.CSM_GATEWAY);
+        return gateway.duration("tpe.csm.answer-deadline-offset").orElseThrow()
+                .plus(gateway.duration("tpe.csm.answer-transmit-window").orElseThrow());
+    }
+
+    /**
+     * From an incoming {@code pacs.008} the CSM settles without confirming to its payment {@code SETTLED} (E2E-I-08):
+     * our answer by csm-gateway's {@code tpe.csm.answer-deadline-offset}, the orchestrator's
+     * {@code tpe.incoming.settlement-overdue} after it, the first {@code tpe.investigation.backoff} value (a lost
+     * request is asked again), and the event's delivery.
+     */
+    public static Duration incomingSettledAfterInvestigation() {
+        ServiceProfile orchestrator = ServiceProfile.systemtest(ServiceJar.ORCHESTRATOR);
+        return ServiceProfile.systemtest(ServiceJar.CSM_GATEWAY).duration("tpe.csm.answer-deadline-offset")
+                .orElseThrow()
+                .plus(orchestrator.duration("tpe.incoming.settlement-overdue").orElseThrow())
+                .plus(investigationBackoff().getFirst())
+                .plus(eventDelivery(orchestrator));
+    }
+
     /** The orchestrator's {@code tpe.investigation.backoff} in the {@code systemtest} profile. */
     private static List<Duration> investigationBackoff() {
         List<Duration> backoff = ServiceProfile.systemtest(ServiceJar.ORCHESTRATOR)

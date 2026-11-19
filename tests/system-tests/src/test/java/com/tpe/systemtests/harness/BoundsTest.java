@@ -64,6 +64,27 @@ class BoundsTest {
                 .isEqualTo(Duration.ofMillis(500).plus(Bounds.eventDelivery(orchestrator)));
     }
 
+    /**
+     * E2E-I-06: a verdict held back by the gateway's answer deadline (2 s) and transmit window (1 s, 20 §2.1) reaches it
+     * after the deadline answer has gone out.
+     */
+    @Test
+    void aVerdictHeldPastTheAnswerDeadlineAndTransmitWindowIsLate() {
+        assertThat(Bounds.verdictHeldPastAnswer()).isEqualTo(Duration.ofSeconds(3));
+    }
+
+    /**
+     * E2E-I-08: our answer by the deadline (2 s), no confirmation for the settlement-overdue time (5 s), the first
+     * status request asked again after 500 ms if lost, then the event's delivery.
+     */
+    @Test
+    void anIncomingPaymentWithoutAConfirmationIsSettledAfterTheFirstStatusRequest() {
+        ServiceProfile orchestrator = ServiceProfile.systemtest(ServiceJar.ORCHESTRATOR);
+
+        assertThat(Bounds.incomingSettledAfterInvestigation()).isEqualTo(Duration.ofMillis(2_000 + 5_000 + 500)
+                .plus(Bounds.eventDelivery(orchestrator)));
+    }
+
     @Test
     void anActionIsOverdueAfterTheOrchestratorsLeaseAndLongestBackoff() {
         assertThat(Bounds.actionOverdue()).isEqualTo(Duration.ofSeconds(35));

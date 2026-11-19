@@ -71,8 +71,9 @@ jobs:
           distribution: temurin
           java-version: '25'
           cache: maven
+      # the orchestrators produce through the chaos profile's toxiproxy in every system-test run (E2E-I-06 slows it)
       - name: Start infrastructure
-        run: docker compose -f deploy/docker-compose.yml up -d --wait postgres kafka oauth2
+        run: docker compose -f deploy/docker-compose.yml --profile chaos up -d --wait postgres kafka oauth2 toxiproxy
       # the system tests (E2E-A-01, the @smoke E2E-O-01, -O-02, -O-07) start the services and the CSM simulator from
       # their jars; their own tests run in the build job
       - name: Package the services
@@ -106,8 +107,9 @@ jobs:
       # OBS-AC-02 … -04 use the sample workload. The modules' own tests ran in the build job.
       - name: Install the sample workload, the services and the harness's modules
         run: ./mvnw -B -pl tests/observability-sample,services/ledger-service,services/risk-service,services/vop-service,services/payment-orchestrator,services/payment-api,services/csm-gateway,simulators/csm-simulator,tests/system-tests -am install -DskipTests
+      # OBS-AC-01's harness produces through the chaos profile's toxiproxy, as every system-test run does
       - name: Start the infrastructure and the observability profile
-        run: docker compose -f deploy/docker-compose.yml --profile observability up -d --wait postgres kafka oauth2 alloy mimir loki tempo grafana observability-sample
+        run: docker compose -f deploy/docker-compose.yml --profile observability --profile chaos up -d --wait postgres kafka oauth2 toxiproxy alloy mimir loki tempo grafana observability-sample
       - name: Pipeline check
         run: ./mvnw -B -pl tests/system-tests verify -Dtpe.local-stack=true -Dtpe.observability-stack=true -Dit.test='PaymentObservabilityIT,ObservabilityPipelineIT' -Dtest=NoSuchTest -Dsurefire.failIfNoSpecifiedTests=false -Dfailsafe.failIfNoSpecifiedTests=false
       - name: Compose logs
