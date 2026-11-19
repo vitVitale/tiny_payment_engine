@@ -230,12 +230,31 @@ public abstract class PaymentSystemTest extends LedgerSystemTest {
      * its payment, the payment joins the checks.
      */
     protected IncomingTransfer received(String creditorIban, String amount, String scenario) {
+        return received(creditorIban, amount, scenario, null, null);
+    }
+
+    /**
+     * As {@link #received(String, String, String)}, as transaction {@code txId} of {@code debtorAgentBic} (ADR-010)
+     * where given: a new {@code txId}, and the peer bank, where {@code null}.
+     */
+    protected IncomingTransfer received(String creditorIban, String amount, String scenario, String txId,
+            String debtorAgentBic) {
         TestData.Customer debtor = TestData.newCustomer();
-        String txId = SIMULATOR.incomingPayment(creditorIban, amount, debtor.name(), TestData.peerIban(), scenario);
+        String sent = SIMULATOR.incomingPayment(creditorIban, amount, debtor.name(), TestData.peerIban(), scenario,
+                txId, debtorAgentBic);
+        return awaitIncoming(sent, debtorAgentBic);
+    }
+
+    /**
+     * The orchestrator's incoming payment of {@code txId} from {@code debtorAgentBic} (any debtor agent if
+     * {@code null}), once it has one, within {@link Bounds#csmEventHandled()}; it joins the checks.
+     */
+    protected IncomingTransfer awaitIncoming(String txId, String debtorAgentBic) {
         var found = new AtomicReference<IncomingTransfer>();
         try {
             await().atMost(Bounds.csmEventHandled()).pollInterval(Duration.ofMillis(100)).until(() -> {
-                found.set(incomingPayment(txId));
+                List<IncomingTransfer> all = incomingPayments(txId, debtorAgentBic);
+                found.set(all.isEmpty() ? null : all.getFirst());
                 return found.get() != null;
             });
         } catch (ConditionTimeoutException e) {
@@ -245,13 +264,54 @@ public abstract class PaymentSystemTest extends LedgerSystemTest {
         return found.get();
     }
 
-    /** The orchestrator's incoming payment of {@code txId}, from whichever debtor agent; {@code null} if none yet. */
-    private static IncomingTransfer incomingPayment(String txId) throws SQLException {
+    /**
+     * The orchestrator's incoming payments of {@code txId} from {@code debtorAgentBic} (from any debtor agent if
+     * {@code null}), now, oldest first.
+     */
+    protected static List<IncomingTransfer> incomingPayments(String txId, String debtorAgentBic) throws SQLException {
         try (var orchestrator = LocalDatabases.payments(); var statement = orchestrator.prepareStatement("""
-                SELECT payment_id, debtor_agent_bic FROM payments WHERE direction = 'INCOMING' AND tx_id = ?""")) {
+                SELECT payment_id, debtor_agent_bic FROM payments
+                 WHERE direction = 'INCOMING' AND tx_id = ? AND (CAST(? AS varchar) IS NULL OR debtor_agent_bic = ?)
+                 ORDER BY created_at""")) {
             statement.setString(1, txId);
+            statement.setString(2, debtorAgentBic);
+            statement.setString(3, debtorAgentBic);
+            var found = new ArrayList<IncomingTransfer>();
             try (var rs = statement.executeQuery()) {
-                return rs.next() ? new IncomingTransfer(txId, rs.getString(2), rs.getObject(1, UUID.class)) : null;
+                while (rs.next()) {
+                    found.add(new IncomingTransfer(txId, rs.getString(2), rs.getObject(1, UUID.class)));
+                }
+            }
+            return found;
+        }
+    }
+
+    /**
+     * csm-gateway's record of the incoming transaction ({@code incoming_transfers}): its answer, decided by whom, and
+     * its transmission, as {@code <answer_status> <answer_reason> <answer_decided_by> <transmit_status>}; {@code null}
+     * if it has none.
+     */
+    protected static String gatewayIncoming(String debtorAgentBic, String txId) throws SQLException {
+        try (var gateway = LocalDatabases.csm(); var statement = gateway.prepareStatement("""
+                SELECT answer_status || ' ' || coalesce(answer_reason, '-') || ' ' || answer_decided_by || ' '
+                       || transmit_status
+                  FROM incoming_transfers WHERE debtor_agent_bic = ? AND tx_id = ?""")) {
+            statement.setString(1, debtorAgentBic);
+            statement.setString(2, txId);
+            try (var rs = statement.executeQuery()) {
+                return rs.next() ? rs.getString(1) : null;
+            }
+        }
+    }
+
+    /** Whether csm-gateway's journal has an XML containing {@code text}, for any transaction. */
+    protected static boolean gatewayJournalContains(String text) throws SQLException {
+        try (var gateway = LocalDatabases.csm(); var statement = gateway.prepareStatement(
+                "SELECT EXISTS (SELECT 1 FROM message_journal WHERE strpos(xml, ?) > 0)")) {
+            statement.setString(1, text);
+            try (var rs = statement.executeQuery()) {
+                rs.next();
+                return rs.getBoolean(1);
             }
         }
     }

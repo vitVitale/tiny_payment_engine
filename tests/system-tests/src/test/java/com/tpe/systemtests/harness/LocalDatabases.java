@@ -24,6 +24,11 @@ public final class LocalDatabases {
         return DriverManager.getConnection(POSTGRES + "csm", "csm", "csm-local");
     }
 
+    /** risk-service's. */
+    public static Connection risk() throws SQLException {
+        return DriverManager.getConnection(POSTGRES + "risk", "risk", "risk-local");
+    }
+
     /** payment-orchestrator's. */
     public static Connection payments() throws SQLException {
         return DriverManager.getConnection(POSTGRES + "payments", "payments", "payments-local");

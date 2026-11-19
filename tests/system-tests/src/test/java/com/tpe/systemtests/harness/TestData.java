@@ -67,6 +67,11 @@ public final class TestData {
         return Math.max(jaroWinkler(a, b), jaroWinkler(sortedTokens(a), sortedTokens(b)));
     }
 
+    /** A {@code TxId} no other test uses, of a transaction a test names itself: 33 of the scheme's 35 characters. */
+    public static String newTxId() {
+        return "SYSTESTTX" + UUID.randomUUID().toString().replace("-", "").substring(0, 24).toUpperCase(Locale.ROOT);
+    }
+
     /**
      * IBAN {@code DE.. 10010010 99........}: our bank code, a valid checksum, an account number the ledger never gives
      * (its sequence is far from 9.9 billion). Personal data from now on, as every IBAN a test uses.
