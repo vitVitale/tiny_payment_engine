@@ -78,7 +78,9 @@ docker compose -f deploy/docker-compose.yml --profile observability up -d --wait
 - OTLP on `localhost:4317` (gRPC) / `4318` (HTTP): a service started on the host with
   `OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4317` sends its traces there. Only containers labelled
   `tpe.io/scrape=true` are scraped and have their logs collected.
-- `curl -X POST localhost:8095/sample/payments` handles a synthetic payment. The pipeline check (OBS-AC-01 … -04):
+- `curl -X POST localhost:8095/sample/payments` handles a synthetic payment. The pipeline check (OBS-AC-01 … -04)
+  pays through the system-test harness, so it needs the toxiproxy of profile `chaos` as well (`docker compose -f
+  deploy/docker-compose.yml --profile chaos up -d --wait toxiproxy`):
   `./mvnw -pl tests/system-tests -am verify -Dtpe.observability-stack=true`.
 
 Start a service against it with its `local` profile:
@@ -94,9 +96,12 @@ purpose: they work only against this stack ([00 §12.2](specs/00-engineering-bas
 Smoke check of the running stack (databases and roles, topics against
 [02 §2](specs/02-messaging-contracts.md#2-topics), token claims) and the ledger system tests (E2E-A-01, ending with
 the ledger invariants of [20 §3](specs/20-testing-strategy.md#3-global-invariants)); CI runs them as well. The system
-tests start ledger-service from its jar in profiles `local,systemtest`, so the same build packages it first:
+tests start ledger-service from its jar in profiles `local,systemtest`, so the same build packages it first. The
+payment-orchestrators they start produce to Kafka through the Toxiproxy of profile `chaos` (E2E-I-06 slows it), so
+start it with the rest of the stack:
 
 ```bash
+docker compose -f deploy/docker-compose.yml --profile chaos up -d --wait postgres kafka oauth2 toxiproxy
 ./mvnw -pl services/ledger-service,tests/system-tests -am verify -Dtpe.local-stack=true
 ```
 

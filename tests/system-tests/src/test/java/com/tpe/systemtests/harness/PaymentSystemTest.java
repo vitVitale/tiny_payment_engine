@@ -95,12 +95,10 @@ public abstract class PaymentSystemTest extends LedgerSystemTest {
         var orchestrator = new HashMap<>(Map.of(
                 "tpe.clients.risk.base-url", risk.toString(),
                 "tpe.clients.ledger.base-url", ledger.toString()));
-        if (Chaos.enabled()) {
-            // CH-03: every instance produces through the proxy, and consumes directly
-            KafkaProduceProxy.get();
-            orchestrator.put("spring.kafka.bootstrap-servers", KafkaProduceProxy.BOOTSTRAP);
-            orchestrator.put("spring.kafka.consumer.bootstrap-servers", "localhost:9092");
-        }
+        // every instance produces through the proxy, and consumes directly: CH-03 blocks it, E2E-I-06 slows it
+        KafkaProduceProxy.get();
+        orchestrator.put("spring.kafka.bootstrap-servers", KafkaProduceProxy.BOOTSTRAP);
+        orchestrator.put("spring.kafka.consumer.bootstrap-servers", "localhost:9092");
         ORCHESTRATOR = ServiceProcess.of(ServiceJar.ORCHESTRATOR, orchestrator).baseUrl();
         if (Chaos.enabled()) {
             // the second instance of each (20 §5); the simulator and payment-api call the first. CH-02 kills the
@@ -530,6 +528,11 @@ public abstract class PaymentSystemTest extends LedgerSystemTest {
     /** vop-service, for its metrics. */
     protected static URI vopService() {
         return VOP;
+    }
+
+    /** vop-service's process, which a test may stop and start again (E2E-I-13; its port and properties stay). */
+    protected static ServiceProcess vopServiceProcess() {
+        return ServiceProcess.of(ServiceJar.VOP);
     }
 
     /** The recorder of the payment topics. */

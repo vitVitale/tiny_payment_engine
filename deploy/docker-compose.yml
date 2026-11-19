@@ -1,5 +1,6 @@
 # Local stack (specs/00-engineering-baseline.md §13). Infrastructure only for now:
 #   docker compose -f deploy/docker-compose.yml up -d --wait postgres kafka oauth2
+# The system tests also need the toxiproxy of profile `chaos` (below).
 # Service images come with the first runnable services.
 name: tpe
 
@@ -30,7 +31,7 @@ services:
       KAFKA_CONTROLLER_QUORUM_VOTERS: 1@localhost:9093
       KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
       # PLAINTEXT for clients on the host, INTERNAL for containers on the compose network, CHAOS for host clients
-      # through the toxiproxy of profile `chaos` (advertised at its port, so they stay behind it; CH-03)
+      # through the toxiproxy of profile `chaos` (advertised at its port, so they stay behind it; CH-03, E2E-I-06)
       KAFKA_LISTENERS: PLAINTEXT://:9092,INTERNAL://:19092,CHAOS://:9094,CONTROLLER://:9093
       KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://localhost:9092,INTERNAL://kafka:19092,CHAOS://localhost:19094
       KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,INTERNAL:PLAINTEXT,CHAOS:PLAINTEXT,CONTROLLER:PLAINTEXT
@@ -74,9 +75,11 @@ services:
       timeout: 5s
       retries: 30
 
-  # ---- profile `chaos` (specs/20-testing-strategy.md §5, CH-02 / CH-03 until M5), off by default:
+  # ---- profile `chaos` (specs/20-testing-strategy.md §5, CH-02 / CH-03 until M5), off by default; every system-test
+  # run needs it as well:
   #   docker compose -f deploy/docker-compose.yml --profile chaos up -d --wait postgres kafka oauth2 toxiproxy
-  # the chaos run creates its proxy localhost:19094 -> kafka:9094 through the control API on 8474 and blocks it
+  # the system tests create its proxy localhost:19094 -> kafka:9094 through the control API on 8474, produce through it
+  # from the orchestrators, and block it (CH-03) or slow it (E2E-I-06)
   toxiproxy:
     profiles: [chaos]
     image: ghcr.io/shopify/toxiproxy:2.12.0
