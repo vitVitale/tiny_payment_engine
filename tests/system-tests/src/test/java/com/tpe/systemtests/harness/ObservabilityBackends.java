@@ -80,13 +80,40 @@ public final class ObservabilityBackends {
     public static Set<String> serviceNames(JsonNode trace) {
         Set<String> names = new HashSet<>();
         for (JsonNode batch : trace.get("batches")) {
-            for (JsonNode attribute : batch.get("resource").get("attributes")) {
-                if (attribute.get("key").asString().equals("service.name")) {
-                    names.add(attribute.get("value").get("stringValue").asString());
-                }
+            String name = serviceName(batch);
+            if (name != null) {
+                names.add(name);
             }
         }
         return names;
+    }
+
+    /** The service and kind ({@code SPAN_KIND_SERVER}, …) of a trace's root span. */
+    public record RootSpan(String service, String kind) {}
+
+    /** The span without a parent of a trace from {@link #tempoTrace}; {@code null} if it has none. */
+    public static RootSpan rootSpan(JsonNode trace) {
+        for (JsonNode batch : trace.get("batches")) {
+            for (JsonNode scope : batch.get("scopeSpans")) {
+                for (JsonNode span : scope.get("spans")) {
+                    JsonNode parent = span.get("parentSpanId");
+                    if (parent == null || parent.asString().isEmpty()) {
+                        return new RootSpan(serviceName(batch), span.get("kind").asString());
+                    }
+                }
+            }
+        }
+        return null;
+    }
+
+    /** The {@code service.name} of the resource of a trace's batch; {@code null} if it has none. */
+    private static String serviceName(JsonNode batch) {
+        for (JsonNode attribute : batch.get("resource").get("attributes")) {
+            if (attribute.get("key").asString().equals("service.name")) {
+                return attribute.get("value").get("stringValue").asString();
+            }
+        }
+        return null;
     }
 
     /** A backend directly, as tenant {@link #TENANT}. */

@@ -45,7 +45,8 @@ class SecurityConfiguration {
                 .csrf(AbstractHttpConfigurer::disable)
                 .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .authorizeHttpRequests(requests -> requests
-                        .requestMatchers("/actuator/health/**", "/v3/api-docs", "/v3/api-docs/**", "/error")
+                        .requestMatchers("/actuator/health/**", "/actuator/prometheus", "/v3/api-docs",
+                                "/v3/api-docs/**", "/error")
                         .permitAll()
                         // @InternalApi: network isolation only until M5 (00 §12.1, ADR-012)
                         .requestMatchers(InternalApi.POSTING_API_PATHS).permitAll()

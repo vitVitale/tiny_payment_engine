@@ -3,28 +3,32 @@ package com.tpe.systemtests.observability;
 import static com.tpe.systemtests.harness.ObservabilityBackends.exemplarTraceIds;
 import static com.tpe.systemtests.harness.ObservabilityBackends.lokiStreams;
 import static com.tpe.systemtests.harness.ObservabilityBackends.mimirValue;
+import static com.tpe.systemtests.harness.ObservabilityBackends.rootSpan;
 import static com.tpe.systemtests.harness.ObservabilityBackends.serviceNames;
 import static com.tpe.systemtests.harness.ObservabilityBackends.tempoTrace;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.awaitility.Awaitility.await;
 
+import com.tpe.systemtests.harness.Bounds;
 import com.tpe.systemtests.harness.ObservabilityBackends;
+import com.tpe.systemtests.harness.ObservabilityBackends.RootSpan;
 import com.tpe.systemtests.harness.PaymentSystemTest;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.UUID;
-import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledIfSystemProperty;
 import tools.jackson.databind.JsonNode;
 
 /**
- * OBS-AC-01 with a real outgoing payment (specs/26-observability.md §15, issue #126): the harness's services run as
- * host processes, which the local Alloy scrapes and tails through the harness's targets list and log files and whose
- * spans reach it on its OTLP port (§13). Within 60 s of the payment's {@code 202}: its log lines in Loki by
- * {@code payment_id}, their trace in Tempo across payment-api and payment-orchestrator, the trace's lines in Loki by
- * {@code trace_id}; its metrics in Mimir: the exemplar of its submit's latency is that trace, and the orchestrator's
- * count of ended payments has moved. The incoming payment joins with M4.
+ * OBS-AC-01 with a real outgoing and a real incoming payment (specs/26-observability.md §15, issues #126, #145): the
+ * harness's services run as host processes, which the local Alloy scrapes and tails through the harness's targets
+ * list and log files and whose spans reach it on its OTLP port (§13). Within 60 s of the payment's {@code 202}, or of
+ * the simulator's send for the incoming one: its log lines in Loki by {@code payment_id}, their trace in Tempo, the
+ * trace's lines in Loki by {@code trace_id}, its metrics in Mimir. The outgoing trace spans payment-api and
+ * payment-orchestrator, and the exemplar of its submit's latency is that trace; the incoming one starts at csm-gateway
+ * on the {@code pacs.008} and spans payment-orchestrator, and the exemplar of its answer margin is that trace. Either
+ * way the orchestrator's count of ended payments has moved.
  */
 @EnabledIfSystemProperty(named = "tpe.local-stack", matches = "true",
         disabledReason = "needs the compose stack; run with -Dtpe.local-stack=true")
@@ -48,27 +52,69 @@ class PaymentObservabilityIT extends PaymentSystemTest {
         UUID payment = paidToPeer(payer, peerPayee("ACCEPT"), "OBS-AC-01");
         Instant accepted = Instant.now();
 
-        var traceId = new AtomicReference<String>();
         await().atMost(Duration.between(Instant.now(), accepted.plus(WITHIN))).pollInterval(POLL)
                 .ignoreExceptions().untilAsserted(() -> {
-                    // the orchestrator's lines carry the payment's id (26 §4.3); payment-api logs none of its own
-                    JsonNode byPayment = lokiStreams("{service_name=\"payment-orchestrator\"} | payment_id=\""
-                            + payment + "\"", accepted.minus(BEFORE), Instant.now());
-                    assertThat(byPayment).as("the orchestrator's lines of the payment in Loki").isNotEmpty();
-                    traceId.set(byPayment.get(0).get("stream").get("trace_id").asString());
-                    assertThat(lokiStreams("{service_namespace=\"tpe\"} | trace_id=\"" + traceId.get() + "\"",
-                            accepted.minus(BEFORE), Instant.now())).as("the trace's lines in Loki").isNotEmpty();
-                    JsonNode trace = tempoTrace(traceId.get());
-                    assertThat(trace).as("trace %s in Tempo", traceId.get()).isNotNull();
-                    assertThat(serviceNames(trace)).contains("payment-api", "payment-orchestrator");
+                    String traceId = traceInLokiAndTempo(payment, accepted);
+                    assertThat(serviceNames(tempoTrace(traceId))).contains("payment-api", "payment-orchestrator");
                     // its metrics: the latency sample of its submit, whose exemplar is its trace (ADR-013)
                     assertThat(exemplarTraceIds("http_server_requests_seconds_bucket{application=\"payment-api\","
                             + "uri=\"/v1/payments\",method=\"POST\"}", accepted.minus(BEFORE), Instant.now()))
-                            .as("payment-api's submit in Mimir, its exemplar the trace").contains(traceId.get());
+                            .as("payment-api's submit in Mimir, its exemplar the trace").contains(traceId);
                     assertThat(outcomesInMimir()).as("the orchestrator's outcomes in Mimir")
                             .isGreaterThan(outcomesBefore);
                 });
         assertThat(finalStatus(payer, payment).get("status").asString()).isEqualTo("ACSC");
+    }
+
+    @Test
+    void OBS_AC_01_mimirLokiAndTempoHoldARealIncomingPaymentWithin60s() {
+        await().atMost(ObservabilityBackends.MIMIR_STARTUP).ignoreExceptions().until(ObservabilityBackends::mimirReady);
+        double outcomesBefore = outcomesInMimir();
+        double answersBefore = answersByVerdictInMimir();
+        Party creditor = customer(0);
+
+        Instant sent = Instant.now();
+        IncomingTransfer transfer = received(creditor.iban(), "12.34", "ACCEPT");
+
+        await().atMost(Duration.between(Instant.now(), sent.plus(WITHIN))).pollInterval(POLL)
+                .ignoreExceptions().untilAsserted(() -> {
+                    String traceId = traceInLokiAndTempo(transfer.payment(), sent);
+                    JsonNode trace = tempoTrace(traceId);
+                    assertThat(serviceNames(trace)).contains("csm-gateway", "payment-orchestrator");
+                    // rooted at the gateway's server span of the pacs.008 request (26 §5.1)
+                    assertThat(rootSpan(trace)).as("the trace's root span")
+                            .isEqualTo(new RootSpan("csm-gateway", "SPAN_KIND_SERVER"));
+                    // its metrics: the margin of its answer, whose exemplar is its trace (26 §5.4), and the answer
+                    assertThat(exemplarTraceIds("tpe_csm_answer_margin_seconds_bucket{application=\"csm-gateway\"}",
+                            sent.minus(BEFORE), Instant.now()))
+                            .as("csm-gateway's answer margin in Mimir, its exemplar the trace").contains(traceId);
+                    assertThat(answersByVerdictInMimir()).as("csm-gateway's answers by VERDICT in Mimir")
+                            .isGreaterThan(answersBefore);
+                    assertThat(outcomesInMimir()).as("the orchestrator's outcomes in Mimir")
+                            .isGreaterThan(outcomesBefore);
+                });
+        assertThat(finalState(transfer.payment(), Bounds.paymentFinal())).isEqualTo("SETTLED");
+    }
+
+    /**
+     * The trace of {@code payment}, asserted there since {@code since}: the orchestrator's lines of the payment in Loki
+     * by {@code payment_id} (26 §4.3; payment-api and csm-gateway log none of their own), the trace's lines in Loki by
+     * {@code trace_id}, the trace in Tempo.
+     */
+    private static String traceInLokiAndTempo(UUID payment, Instant since) {
+        JsonNode byPayment = lokiStreams("{service_name=\"payment-orchestrator\"} | payment_id=\"" + payment + "\"",
+                since.minus(BEFORE), Instant.now());
+        assertThat(byPayment).as("the orchestrator's lines of the payment in Loki").isNotEmpty();
+        String traceId = byPayment.get(0).get("stream").get("trace_id").asString();
+        assertThat(lokiStreams("{service_namespace=\"tpe\"} | trace_id=\"" + traceId + "\"", since.minus(BEFORE),
+                Instant.now())).as("the trace's lines in Loki").isNotEmpty();
+        assertThat(tempoTrace(traceId)).as("trace %s in Tempo", traceId).isNotNull();
+        return traceId;
+    }
+
+    /** csm-gateway's answers decided by our verdict, as Mimir has them now. */
+    private static double answersByVerdictInMimir() {
+        return mimirValue("sum(tpe_csm_answer_total{application=\"csm-gateway\",decidedBy=\"VERDICT\"})");
     }
 
     /** The orchestrator's payments ended, as Mimir has them now. */

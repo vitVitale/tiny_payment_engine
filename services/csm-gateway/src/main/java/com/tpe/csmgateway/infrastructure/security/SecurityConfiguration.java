@@ -46,7 +46,8 @@ class SecurityConfiguration {
                 .csrf(AbstractHttpConfigurer::disable)
                 .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .authorizeHttpRequests(requests -> requests
-                        .requestMatchers("/actuator/health/**", "/v3/api-docs", "/v3/api-docs/**", "/error")
+                        .requestMatchers("/actuator/health/**", "/actuator/prometheus", "/v3/api-docs",
+                                "/v3/api-docs/**", "/error")
                         .permitAll()
                         // the CSM transport: mTLS in prod, plain HTTP in local / test (specs/15-csm-gateway.md §3.1)
                         .requestMatchers(HttpMethod.POST, "/csm/v1/inbound").permitAll()
