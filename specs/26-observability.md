@@ -509,8 +509,11 @@ M5 performance-run measurements.
 
 - **OBS-AC-01** Pipeline conformance (CI, compose `observability` profile): after one outgoing and one incoming
   payment, Mimir, Loki and Tempo each hold that run's data within 60 s. From M3 with a real outgoing payment through
-  the system-test harness (its trace, its log lines by `payment_id` / `trace_id`, its metrics), counted from its
-  `202`; the incoming one joins with M4.
+  the system-test harness (its trace across payment-api and payment-orchestrator, its log lines by `payment_id` /
+  `trace_id`, its metrics, the exemplar of its submit's latency being its trace), counted from its `202`; from M4
+  with a real incoming payment as well, counted from the simulator's send: its trace rooted at csm-gateway's server
+  span of the `pacs.008` and across payment-orchestrator, its log lines by `payment_id` / `trace_id`, its metrics
+  (`tpe.csm.answer` by `decidedBy`, the exemplar of `tpe.csm.answer.margin` being its trace).
 - **OBS-AC-02** Every series named by the telemetry contract test exists in Mimir with the identical name and label
   set, including `le` buckets at every SLO threshold; no series in Mimir has a label outside §3 and the allow-list.
 - **OBS-AC-03** A latency histogram sample in Mimir carries an exemplar whose trace id resolves in Tempo.
