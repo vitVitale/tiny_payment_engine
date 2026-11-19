@@ -1,5 +1,12 @@
 # Profile systemtest (specs/20-testing-strategy.md §2.1): short deadlines keep the system tests fast, in the order of
 # the production values: answer-deadline-offset + answer-transmit-window <= the simulator's answer-timeout.
+spring:
+  kafka:
+    consumer:
+      # the session stays shorter than the shortened answer deadline (specs/15-csm-gateway.md §4, #158)
+      heartbeat-interval: 500ms
+      properties:
+        session.timeout.ms: 1500
 tpe:
   csm:
     answer-deadline-offset: 2s

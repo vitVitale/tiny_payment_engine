@@ -72,19 +72,30 @@ public final class ServiceProfile {
         return Optional.empty();
     }
 
+    /** The value at {@code key}; a map key may hold dots itself, as Kafka client properties do. */
     private static Object lookup(Map<String, Object> tree, String key) {
         Object node = tree;
-        for (String part : key.split("\\.")) {
-            if (!(node instanceof Map<?, ?> map)) {
+        String rest = key;
+        while (node instanceof Map<?, ?> map) {
+            if (map.containsKey(rest)) {
+                node = map.get(rest);
+                return node instanceof Map<?, ?> ? null : node;
+            }
+            int dot = rest.indexOf('.');
+            if (dot < 0) {
                 return null;
             }
-            node = map.get(part);
+            node = map.get(rest.substring(0, dot));
+            rest = rest.substring(dot + 1);
         }
-        return node instanceof Map<?, ?> ? null : node;
+        return null;
     }
 
-    /** Spring Boot's simple format ({@code 500ms}, {@code 5s}, …) or ISO-8601. */
+    /** Spring Boot's simple format ({@code 500ms}, {@code 5s}, …), a bare number of milliseconds, or ISO-8601. */
     static Duration parse(String value) {
+        if (value.trim().matches("\\d+")) {
+            return Duration.ofMillis(Long.parseLong(value.trim()));
+        }
         var simple = SIMPLE_DURATION.matcher(value.trim());
         if (!simple.matches()) {
             return Duration.parse(value.trim());

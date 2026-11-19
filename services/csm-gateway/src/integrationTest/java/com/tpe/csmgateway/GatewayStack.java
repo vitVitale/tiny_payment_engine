@@ -53,7 +53,9 @@ public abstract class GatewayStack {
     protected static final MutableClock CLOCK = new MutableClock(START);
 
     protected static final PostgreSQLContainer POSTGRES = new PostgreSQLContainer("postgres:17.6-alpine");
-    protected static final KafkaContainer KAFKA = new KafkaContainer("apache/kafka:4.1.0");
+    /** Allows the gateway's session of 3 s (specs/15-csm-gateway.md §4): the broker's default minimum is 6 s. */
+    protected static final KafkaContainer KAFKA = new KafkaContainer("apache/kafka:4.1.0")
+            .withEnv("KAFKA_GROUP_MIN_SESSION_TIMEOUT_MS", "3000");
 
     /** The CSM's {@code POST /csm/v1/messages}. */
     protected static final WireMockServer CSM = new WireMockServer(WireMockConfiguration.options().dynamicPort());

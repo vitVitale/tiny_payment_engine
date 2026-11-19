@@ -2,7 +2,10 @@ package com.tpe.systemtests.localstack;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.tpe.systemtests.harness.ServiceJar;
+import com.tpe.systemtests.harness.ServiceProfile;
 import java.io.IOException;
+import java.time.Duration;
 import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.Test;
@@ -59,6 +62,18 @@ class ComposeProfilesTest {
         assertThat(kafka.get("KAFKA_LISTENER_SECURITY_PROTOCOL_MAP").toString())
                 .contains("CHAOS_CONSUME:PLAINTEXT");
         assertThat((List<Object>) services.get("toxiproxy").get("ports")).contains("19095:19095");
+    }
+
+    /** The broker allows csm-gateway's shortest consumer session, the systemtest one (specs/15-csm-gateway.md §4). */
+    @Test
+    @SuppressWarnings("unchecked")
+    void kafkaAllowsTheGatewaysSessionShorterThanTheAnswerDeadline() throws IOException {
+        Map<String, Object> kafka = (Map<String, Object>) services().get("kafka").get("environment");
+        Duration minimum = Duration.ofMillis(
+                Long.parseLong(kafka.get("KAFKA_GROUP_MIN_SESSION_TIMEOUT_MS").toString()));
+
+        assertThat(minimum).isLessThanOrEqualTo(ServiceProfile.systemtest(ServiceJar.CSM_GATEWAY)
+                .duration("spring.kafka.consumer.properties.session.timeout.ms").orElseThrow());
     }
 
     @Test

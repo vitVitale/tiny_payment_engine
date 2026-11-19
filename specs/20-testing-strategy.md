@@ -70,6 +70,7 @@ Short deadlines keep the suite fast. They keep the ordering of the production va
 | orchestrator | `tpe.investigation.backoff` / `budget` | `500ms,1s` / `10s` | `5s,…` / `1h` | E2E-O-11 |
 | csm-gateway | `tpe.csm.answer-deadline-offset` | `2s` | `5s` | |
 | csm-gateway | `tpe.csm.answer-transmit-window` | `1s` | `1s` | counted from `answer_deadline`; deadline + window must not exceed the simulator `answer-timeout` |
+| csm-gateway | `spring.kafka.consumer.properties.session.timeout.ms` / `heartbeat-interval` | `1500` / `500ms` | `3000` / `1s` | session shorter than `answer-deadline-offset` ([15 §4](15-csm-gateway.md#4-messaging)); the compose broker allows 1.5 s |
 | csm-simulator | `tpe.sim.timeout-deadline` / `answer-timeout` | `6s` / `3s` | `20s` / `6s` | equal to the orchestrator deadline, as in production |
 | vop-service | `tpe.vop.reference-validity` | `5s` | `30m` | E2E-O-17 (expired reference) |
 | risk-service | `tpe.risk.sanctions.poll-interval` | `1s` | `15m` | E2E-O-06, -I-11, -S-01, -S-03 |
@@ -78,7 +79,8 @@ Short deadlines keep the suite fast. They keep the ordering of the production va
 
 Ordering rule, checked by a unit test over the default and the `systemtest` profile files: `send-by-offset < deadline-offset =
 sim.timeout-deadline`; `answer-deadline-offset + answer-transmit-window ≤ sim.answer-timeout`;
-`settlement-overdue > sim.beneficiary-delay`.
+`settlement-overdue > sim.beneficiary-delay`; the gateway's `session.timeout.ms < answer-deadline-offset`, its
+`heartbeat-interval` at most a third of it.
 
 Performance runs (§6) use the **default** values, never this profile.
 
@@ -201,9 +203,9 @@ each direction the scenario needs: both for CH-02, outgoing for CH-03, incoming 
 `-Pchaos`, `@Tag("chaos")`). The orchestrators produce to Kafka through Toxiproxy (a listener of its own, advertised at
 the proxy) and consume directly; the gateways consume through a second proxy on a second such listener and produce
 directly. CH-02 kills (`SIGKILL`) the second gateway, which the CSM never calls, at a moment when it has a `pacs.008`
-in flight on a link slowed to 700 ms; its "no `DEADLINE` answers" covers the incoming payments of the load
-([#158](https://github.com/vitVitale/tiny_payment_engine/issues/158): a killed instance's command partitions wait for
-its consumer's session timeout, past the answer deadline). CH-03's `AB03` covers the payments whose
+in flight on a link slowed to 700 ms; its "no `DEADLINE` answers" covers the incoming payments of the load, whose
+verdicts on a killed instance's command partitions move on once its consumer's session ends, before the answer
+deadline ([15 §4](15-csm-gateway.md#4-messaging)). CH-03's `AB03` covers the payments whose
 `SendCreditTransfer` the block held past `sendBy` (accepted in it, `sendBy` before its end); one produced before the
 block may settle although its `sendBy` fell in it. CH-04 delays the consumption by cutting the gateways' consume link
 for 15 s, not by a latency: one past the 5 s answer deadline would also hold the consumers' heartbeats past their

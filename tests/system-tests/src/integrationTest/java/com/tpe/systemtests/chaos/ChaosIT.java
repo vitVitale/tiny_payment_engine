@@ -90,9 +90,9 @@ class ChaosIT extends PaymentSystemTest {
      * CSM, and started again; the first is always up. What the killed one had claimed is taken over by the other once
      * its 2 s lease runs out, before {@code sendBy}: every payment settles, none ends {@code AB03}, none goes into
      * investigation at its deadline. The load has incoming payments as well: each is answered by our verdict, none by
-     * the gateway's answer deadline ({@code DEADLINE}), and settled. Not so yet: the verdicts on the killed instance's
-     * partitions of {@code csm.outbound.commands} wait for its consumer's session timeout, which is longer than the
-     * answer deadline, so the few received at a kill are answered {@code DEADLINE} (issue #158).
+     * the gateway's answer deadline ({@code DEADLINE}), and settled: the verdicts on the killed instance's partitions
+     * of {@code csm.outbound.commands} move to the other once its consumer's session (3 s) ends, before the answer
+     * deadline (specs/15-csm-gateway.md §4, #158).
      */
     @Test
     void CH_02_aGatewayKilledMidSendLeavesItsTransmissionsToTheOtherBeforeSendBy() throws Exception {
@@ -136,9 +136,7 @@ class ChaosIT extends PaymentSystemTest {
             }
             assertThat(state).as("%s answered by our verdict", transfer).isEqualTo("SETTLED");
         }
-        // a killed instance's command partitions wait for its consumer's session timeout, past the answer deadline:
-        // issue #158 decides whether the gateway's failover gets faster or the scenario's expectation changes
-        assertThat(byDeadline).as("incoming payments of the load answered by DEADLINE (#158)").isEmpty();
+        assertThat(byDeadline).as("incoming payments of the load answered by DEADLINE").isEmpty();
     }
 
     /**

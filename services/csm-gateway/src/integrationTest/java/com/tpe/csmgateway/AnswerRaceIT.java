@@ -93,7 +93,9 @@ class AnswerRaceIT {
     private static final Duration QUIET = Duration.ofSeconds(4);
 
     private static final PostgreSQLContainer POSTGRES = new PostgreSQLContainer("postgres:17.6-alpine");
-    private static final KafkaContainer KAFKA = new KafkaContainer("apache/kafka:4.1.0");
+    /** Allows the gateway's session of 3 s (specs/15-csm-gateway.md §4): the broker's default minimum is 6 s. */
+    private static final KafkaContainer KAFKA = new KafkaContainer("apache/kafka:4.1.0")
+            .withEnv("KAFKA_GROUP_MIN_SESSION_TIMEOUT_MS", "3000");
     private static final WireMockServer CSM = new WireMockServer(WireMockConfiguration.options().dynamicPort());
 
     private static final List<ConfigurableApplicationContext> INSTANCES = new ArrayList<>();

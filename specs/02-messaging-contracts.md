@@ -31,10 +31,14 @@ All asynchronous communication. Topics and ownership come from
 | `accounts.events` | `accountId` | 6 / 3 | ∞ | **compact** | ledger-service → vop-service, risk-service |
 | `<topic>.dlt` | as source | 1 | 30 d | delete | `messaging` lib → operations tooling |
 
-Replication factor 3 and `min.insync.replicas=2` in production, 1 locally. The producer / consumer column is also the
-access rule: Kafka ACLs are generated from it ([ADR-015](../architecture/decisions/ADR-015-kafka-authentication-and-acls.md)),
-and a new producer or consumer changes this table and `deploy/kafka/topics.yml` together. Consumer groups: `<service>` (e.g.
-`csm-gateway`). Partition count changes are forbidden once in use (they break per-key ordering).
+Replication factor 3 and `min.insync.replicas=2` in production, 1 locally. Brokers allow consumer sessions from 3 s
+(`group.min.session.timeout.ms=3000`; 1.5 s locally, for the `systemtest` profile): csm-gateway's session on
+`csm.outbound.commands` is shorter than the answer deadline ([15 §4](15-csm-gateway.md#4-messaging)).
+
+The producer / consumer column is also the access rule: Kafka ACLs are generated from it
+([ADR-015](../architecture/decisions/ADR-015-kafka-authentication-and-acls.md)), and a new producer or consumer
+changes this table and `deploy/kafka/topics.yml` together. Consumer groups: `<service>` (e.g. `csm-gateway`).
+Partition count changes are forbidden once in use (they break per-key ordering).
 
 `accounts.events` is compacted so a new projection can be rebuilt from the topic. Therefore **every account event
 carries the full current account snapshot** (§5), and consumers upsert by `accountId` if `revision` is newer than
