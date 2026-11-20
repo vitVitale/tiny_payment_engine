@@ -285,7 +285,7 @@ class RiskServicePactTest {
     }
 
     /** An interaction's example payment; {@code n} picks its IBANs. */
-    private record Example(String paymentId, long amountMinor, int n) {
+    record Example(String paymentId, long amountMinor, int n) {
 
         String txId() {
             return "TPE01JABCDEFGHJKMNPQRST000" + n;

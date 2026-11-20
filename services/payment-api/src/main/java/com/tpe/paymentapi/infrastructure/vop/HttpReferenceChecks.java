@@ -53,6 +53,9 @@ public class HttpReferenceChecks implements ReferenceChecks {
             Failure failure = HttpFailures.of(e);
             return new Unavailable(failure, "vop-service not reached: " + failure);
         } catch (RestClientException e) {
+            if (HttpFailures.cutOff(e)) {
+                return new Unavailable(Failure.TIMEOUT, "vop-service answer cut off");
+            }
             throw unexpected("an unreadable answer");
         }
         if (response != null && response.valid() && response.result() != null) {

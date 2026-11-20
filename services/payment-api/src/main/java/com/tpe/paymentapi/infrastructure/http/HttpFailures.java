@@ -1,12 +1,14 @@
 package com.tpe.paymentapi.infrastructure.http;
 
 import com.tpe.paymentapi.application.submission.Failure;
+import java.io.IOException;
 import java.net.ConnectException;
 import java.net.http.HttpConnectTimeoutException;
 import java.nio.channels.UnresolvedAddressException;
 import java.util.Optional;
 import java.util.Set;
 import org.springframework.web.client.ResourceAccessException;
+import org.springframework.web.client.RestClientException;
 
 /** How the clients tell the {@link Failure}s apart (specs/00-engineering-baseline.md §8). */
 public final class HttpFailures {
@@ -24,6 +26,19 @@ public final class HttpFailures {
             }
         }
         return Failure.TIMEOUT;
+    }
+
+    /**
+     * {@code e}, raised reading an answer, comes from an I/O failure: the answer was cut off by a read timeout or a
+     * lost connection, a {@link Failure#TIMEOUT}. Not so for a body read whole that makes no answer.
+     */
+    public static boolean cutOff(RestClientException e) {
+        for (Throwable cause = e.getCause(); cause != null; cause = cause.getCause()) {
+            if (cause instanceof IOException) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /** A {@code 5xx} as a failure; empty for any other status. */

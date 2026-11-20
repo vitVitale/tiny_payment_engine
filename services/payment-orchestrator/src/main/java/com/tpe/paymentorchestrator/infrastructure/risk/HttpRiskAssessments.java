@@ -11,6 +11,7 @@ import com.tpe.paymentorchestrator.application.risk.RiskAssessments;
 import com.tpe.paymentorchestrator.domain.payment.Payment;
 import com.tpe.paymentorchestrator.domain.payment.PaymentDirection;
 import com.tpe.paymentorchestrator.domain.payment.PaymentParty;
+import com.tpe.paymentorchestrator.infrastructure.http.CutOffAnswers;
 import java.net.http.HttpClient;
 import java.time.Duration;
 import java.util.Set;
@@ -25,9 +26,9 @@ import org.springframework.web.client.RestClientResponseException;
 /**
  * risk-service {@code POST /v1/risk/assessments} (specs/14-risk-service.md §3.1) over HTTP, connect timeout 200 ms and
  * the read timeout the runner computed (specs/00-engineering-baseline.md §8). Anything but a decision is
- * {@link RiskAnswer.Unavailable}: retryable for a connect failure, a read timeout, {@code 502}, {@code 503} and
- * {@code 504}; not for any other status, an unreadable answer or a {@code DENY} without its reason, which are bugs on
- * one side and are logged as errors.
+ * {@link RiskAnswer.Unavailable}: retryable for a connect failure, a read timeout (also one that cuts the body off,
+ * {@link CutOffAnswers}), {@code 502}, {@code 503} and {@code 504}; not for any other status, an unreadable answer or
+ * a {@code DENY} without its reason, which are bugs on one side and are logged as errors.
  */
 public class HttpRiskAssessments implements RiskAssessments {
 
@@ -72,6 +73,9 @@ public class HttpRiskAssessments implements RiskAssessments {
             // connect failure or read timeout; the message names hosts and ports only, but stays out of the log
             return new RiskAnswer.Unavailable("risk-service not reached: " + e.getClass().getSimpleName(), true);
         } catch (RestClientException e) {
+            if (CutOffAnswers.cutOff(e)) {
+                return new RiskAnswer.Unavailable("risk-service answer cut off", true);
+            }
             LOG.error("risk-service answer for payment {} unreadable: {}", payment.paymentId().value(),
                     e.getClass().getSimpleName());
             return new RiskAnswer.Unavailable("risk-service answer unreadable", false);
