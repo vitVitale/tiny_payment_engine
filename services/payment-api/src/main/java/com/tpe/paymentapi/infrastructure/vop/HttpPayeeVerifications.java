@@ -56,6 +56,9 @@ public class HttpPayeeVerifications implements PayeeVerifications {
             Failure failure = HttpFailures.of(e);
             return new Unavailable(failure, "vop-service not reached: " + failure);
         } catch (RestClientException e) {
+            if (HttpFailures.cutOff(e)) {
+                return new Unavailable(Failure.TIMEOUT, "vop-service answer cut off");
+            }
             throw unexpected("an unreadable answer");
         }
         VerificationResponse verification = response.getBody();

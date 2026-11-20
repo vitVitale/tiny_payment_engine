@@ -54,6 +54,9 @@ public class HttpOrchestrator implements Orchestrator {
         } catch (ResourceAccessException e) {
             return notReached(e);
         } catch (RestClientException e) {
+            if (HttpFailures.cutOff(e)) {
+                return cutOff();
+            }
             throw unexpected(command, "an unreadable answer");
         }
         int status = response.getStatusCode().value();
@@ -84,6 +87,9 @@ public class HttpOrchestrator implements Orchestrator {
         } catch (ResourceAccessException e) {
             return notReached(e);
         } catch (RestClientException e) {
+            if (HttpFailures.cutOff(e)) {
+                return cutOff();
+            }
             throw unexpected(paymentId, "an unreadable answer");
         }
         if (payment == null || !paymentId.equals(payment.paymentId()) || payment.direction() == null
@@ -113,6 +119,11 @@ public class HttpOrchestrator implements Orchestrator {
     private static Unavailable notReached(ResourceAccessException e) {
         Failure failure = HttpFailures.of(e);
         return new Unavailable(failure, "payment-orchestrator not reached: " + failure);
+    }
+
+    /** An answer cut off by a read timeout or a lost connection ({@link HttpFailures#cutOff}). */
+    private static Unavailable cutOff() {
+        return new Unavailable(Failure.TIMEOUT, "payment-orchestrator answer cut off");
     }
 
     /** A {@code 5xx} as {@link Unavailable}; empty for any other status. */

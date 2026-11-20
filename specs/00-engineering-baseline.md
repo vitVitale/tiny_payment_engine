@@ -198,7 +198,9 @@ inside an IBAN, used for routing).
 - Every `RestClient` has connect timeout 200 ms and a per-call read timeout. Defaults per client are in the service
   specs; on the payment path the read timeout is `min(configured, remaining deadline − safety margin)`.
 - Retries happen only for idempotent calls (all internal mutating calls are idempotent by key) and only on
-  connect failure, read timeout, `502`, `503`, `504`. Never retry on `4xx`.
+  connect failure, read timeout, `502`, `503`, `504`. Never retry on `4xx`. A read timeout or a lost connection
+  while the body is being read is a read timeout; only a body read whole that makes no answer is unreadable, and is
+  not retried.
 - No retry library magic: retries are explicit in the application service so they can respect the payment deadline.
 - Circuit breakers are not used on the payment path in the MVP (fail-closed behaviour is explicit per call).
 

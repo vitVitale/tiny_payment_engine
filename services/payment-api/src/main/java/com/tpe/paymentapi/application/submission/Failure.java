@@ -7,7 +7,7 @@ package com.tpe.paymentapi.application.submission;
 public enum Failure {
     /** Not reached: the request was not sent. */
     CONNECT,
-    /** Sent, but no answer within the read timeout. */
+    /** Sent, but no answer, or one cut off, within the read timeout (specs/00-engineering-baseline.md §8). */
     TIMEOUT,
     /** {@code 502}, {@code 503} or {@code 504}. */
     GATEWAY,

@@ -5,6 +5,7 @@ import com.tpe.paymentorchestrator.application.ledger.Ledger;
 import com.tpe.paymentorchestrator.application.ledger.LedgerAnswer;
 import com.tpe.paymentorchestrator.application.ledger.LedgerRefusal;
 import com.tpe.paymentorchestrator.domain.payment.Payment;
+import com.tpe.paymentorchestrator.infrastructure.http.CutOffAnswers;
 import java.net.http.HttpClient;
 import java.time.Duration;
 import java.util.Map;
@@ -32,8 +33,9 @@ import tools.jackson.databind.json.JsonMapper;
  * <p>A {@code 4xx} Problem Details with a {@code code} (specs/12-ledger-service.md §3.4) is
  * {@link LedgerAnswer.Refused}, except {@code CONCURRENT_MODIFICATION}, which asks to retry;
  * {@code IDEMPOTENCY_CONFLICT} is a bug on one side and logged as an error. Anything else is
- * {@link LedgerAnswer.Unavailable}: retryable for a connect failure, a read timeout, {@code 502}, {@code 503} and
- * {@code 504}; not for any other status or an unreadable answer, which are logged as errors.
+ * {@link LedgerAnswer.Unavailable}: retryable for a connect failure, a read timeout (also one that cuts the body off,
+ * {@link CutOffAnswers}), {@code 502}, {@code 503} and {@code 504}; not for any other status or an unreadable answer,
+ * which are logged as errors.
  */
 public class HttpLedger implements Ledger {
 
@@ -160,6 +162,9 @@ public class HttpLedger implements Ledger {
             // connect failure or read timeout; the message names hosts and ports only, but stays out of the log
             return new LedgerAnswer.Unavailable<>("ledger-service not reached: " + e.getClass().getSimpleName(), true);
         } catch (RestClientException e) {
+            if (CutOffAnswers.cutOff(e)) {
+                return new LedgerAnswer.Unavailable<>("ledger-service answer cut off", true);
+            }
             LOG.error("ledger-service answer to {} for payment {} unreadable: {}", call, payment.paymentId().value(),
                     e.getClass().getSimpleName());
             return new LedgerAnswer.Unavailable<>("ledger-service answer unreadable", false);
