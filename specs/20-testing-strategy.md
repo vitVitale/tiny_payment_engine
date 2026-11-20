@@ -200,7 +200,9 @@ Rules:
 compose stack with its `chaos` profile, not in the environment above, and without budget or page checks. They keep the
 default timings, run two payment-orchestrator and two csm-gateway instances, and load the system with 2 payments/s in
 each direction the scenario needs: both for CH-02, outgoing for CH-03, incoming for CH-04 (`tests/system-tests`,
-`-Pchaos`, `@Tag("chaos")`). The orchestrators produce to Kafka through Toxiproxy (a listener of its own, advertised at
+`-Pchaos`, `@Tag("chaos")`). Before the first load, one payment each way runs until final. The services start with
+the run, and a cold csm-gateway can take longer to answer its first `pacs.008` than the simulator's 1 s read timeout,
+which the simulator does not repeat ([17 §3.1](17-csm-simulator.md#31-csm-transport)). The orchestrators produce to Kafka through Toxiproxy (a listener of its own, advertised at
 the proxy) and consume directly; the gateways consume through a second proxy on a second such listener and produce
 directly. CH-02 kills (`SIGKILL`) the second gateway, which the CSM never calls, at a moment when it has a `pacs.008`
 in flight on a link slowed to 700 ms; its "no `DEADLINE` answers" covers the incoming payments of the load, whose

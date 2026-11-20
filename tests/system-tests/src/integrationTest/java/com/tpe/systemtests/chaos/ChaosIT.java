@@ -27,6 +27,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
@@ -275,10 +276,46 @@ class ChaosIT extends PaymentSystemTest {
     /** The directions of a {@link Load}: payments to the peer bank, and from it to customers of ours. */
     private enum Flow { OUTGOING, INCOMING }
 
+    /** Whether this JVM's services have had their {@link #warmUp()}. */
+    private static final AtomicBoolean WARM = new AtomicBoolean();
+    /** How often the warm-up's incoming payment is delivered before the run gives up on it. */
+    private static final int WARM_UP_DELIVERIES = 3;
+
+    /**
+     * Once per run, before the first load: one payment each way, until final. The services start with this JVM, so the
+     * first scenario would otherwise meet their first requests cold (class loading, JIT, first statements). On a
+     * 2-vCPU runner, starting both flows at once, csm-gateway took over a second to answer its first
+     * {@code /csm/v1/inbound}. That is past the simulator's 1 s read timeout, which it answers
+     * {@code 502 GATEWAY_UNREACHABLE} and does not repeat (specs/17-csm-simulator.md §3.1). Here a delivery the
+     * gateway gave no answer for is made again as a new transaction; the one it may have taken stays out of the
+     * test's checks.
+     */
+    private void warmUp() {
+        if (!WARM.compareAndSet(false, true)) {
+            return;
+        }
+        Party payer = customer(PEER_PAYMENT_MINOR);
+        UUID outgoing = paidToPeer(payer, peerPayee("ACCEPT"), "WARM-UP");
+        Party creditor = customer(0);
+        IncomingTransfer incoming = null;
+        for (int delivery = 1; incoming == null; delivery++) {
+            try {
+                incoming = received(creditor.iban(), INCOMING_AMOUNT, "ACCEPT");
+            } catch (IllegalStateException e) {
+                if (delivery == WARM_UP_DELIVERIES || !String.valueOf(e.getMessage()).contains("GATEWAY_UNREACHABLE")) {
+                    throw e;
+                }
+            }
+        }
+        finalStatus(payer, outgoing, Bounds.paymentFinal());
+        finalState(incoming.payment(), Bounds.paymentFinal());
+    }
+
     /**
      * The steady stream of payments for {@code duration}: one in each of its {@code flows} every {@link #LOAD_PERIOD},
-     * each on a worker of its own, so a slow submit holds up no other; payers and payees made before it starts.
-     * Closing it stops it; a submit that failed fails the test.
+     * each on a worker of its own, so a slow submit holds up no other; payers and payees made before it starts, and
+     * the services warmed up before the first ({@link #warmUp()}). Closing it stops it; a submit that failed fails the
+     * test.
      */
     private final class Load implements AutoCloseable {
 
@@ -289,6 +326,7 @@ class ChaosIT extends PaymentSystemTest {
         private final Instant until;
 
         Load(String scenario, Duration duration, Set<Flow> flows) {
+            warmUp();
             boolean outgoing = flows.contains(Flow.OUTGOING);
             boolean incoming = flows.contains(Flow.INCOMING);
             long payments = duration.toMillis() / LOAD_PERIOD.toMillis() + 1;
