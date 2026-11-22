@@ -13,6 +13,11 @@
 
     <artifactId>csm-gateway</artifactId>
 
+    <properties>
+        <!-- in the mutation score of specs/20-testing-strategy.md §7 -->
+        <tpe.pit.skip>false</tpe.pit.skip>
+    </properties>
+
     <dependencies>
         <!-- the csm.* messages (specs/02-messaging-contracts.md §3, §4) -->
         <dependency>
@@ -157,6 +162,28 @@
                 </includes>
             </resource>
         </resources>
+        <pluginManagement>
+            <plugins>
+                <!-- 20 §7: the answer coordinator and the send-by guard (on receipt and before every transmission, ADR-011) -->
+                <plugin>
+                    <groupId>org.pitest</groupId>
+                    <artifactId>pitest-maven</artifactId>
+                    <configuration>
+                        <targetClasses>
+                            <param>com.tpe.csmgateway.application.answer.AnswerCoordinator*</param>
+                            <param>com.tpe.csmgateway.application.outgoing.CreditTransferSending*</param>
+                            <param>com.tpe.csmgateway.application.outgoing.OutgoingTransmissions*</param>
+                        </targetClasses>
+                        <!-- these classes are exercised by the component tests only (Testcontainers, so the nightly
+                             job needs Docker) -->
+                        <targetTests>
+                            <param>com.tpe.csmgateway.*IT</param>
+                        </targetTests>
+                        <excludedTestClasses combine.self="override"/>
+                    </configuration>
+                </plugin>
+            </plugins>
+        </pluginManagement>
         <plugins>
             <plugin>
                 <groupId>org.springframework.boot</groupId>

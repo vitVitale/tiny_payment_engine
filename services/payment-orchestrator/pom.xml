@@ -13,6 +13,11 @@
 
     <artifactId>payment-orchestrator</artifactId>
 
+    <properties>
+        <!-- in the mutation score of specs/20-testing-strategy.md §7 -->
+        <tpe.pit.skip>false</tpe.pit.skip>
+    </properties>
+
     <dependencies>
         <!-- the payment command API's DTOs (specs/01-shared-libraries.md §4); Money, Iban, BankDirectory -->
         <dependency>
@@ -142,6 +147,23 @@
                 </includes>
             </resource>
         </resources>
+        <pluginManagement>
+            <plugins>
+                <!-- 20 §7: domain.payment -->
+                <plugin>
+                    <groupId>org.pitest</groupId>
+                    <artifactId>pitest-maven</artifactId>
+                    <configuration>
+                        <targetClasses>
+                            <param>com.tpe.paymentorchestrator.domain.payment.*</param>
+                        </targetClasses>
+                        <targetTests>
+                            <param>com.tpe.paymentorchestrator.domain.payment.*</param>
+                        </targetTests>
+                    </configuration>
+                </plugin>
+            </plugins>
+        </pluginManagement>
         <plugins>
             <plugin>
                 <groupId>org.springframework.boot</groupId>

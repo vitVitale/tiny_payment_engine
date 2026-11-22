@@ -3,6 +3,7 @@ package com.tpe.riskservice.domain.rules;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatIllegalStateException;
 
+import java.math.BigInteger;
 import java.time.Duration;
 import java.util.Map;
 import org.junit.jupiter.api.Test;
@@ -16,6 +17,16 @@ class RuleParametersTest {
 
         assertThat(parameters.longValue("small")).isEqualTo(5L);
         assertThat(parameters.longValue("large")).isEqualTo(5_000_000_000L);
+        assertThat(new RuleParameters(Map.of("short", (short) 7)).longValue("short")).isEqualTo(7L);
+    }
+
+    @Test
+    void aJsonBigIntegerIsAWholeNumberWhileItFitsALong() {
+        var parameters = new RuleParameters(Map.of("fits", BigInteger.valueOf(Long.MAX_VALUE),
+                "beyond", BigInteger.valueOf(Long.MAX_VALUE).add(BigInteger.ONE)));
+
+        assertThat(parameters.longValue("fits")).isEqualTo(Long.MAX_VALUE);
+        assertThatIllegalStateException().isThrownBy(() -> parameters.longValue("beyond"));
     }
 
     @Test

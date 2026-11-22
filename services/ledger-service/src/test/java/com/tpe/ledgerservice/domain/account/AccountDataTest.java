@@ -66,6 +66,15 @@ class AccountDataTest {
     }
 
     @Test
+    void aMissingNameAndABlankOrganisationIdAreRequired() {
+        assertThatThrownBy(() -> Holder.of(HolderType.ORGANISATION, null, null, null, " "))
+                .isInstanceOfSatisfying(InvalidAccountDataException.class, e -> assertThat(e.violations())
+                        .containsExactlyInAnyOrder(
+                                new AccountDataViolation("holder.name", "REQUIRED"),
+                                new AccountDataViolation("holder.organisationId", "REQUIRED")));
+    }
+
+    @Test
     void countryOfResidenceIsAnIsoAlpha2CodeAndOrganisationIdAtMost35Characters() {
         assertThatThrownBy(() -> Holder.of(HolderType.ORGANISATION, "ACME", null, "deu", "x".repeat(36)))
                 .isInstanceOfSatisfying(InvalidAccountDataException.class, e -> assertThat(e.violations())

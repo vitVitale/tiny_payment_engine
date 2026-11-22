@@ -65,6 +65,22 @@ class AccountBlockTest {
     }
 
     @Test
+    void sanctionsWithoutAProvisionalBlockReplacesNothing() {
+        Account operatorBlocked = account(AccountStatus.BLOCKED, List.of(BlockReason.OPERATOR));
+
+        BlockChange change = operatorBlocked.block(BlockReason.SANCTIONS);
+
+        assertThat(change.replaced()).isNull();
+        assertThat(change.account().activeBlockReasons())
+                .containsExactly(BlockReason.SANCTIONS, BlockReason.OPERATOR);
+    }
+
+    @Test
+    void anAccountReadWithoutBlockReasonsHasNone() {
+        assertThat(account(AccountStatus.OPEN, null).activeBlockReasons()).isEmpty();
+    }
+
+    @Test
     void liftingTheLastBlockOpensTheAccount() {
         Account blocked = account(AccountStatus.BLOCKED, List.of(BlockReason.OPERATOR));
 

@@ -43,6 +43,12 @@ class IbanGeneratorTest {
     }
 
     @Test
+    void refusesAMissingBankCode() {
+        assertThatIllegalArgumentException().isThrownBy(() -> new IbanGenerator(null))
+                .withMessageContaining("tpe.bank.bank-code");
+    }
+
+    @Test
     void refusesAnAccountNumberBeyondTenDigits() {
         var generator = new IbanGenerator("10010010");
 
