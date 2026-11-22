@@ -374,7 +374,8 @@ Pipeline on every pull request and on `main`:
    On `main` also the compose `observability` profile and its pipeline check (OBS-AC-01 … -04, 26 §13).
    Until the services have images, this step starts the infrastructure only and runs `LocalStackSmokeIT`.
 6. Nightly: full scenario catalogue, Gatling load profile, failure-injection scenarios ([20 §5](20-testing-strategy.md#5-failure-injection-scenarios)),
-   forward pact check (the last release's providers against this commit's pacts).
+   forward pact check (the last release's providers against this commit's pacts), mutation score (`-Pmutation`,
+   [20 §7](20-testing-strategy.md#7-coverage-targets); the surviving-mutant report is a build artifact).
 7. Release: the forward pact check must be green; the release job copies the pact files to `pacts/released/<version>/`,
    commits them and tags `v<version>` (`.github/workflows/release.yml`).
 

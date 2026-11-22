@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.awaitility.Awaitility.await;
 
 import com.tpe.contracts.TechnicalAccounts;
+import com.tpe.messaging.housekeeping.MessagingHousekeeping;
 import java.sql.Connection;
 import java.time.Duration;
 import java.time.Instant;
@@ -39,6 +40,9 @@ class CloseIT extends LedgerStack {
 
     @Autowired
     DataSource dataSource;
+
+    @Autowired
+    MessagingHousekeeping housekeeping;
 
     @Test
     void LED_AC_14_closingAnAccountWithABalanceAnActiveHoldOrAnActivePendingCreditFailsAccountNotEmpty() {
@@ -214,6 +218,9 @@ class CloseIT extends LedgerStack {
     @Test
     void thirteenMonthsAfterTheCloseTheJobPublishesOneTombstoneForTheAccountKey() {
         Instant start = CLOCK.instant();
+        // The outbox purge compares the database's real published_at with the moved clock, so 13 months ahead it
+        // would delete the tombstone this test counts; it stays off while the clock is moved.
+        housekeeping.stop();
         try {
             Customer customer = customer(0);
             CLOCK.set(Instant.parse("2026-01-31T12:00:00Z"));
@@ -239,6 +246,7 @@ class CloseIT extends LedgerStack {
                     .param(customer.accountId().toString()).query(Long.class).single() == 1);
         } finally {
             CLOCK.set(start);
+            housekeeping.start();
         }
     }
 

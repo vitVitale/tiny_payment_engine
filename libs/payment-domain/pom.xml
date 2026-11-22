@@ -13,6 +13,11 @@
 
     <artifactId>payment-domain</artifactId>
 
+    <properties>
+        <!-- in the mutation score of specs/20-testing-strategy.md §7 -->
+        <tpe.pit.skip>false</tpe.pit.skip>
+    </properties>
+
     <dependencies>
         <dependency>
             <groupId>net.jqwik</groupId>
@@ -21,6 +26,23 @@
     </dependencies>
 
     <build>
+        <pluginManagement>
+            <plugins>
+                <!-- 20 §7: all of libs/payment-domain -->
+                <plugin>
+                    <groupId>org.pitest</groupId>
+                    <artifactId>pitest-maven</artifactId>
+                    <configuration>
+                        <targetClasses>
+                            <param>com.tpe.paymentdomain.*</param>
+                        </targetClasses>
+                        <targetTests>
+                            <param>com.tpe.paymentdomain.*</param>
+                        </targetTests>
+                    </configuration>
+                </plugin>
+            </plugins>
+        </pluginManagement>
         <plugins>
             <!-- test fixture jar payment-domain:tests (specs/01-shared-libraries.md §1.3): fixtures only, no tests -->
             <plugin>

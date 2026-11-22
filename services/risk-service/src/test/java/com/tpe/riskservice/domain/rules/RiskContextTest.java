@@ -38,6 +38,13 @@ class RiskContextTest {
         assertThat(RiskContext.loaded(NOW, Duration.ZERO, List.of(), false, null).accountAge()).isEmpty();
     }
 
+    /** A log line names how much history was read, never the customer's payments themselves. */
+    @Test
+    void itsDescriptionCountsThePaymentsWithoutListingThem() {
+        assertThat(context.toString()).contains("allowedPayments=4").doesNotContain("30000", "PastPayment");
+        assertThat(RiskContext.NOT_LOADED).hasToString("RiskContext[NOT_LOADED]");
+    }
+
     @Test
     void aWindowBeyondTheLoadedLookBackIsAnError() {
         assertThatIllegalStateException().isThrownBy(() -> context.count(Duration.ofHours(25)));

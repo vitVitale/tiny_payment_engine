@@ -13,6 +13,11 @@
 
     <artifactId>ledger-service</artifactId>
 
+    <properties>
+        <!-- in the mutation score of specs/20-testing-strategy.md §7 -->
+        <tpe.pit.skip>false</tpe.pit.skip>
+    </properties>
+
     <dependencies>
         <dependency>
             <groupId>com.tpe</groupId>
@@ -110,6 +115,23 @@
     </dependencies>
 
     <build>
+        <pluginManagement>
+            <plugins>
+                <!-- 20 §7: the posting engine -->
+                <plugin>
+                    <groupId>org.pitest</groupId>
+                    <artifactId>pitest-maven</artifactId>
+                    <configuration>
+                        <targetClasses>
+                            <param>com.tpe.ledgerservice.domain.posting.*</param>
+                        </targetClasses>
+                        <targetTests>
+                            <param>com.tpe.ledgerservice.domain.posting.*</param>
+                        </targetTests>
+                    </configuration>
+                </plugin>
+            </plugins>
+        </pluginManagement>
         <plugins>
             <plugin>
                 <groupId>org.springframework.boot</groupId>

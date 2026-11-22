@@ -52,6 +52,15 @@ class IssuedReferenceTest {
     }
 
     @Test
+    void aReferenceWhoseNamesRetentionClearedMatchesNoName() {
+        var cleared = new IssuedReference("VOP-01JAB", DEBTOR, PAYEE, null, VerificationResult.CLOSE_MATCH, null,
+                new Bic("PEERDEFFXXX"), ISSUED, EXPIRES);
+
+        assertThat(cleared.check(DEBTOR, PAYEE, "Anna Schmidt", ISSUED))
+                .isEqualTo(ReferenceCheck.invalid(ReferenceProblem.MISMATCH));
+    }
+
+    @Test
     void aPayeeNameDifferingOnlyInCaseIsAMismatch() {
         assertThat(reference.check(DEBTOR, PAYEE, "anna schmidt", ISSUED))
                 .isEqualTo(ReferenceCheck.invalid(ReferenceProblem.MISMATCH));
